@@ -9,7 +9,7 @@ import { PRESETS, CATEGORIES } from '../web/js/presets.js';
 import { toBase64Url, fromBase64Url, patchToHash, hashToPatch, shareUrl } from '../web/js/share.js';
 import { formatValue } from '../web/js/format.js';
 
-const bytes = await readFile(new URL('../web/wasm/nami.wasm', import.meta.url));
+const bytes = await readFile(new URL('../web/wasm/seosynth.wasm', import.meta.url));
 const makeStore = async () => {
   const posted = [];
   const store = new Store(await EngineCore.fromBytes(bytes), { post: (m) => posted.push(m) });
@@ -145,8 +145,8 @@ test('share URL encoding', () => {
   assert.deepEqual(Array.from(hashToPatch(`#x=1&${patchToHash(data).slice(1)}`)), Array.from(data));
   assert.equal(hashToPatch('#nothing'), null);
   assert.equal(hashToPatch('#p=***'), null);
-  const url = shareUrl(data, 'https://example.com/nami/?a=1#old');
-  assert.ok(url.startsWith('https://example.com/nami/?a=1#p='));
+  const url = shareUrl(data, 'https://example.com/seosynth/?a=1#old');
+  assert.ok(url.startsWith('https://example.com/seosynth/?a=1#p='));
 });
 
 test('a shared patch survives the URL round trip', async () => {
@@ -323,7 +323,7 @@ test('zip writer', () => {
   assert.equal(crc32(new TextEncoder().encode('123456789')), 0xcbf43926);
   const archive = zip([
     { name: 'a.txt', data: 'hello' },
-    { name: 'Tables/Nami/音.wav', data: Uint8Array.from([1, 2, 3, 4]) },
+    { name: 'Tables/seosynth/音.wav', data: Uint8Array.from([1, 2, 3, 4]) },
   ]);
   const view = new DataView(archive.buffer);
   assert.equal(view.getUint32(0, true), 0x04034b50);

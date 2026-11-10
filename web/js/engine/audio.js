@@ -40,7 +40,7 @@ export class AudioEngine {
     this.ctx = new Ctx({ latencyHint: 'interactive' });
     this.ctx.addEventListener('statechange', () => this.onState?.(this.ctx.state));
     await this.ctx.audioWorklet.addModule(new URL('./worklet.js', import.meta.url));
-    this.node = new AudioWorkletNode(this.ctx, 'nami', {
+    this.node = new AudioWorkletNode(this.ctx, 'seosynth', {
       numberOfInputs: 0,
       numberOfOutputs: 1,
       outputChannelCount: [2],

@@ -22,7 +22,7 @@ use crate::wavetable::{Bank, TABLE_SIZE};
 use value::{empty, map, Value};
 
 /// Folder (inside Serum's Tables folder) the exported wavetables belong in.
-pub const TABLE_DIR: &str = "Nami";
+pub const TABLE_DIR: &str = "seosynth";
 /// Exported tables are pre-morphed to this many frames so they glide
 /// smoothly in Serum regardless of its interpolation setting.
 pub const TABLE_FRAMES: usize = 256;
@@ -975,11 +975,11 @@ pub fn build(patch: &Patch) -> (Value, Vec<String>, Vec<usize>) {
 
 fn header_fields(patch: &Patch) -> Vec<(&'static str, Value)> {
     let mono = patch.plain(params::master::MONO) >= 0.5;
-    let name = if patch.name.trim().is_empty() { "Nami" } else { patch.name.trim() };
+    let name = if patch.name.trim().is_empty() { "seosynth" } else { patch.name.trim() };
     vec![
         ("fileType", Value::from("SerumPreset")),
-        ("presetAuthor", Value::from("Nami")),
-        ("presetDescription", Value::from("Exported from Nami, a browser wavetable synth.")),
+        ("presetAuthor", Value::from("seosynth")),
+        ("presetDescription", Value::from("Exported from seosynth, a browser wavetable synth.")),
         ("presetName", Value::from(name)),
         ("product", Value::from("Serum2")),
         ("productVersion", Value::from(PRODUCT_VERSION)),
@@ -1096,7 +1096,7 @@ mod tests {
         near(plain_of(&d, &["Oscillator0", "plainParams", "kParamUnison"]), 7.0);
         assert_eq!(plain_of(&d, &["Oscillator0", "WTOsc0", "plainParams", "kParamWarpMenu"]), &Value::from("kSync"));
         near(plain_of(&d, &["Oscillator0", "WTOsc0", "plainParams", "kParamWarp"]), 0.25);
-        assert_eq!(plain_of(&d, &["Oscillator0", "WTOsc0", "relativePathToWT"]), &Value::from("Nami/PWM.wav"));
+        assert_eq!(plain_of(&d, &["Oscillator0", "WTOsc0", "relativePathToWT"]), &Value::from("seosynth/PWM.wav"));
         assert_eq!(plain_of(&d, &["Oscillator0", "WTOsc0", "numFrames"]), &Value::Int(524_288));
         assert_eq!(tables, vec![3]);
         near(plain_of(&d, &["Env0", "plainParams", "kParamAttack"]), 0.25);

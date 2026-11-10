@@ -1,10 +1,10 @@
-# Nami 波 — ブラウザで動くウェーブテーブルシンセ
+# seosynth — ブラウザで動くウェーブテーブルシンセ
 
 Rust で書いたシンセエンジンを WebAssembly にして、ブラウザの AudioWorklet で鳴らすウェーブテーブルシンセサイザーです。インストール不要で、作った音色は URL で共有できます。
 
 *A wavetable synthesizer whose DSP engine is written in Rust, compiled to WebAssembly and run in an AudioWorklet. Nothing to install, and every sound can be shared as a link. [English summary below](#english).*
 
-![Nami の画面](docs/screenshot.png)
+![seosynth の画面](docs/screenshot.png)
 
 ## 特長
 
@@ -31,7 +31,7 @@ Rust で書いたシンセエンジンを WebAssembly にして、ブラウザ�
 **共有と書き出し**
 
 - **URL で共有**：音色の設定はすべて URL の `#p=…` の中に入ります。サーバーには何も保存しません。アドレスバーの URL は編集のたびに更新されるので、そのままコピーしても共有できます
-- **プリセットファイル**：読みやすい JSON（`.nami.json`）で保存・読み込み
+- **プリセットファイル**：読みやすい JSON（`.seosynth.json`）で保存・読み込み
 - **Serum 2 用の書き出し**：`.SerumPreset` と、必要なウェーブテーブルの WAV を書き出します（[下記の注意](#serum-2-への書き出しについて)を読んでください）
 
 ## 動かす
@@ -40,11 +40,11 @@ Rust で書いたシンセエンジンを WebAssembly にして、ブラウザ�
 
 ```sh
 rustup target add wasm32-unknown-unknown   # 初回のみ
-npm run build                              # Rust → web/wasm/nami.wasm
+npm run build                              # Rust → web/wasm/seosynth.wasm
 npm run dev                                # http://localhost:8080
 ```
 
-`web/` フォルダは、ビルドした `nami.wasm` を含めれば、そのまま静的サイトとして配信できます。
+`web/` フォルダは、ビルドした `seosynth.wasm` を含めれば、そのまま静的サイトとして配信できます。
 
 ### テスト
 
@@ -88,8 +88,8 @@ tests/             Node から wasm と Web 側モジュールを検証
 
 - `.SerumPreset` は **公開されていない形式** です。コミュニティによる解析（下記）をもとに、ヘッダー＋JSON メタデータ＋Zstandard 圧縮した CBOR という構造で書き出しています
 - 書き出したファイルは、別実装の zstd／CBOR デコーダーで読み戻し、Serum 2 の初期プリセットとモジュール構成が一致することを確認しています。ただし **Serum 2 本体での読み込みは未確認** です（開発環境に Serum がないため）。読み込めない場合は Issue で教えてください
-- Nami と Serum は別のシンセなので、同じ音にはなりません。つまみの位置、配線、エフェクトの順番を移し替えるものです。移し替えられなかった項目は、書き出しダイアログの「変換メモ」に表示されます
-- Serum はウェーブテーブルを自分のフォルダから読み込むため、テーブルは WAV として別に書き出します。`Serum 2 Presets/Tables/Nami/` に置いてください（ZIP にまとめてダウンロードできます）
+- seosynth と Serum は別のシンセなので、同じ音にはなりません。つまみの位置、配線、エフェクトの順番を移し替えるものです。移し替えられなかった項目は、書き出しダイアログの「変換メモ」に表示されます
+- Serum はウェーブテーブルを自分のフォルダから読み込むため、テーブルは WAV として別に書き出します。`Serum 2 Presets/Tables/seosynth/` に置いてください（ZIP にまとめてダウンロードできます）
 
 形式の調査で参考にしたもの：
 
@@ -102,7 +102,7 @@ Serum は Xfer Records の製品です。このプロジェクトは Xfer Record
 ## GitHub に上げる／公開する
 
 ```sh
-gh repo create nami-synth --source . --public --push   # または git remote add … && git push
+gh repo create seosynth --source . --public --push   # または git remote add … && git push
 ```
 
 `.github/workflows/` に 2 つのワークフローが入っています。
@@ -116,7 +116,7 @@ gh repo create nami-synth --source . --public --push   # または git remote ad
 - オシレーターのオーバーサンプリング（ワープを強くかけたときのエイリアシング低減）
 - Serum 2 本体での書き出し検証と、未対応項目（Env／LFO／FX を行き先にした配線など）の対応
 
-ライセンスは未設定です。公開する前に決めてください。
+ライセンス：[MIT](LICENSE)
 
 ---
 
@@ -124,7 +124,7 @@ gh repo create nami-synth --source . --public --push   # または git remote ad
 
 ## English
 
-Nami is a wavetable synthesizer for the browser. The DSP engine is dependency-free Rust compiled to WebAssembly and runs in an AudioWorklet; the UI is plain ES modules with no build step.
+seosynth is a wavetable synthesizer for the browser. The DSP engine is dependency-free Rust compiled to WebAssembly and runs in an AudioWorklet; the UI is plain ES modules with no build step.
 
 - **The screen is the signal chain.** Sources, filter, amp, effects and output are joined by cables that light up with the sound passing through, and every module shows a small scope of what leaves it. Modulation sources live in their own lane; drag a coloured dot onto a knob to connect it. Hover any control for a plain-language explanation; a guided tour covers the first steps. Japanese and English.
 - **Synth features** modelled on Serum's layout: two wavetable oscillators (22 generated tables, unison, 13 warp modes), sub, noise, a 19-type filter, 3 envelopes, 4 LFOs with drawable shapes, 4 macros, a 32-slot mod matrix and ten reorderable effects.
@@ -137,4 +137,4 @@ npm run build && npm run dev    # http://localhost:8080
 npm test
 ```
 
-No license has been chosen yet.
+License: [MIT](LICENSE).

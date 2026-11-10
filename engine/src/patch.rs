@@ -5,7 +5,7 @@
 //! is compact and forward compatible:
 //!
 //! ```text
-//! 'N' version                      2 bytes
+//! 'S' version                      2 bytes
 //! then sections: tag, varint length, payload
 //!   1 name      UTF-8
 //!   2 params    repeated: varint (sid << 1 | discrete),
@@ -25,7 +25,7 @@ use crate::params::{self, defs, NUM_FX, NUM_LFO, NUM_PARAMS, NUM_SLOTS};
 
 pub const NO_DEST: u16 = 0xFFFF;
 pub const FORMAT_VERSION: u8 = 1;
-const MAGIC: u8 = b'N';
+const MAGIC: u8 = b'S';
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct ModSlot {

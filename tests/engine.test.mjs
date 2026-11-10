@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { EngineCore } from '../web/js/engine/core.js';
 
-const bytes = await readFile(new URL('../web/wasm/nami.wasm', import.meta.url));
+const bytes = await readFile(new URL('../web/wasm/seosynth.wasm', import.meta.url));
 const make = () => EngineCore.fromBytes(bytes, 48000);
 
 const rms = (a) => Math.sqrt(a.reduce((s, v) => s + v * v, 0) / a.length);

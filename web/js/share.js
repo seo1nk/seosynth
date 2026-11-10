@@ -1,7 +1,7 @@
 // Share URLs: the whole patch travels in the URL fragment, so nothing is
 // stored on a server and a link keeps working as long as the page exists.
 //
-//   https://example.com/nami/#p=<base64url of the binary patch>
+//   https://example.com/seosynth/#p=<base64url of the binary patch>
 
 export function toBase64Url(bytes) {
   let s = '';

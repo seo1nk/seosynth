@@ -1,4 +1,4 @@
-//! Nami: a wavetable synthesizer engine.
+//! seosynth: a wavetable synthesizer engine.
 //!
 //! Pure Rust with no dependencies. Builds natively (for tests) and to
 //! WebAssembly, where `api` exposes it to the browser.

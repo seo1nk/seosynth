@@ -152,7 +152,7 @@ function download(name, data, type) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-const safeName = (name) => (name || 'nami').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 60) || 'nami';
+const safeName = (name) => (name || 'seosynth').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 60) || 'seosynth';
 
 export function Header(app) {
   const { store, i18n } = app;
@@ -242,7 +242,7 @@ export function Header(app) {
             class: 'menu-item',
             onclick: () => {
               close();
-              download(`${safeName(store.getName())}.nami.json`, JSON.stringify(store.toJSON(), null, 2), 'application/json');
+              download(`${safeName(store.getName())}.seosynth.json`, JSON.stringify(store.toJSON(), null, 2), 'application/json');
               app.toast(t('file.exported'));
             },
           },
@@ -288,7 +288,7 @@ export function Header(app) {
   return h(
     'header',
     { class: 'top' },
-    h('div', { class: 'brand' }, h('span', { class: 'logo' }, 'NAMI'), h('span', { class: 'logo-sub' }, '波'), h('span', { class: 'tagline' }, t('app.tagline'))),
+    h('div', { class: 'brand' }, h('span', { class: 'logo' }, 'seosynth'), h('span', { class: 'logo-sub' }, '波'), h('span', { class: 'tagline' }, t('app.tagline'))),
     h(
       'div',
       { class: 'preset-nav' },
@@ -355,7 +355,7 @@ function openShare(app) {
     t('btn.copy'),
   );
   const native = navigator.share
-    ? h('button', { type: 'button', class: 'btn', onclick: () => navigator.share({ title: `Nami — ${store.getName()}`, url: url.value }).catch(() => {}) }, t('share.native'))
+    ? h('button', { type: 'button', class: 'btn', onclick: () => navigator.share({ title: `seosynth — ${store.getName()}`, url: url.value }).catch(() => {}) }, t('share.native'))
     : null;
   dialog(
     app,
@@ -480,7 +480,7 @@ export class Tour {
     this.el = null;
     for (const el of document.querySelectorAll('.tour-focus')) el.classList.remove('tour-focus');
     try {
-      localStorage.setItem('nami.tour', 'seen');
+      localStorage.setItem('seosynth.tour', 'seen');
     } catch {
       /* ignore */
     }

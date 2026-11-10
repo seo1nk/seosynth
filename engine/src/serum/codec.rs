@@ -81,7 +81,7 @@ pub fn md5_hex(data: &[u8]) -> String {
 /// Mono 32-bit float WAV with the `clm ` chunk that tells wavetable synths
 /// each cycle is `cycle` samples long.
 pub fn wavetable_wav(samples: &[f32], cycle: usize, sample_rate: u32) -> Vec<u8> {
-    let clm = format!("<!>{cycle} 10000000 wavetable (nami)");
+    let clm = format!("<!>{cycle} 10000000 wavetable (seosynth)");
     let clm = clm.as_bytes();
     let clm_pad = clm.len() % 2;
     let data_len = samples.len() * 4;

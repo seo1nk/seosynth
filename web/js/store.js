@@ -191,7 +191,7 @@ export class Store {
   /** Human-readable form, used for preset files and the built-in presets. */
   toJSON() {
     const c = this.core;
-    const out = { format: 'nami-patch', version: 1, name: c.getName(), params: {} };
+    const out = { format: 'seosynth-patch', version: 1, name: c.getName(), params: {} };
     for (const p of this.params) {
       const plain = c.getPlain(p.i);
       if (p.curve === 'enum') {

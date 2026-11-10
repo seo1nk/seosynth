@@ -6,7 +6,7 @@ const TELEMETRY_EVERY = 6; // render quanta between telemetry posts (~60 Hz)
 const TAPS_EVERY = 12; // (~30 Hz)
 const TAP_WINDOW = 1024; // samples of each tap sent to the UI
 
-class NamiProcessor extends AudioWorkletProcessor {
+class SeosynthProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
     const { wasm, tele, tap } = options.processorOptions;
@@ -118,4 +118,4 @@ class NamiProcessor extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor('nami', NamiProcessor);
+registerProcessor('seosynth', SeosynthProcessor);

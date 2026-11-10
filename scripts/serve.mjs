@@ -32,4 +32,4 @@ createServer(async (req, res) => {
     res.writeHead(code, { 'content-type': 'text/plain' });
     res.end(code === 403 ? 'Forbidden' : 'Not found');
   }
-}).listen(port, '127.0.0.1', () => console.log(`Nami dev server: http://localhost:${port}`));
+}).listen(port, '127.0.0.1', () => console.log(`seosynth dev server: http://localhost:${port}`));

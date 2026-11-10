@@ -21,7 +21,7 @@ async function boot() {
   let bytes;
   let core;
   try {
-    const response = await fetch(new URL('../wasm/nami.wasm', import.meta.url));
+    const response = await fetch(new URL('../wasm/seosynth.wasm', import.meta.url));
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     bytes = await response.arrayBuffer();
     core = await EngineCore.fromBytes(bytes, 48000);
@@ -98,7 +98,7 @@ async function boot() {
     },
     setLang(lang) {
       try {
-        localStorage.setItem('nami.lang', lang);
+        localStorage.setItem('seosynth.lang', lang);
       } catch {
         /* ignore */
       }
@@ -143,7 +143,7 @@ async function boot() {
 
     app.i18n = createI18n(lang);
     document.documentElement.lang = lang;
-    document.title = lang === 'ja' ? 'Nami — ブラウザで動くウェーブテーブルシンセ' : 'Nami — a wavetable synth in your browser';
+    document.title = lang === 'ja' ? 'seosynth — ブラウザで動くウェーブテーブルシンセ' : 'seosynth — a wavetable synth in your browser';
     app.help = new Help(app);
     app.mods = new Mods(app);
     app.scopes = new ScopeBank(app);
@@ -212,14 +212,14 @@ async function boot() {
   // First visit: offer the guided tour (not when opening a shared sound).
   let seen = true;
   try {
-    seen = localStorage.getItem('nami.tour') === 'seen';
+    seen = localStorage.getItem('seosynth.tour') === 'seen';
   } catch {
     /* ignore */
   }
   if (!seen && !shared) app.tour.start();
 
   // Handy for debugging from the console.
-  window.nami = app;
+  window.seosynth = app;
 }
 
 function debounce(fn, ms) {
