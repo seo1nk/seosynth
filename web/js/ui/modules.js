@@ -193,7 +193,7 @@ function SubCard(app) {
       'div',
       { class: 'knob-row' },
       h('div', { class: 'src-col' }, Select(app, 'sub.shape', { label: false }), RouteButton(app, 'sub.toFilter')),
-      Knob(app, 'sub.oct'),
+      Knob(app, 'sub.oct', { label: 'OCT' }),
       Knob(app, 'sub.level'),
       Knob(app, 'sub.pan'),
     ),
@@ -496,7 +496,15 @@ function EnvCard(app, e) {
     headExtra: moreBtn,
     body: [
       EnvDisplay(app, e, color),
-      h('div', { class: 'knob-row' }, Knob(app, k('attack')), Knob(app, k('decay')), Knob(app, k('sustain')), Knob(app, k('release'))),
+      h(
+        'div',
+        { class: 'knob-row' },
+        Knob(app, k('attack')),
+        Knob(app, k('decay')),
+        // The full word does not fit under these small knobs in Japanese.
+        Knob(app, k('sustain'), i18n.lang === 'ja' ? { label: 'サス' } : {}),
+        Knob(app, k('release')),
+      ),
       more,
     ],
   });

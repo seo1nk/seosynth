@@ -34,6 +34,7 @@ export const PRESETS = [
     demo: 'bass',
     note: ['LFO 1 がカットオフを周期的に動かします。LFO の速さ（音符）を変えてみましょう。', 'LFO 1 moves the cutoff in a cycle. Try a different LFO note length.'],
     params: {
+      'master.volume': 0.95,
       'filter.cutoff': 500, 'filter.res': 0.4, 'oscA.oct': -1, 'oscA.unison': 3, 'oscA.detune': 0.18,
       'lfo1.shape': 'Sine', 'lfo1.div': '1/8', 'master.mono': true, 'env1.release': 0.08,
     },
@@ -60,6 +61,7 @@ export const PRESETS = [
     cat: 'bass',
     demo: 'bass',
     params: {
+      'master.volume': 0.95,
       'oscA.pos': 0.12, 'oscA.oct': -1, 'oscA.level': 0.7, 'oscA.rand': 0,
       'sub.on': true, 'sub.oct': -2, 'sub.level': 0.85,
       'filter.cutoff': 900, 'filter.type': 'LP24', 'filter.drive': 0.2,
@@ -72,6 +74,7 @@ export const PRESETS = [
     cat: 'bass',
     demo: 'bass',
     params: {
+      'master.volume': 0.9,
       'oscA.pos': 0.5, 'oscA.oct': -1, 'oscA.rand': 0,
       'filter.type': 'Ladder24', 'filter.cutoff': 260, 'filter.res': 0.72, 'filter.drive': 0.35, 'filter.keytrack': 0.3,
       'env2.attack': 0.001, 'env2.decay': 0.22, 'env2.sustain': 0.05, 'env1.decay': 0.5, 'env1.sustain': 0.6, 'env1.release': 0.06,
@@ -87,6 +90,7 @@ export const PRESETS = [
     cat: 'bass',
     demo: 'bass',
     params: {
+      'master.volume': 1.0,
       'oscA.pos': 0.5, 'oscA.oct': -2, 'oscA.unison': 2, 'oscA.detune': 0.3, 'oscA.width': 0.6,
       'oscB.on': true, 'oscB.pos': 0.5, 'oscB.oct': -1, 'oscB.unison': 2, 'oscB.detune': 0.22, 'oscB.fine': 7, 'oscB.level': 0.6,
       'filter.type': 'LP24', 'filter.cutoff': 650, 'filter.res': 0.25, 'filter.drive': 0.4,
@@ -117,6 +121,7 @@ export const PRESETS = [
     cat: 'bass',
     demo: 'bass',
     params: {
+      'master.volume': 1.0,
       'oscA.pos': 0, 'oscA.oct': -1, 'oscA.warp': 'FM', 'oscA.warpAmt': 0.1, 'oscA.rand': 0,
       'oscB.on': true, 'oscB.pos': 0, 'oscB.level': 0, 'oscB.rand': 0,
       'filter.cutoff': 6000, 'env2.decay': 0.16, 'env2.sustain': 0,
@@ -147,6 +152,7 @@ export const PRESETS = [
     cat: 'lead',
     demo: 'lead',
     params: {
+      'master.volume': 1.0,
       'oscA.pos': 0.5, 'oscA.warp': 'Sync', 'oscA.warpAmt': 0.2, 'oscA.unison': 2, 'oscA.detune': 0.08, 'oscA.rand': 0,
       'filter.type': 'LP12', 'filter.cutoff': 7000,
       'env2.attack': 0.001, 'env2.decay': 0.7, 'env2.sustain': 0.15,
@@ -161,6 +167,7 @@ export const PRESETS = [
     cat: 'lead',
     demo: 'lead',
     params: {
+      'master.volume': 0.85,
       'oscA.wt': '8-Bit', 'oscA.pos': 0.66, 'oscA.rand': 0, 'filter.on': false,
       'lfo1.sync': false, 'lfo1.rate': 5.5, 'lfo1.shape': 'Sine', 'lfo1.rise': 0.35, 'lfo1.delay': 0.2,
       'lfo2.shape': 'Square', 'lfo2.div': '1/16',
@@ -175,6 +182,7 @@ export const PRESETS = [
     cat: 'lead',
     demo: 'lead',
     params: {
+      'master.volume': 1.0,
       'oscA.wt': 'Vowels', 'oscA.pos': 0.1, 'oscA.unison': 3, 'oscA.detune': 0.1,
       'filter.type': 'LP12', 'filter.cutoff': 8000,
       'lfo1.shape': 'Custom', 'lfo1.div': '1/2', 'lfo1.smooth': 0.3,
@@ -345,6 +353,7 @@ export const PRESETS = [
     cat: 'fx',
     demo: 'pad',
     params: {
+      'master.volume': 1.0,
       'oscA.on': false, 'noise.on': true, 'noise.type': 'Pink', 'noise.level': 0.8,
       'filter.type': 'BP12', 'filter.cutoff': 900, 'filter.res': 0.55,
       'lfo1.sync': false, 'lfo1.rate': 0.22, 'lfo1.shape': 'Smooth', 'lfo1.mode': 'Free',

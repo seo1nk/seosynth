@@ -1614,13 +1614,17 @@ input[type='range'] {
     flex-wrap: wrap;
   }
   .piano {
-    overflow-x: auto;
+    flex: none;
   }
-  .key.white {
-    min-width: 30px;
+  /* Two octaves are enough on a phone; the octave buttons reach the rest. */
+  .piano > .key.white:nth-child(n + 16) {
+    display: none;
   }
   .hint {
-    white-space: normal;
+    display: none;
+  }
+  .toasts {
+    bottom: 170px;
   }
   .cables.mod {
     display: none;
