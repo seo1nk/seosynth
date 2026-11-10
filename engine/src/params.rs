@@ -526,7 +526,8 @@ fn build() -> Vec<ParamDef> {
         let i = |p: usize| osc_idx(o, p);
         b.flag(i(osc::ON), s, k("on"), o == 0, 0);
         b.choice(i(osc::WT), s + 1, k("wt"), crate::tables::TABLE_NAMES, 0, 0);
-        b.num(i(osc::POS), s + 2, k("pos"), 0.0, 1.0, 0.0, Lin, "%", MS);
+        // 0.5 on the default table is a saw: a bright start that the filter can shape.
+        b.num(i(osc::POS), s + 2, k("pos"), 0.0, 1.0, 0.5, Lin, "%", MS);
         b.num(i(osc::LEVEL), s + 3, k("level"), 0.0, 1.0, 0.75, Lin, "%", MS);
         b.num(i(osc::PAN), s + 4, k("pan"), -1.0, 1.0, 0.0, Lin, "pan", MS);
         b.int(i(osc::OCT), s + 5, k("oct"), -4, 4, 0, "oct", 0);
