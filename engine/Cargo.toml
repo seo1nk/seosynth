@@ -1,0 +1,11 @@
+[package]
+name = "nami-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Wavetable synthesizer engine (DSP core) compiled to WebAssembly"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]

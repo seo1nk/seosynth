@@ -1,0 +1,12 @@
+{
+  "name": "nami-synth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser wavetable synthesizer: Rust DSP compiled to WebAssembly",
+  "scripts": {
+    "build": "./scripts/build.sh",
+    "dev": "node scripts/serve.mjs",
+    "test": "cargo test --release && ./scripts/build.sh && node --test \"tests/*.test.mjs\""
+  }
+}
