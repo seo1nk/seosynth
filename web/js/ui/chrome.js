@@ -4,6 +4,7 @@
 import { h, clamp } from './dom.js';
 import { PRESETS, CATEGORIES, presetTitle } from '../presets.js';
 import { shareUrl } from '../share.js';
+import { zip } from '../zip.js';
 
 // ---------------------------------------------------------------------------
 // Hint bar
@@ -367,6 +368,78 @@ function openShare(app) {
       url,
       h('div', { class: 'dialog-actions' }, native, copy),
     ),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Serum 2 export
+// ---------------------------------------------------------------------------
+
+export function openSerumExport(app) {
+  const { core, store, i18n } = app;
+  const t = i18n.t;
+  const { preset, notes, tables } = core.serumExport();
+  const base = safeName(store.getName());
+  const fileName = (path) => path.split('/').pop();
+
+  const tableList = tables.length
+    ? h(
+        'ul',
+        { class: 'file-list' },
+        tables.map((tb) =>
+          h(
+            'li',
+            {},
+            h('code', {}, `Tables/${tb.path}`),
+            h('button', { type: 'button', class: 'btn', onclick: () => download(fileName(tb.path), core.serumTableWav(tb.index), 'audio/wav') }, '.wav'),
+          ),
+        ),
+      )
+    : h('p', { class: 'muted' }, t('serum.tables.none'));
+
+  const noteText = (n) => {
+    const key = `serum.note.${n.code}`;
+    const text = t(key, { detail: n.detail });
+    return text === key ? `${n.code} ${n.detail}`.trim() : text;
+  };
+
+  const downloadZip = () => {
+    const files = [
+      { name: `${base}.SerumPreset`, data: preset },
+      ...tables.map((tb) => ({ name: `Tables/${tb.path}`, data: core.serumTableWav(tb.index) })),
+      { name: 'README.txt', data: `${i18n.t('serum.readme')}\n\n${notes.map((n) => `- ${noteText(n)}`).join('\n')}\n` },
+    ];
+    download(`${base} (Serum 2).zip`, zip(files), 'application/zip');
+    app.toast(t('file.exported'));
+  };
+
+  dialog(
+    app,
+    t('serum.title'),
+    h(
+      'div',
+      { class: 'serum-export' },
+      h('p', {}, t('serum.intro')),
+      h('p', { class: 'caveat' }, t('serum.caveat')),
+      h('div', { class: 'dialog-actions start' }, h('button', { type: 'button', class: 'btn primary', onclick: downloadZip }, t('serum.zip'))),
+      h('h3', {}, t('serum.step1')),
+      h(
+        'ul',
+        { class: 'file-list' },
+        h(
+          'li',
+          {},
+          h('code', {}, `${base}.SerumPreset`),
+          h('button', { type: 'button', class: 'btn', onclick: () => download(`${base}.SerumPreset`, preset, 'application/octet-stream') }, t('serum.preset')),
+        ),
+      ),
+      h('h3', {}, t('serum.step2')),
+      h('p', { class: 'muted' }, t('serum.tables.help')),
+      tableList,
+      h('h3', {}, t('serum.notes')),
+      h('ul', { class: 'note-list' }, notes.map((n) => h('li', {}, noteText(n)))),
+    ),
+    { wide: true },
   );
 }
 

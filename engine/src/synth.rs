@@ -584,6 +584,11 @@ impl Synth {
         self.bank.get(table).render_cycle(pos, out);
     }
 
+    /// The wavetable bank, for exporting tables.
+    pub fn bank_mut(&mut self) -> &mut Bank {
+        &mut self.bank
+    }
+
     pub fn table_frames(&mut self, table: usize) -> usize {
         self.bank.get(table).frames
     }

@@ -1440,6 +1440,69 @@ input[type='range'] {
   word-break: break-all;
 }
 
+.serum-export {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  line-height: 1.65;
+  user-select: text;
+}
+.serum-export p {
+  margin: 0;
+}
+.serum-export h3 {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+}
+.serum-export .caveat {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #a16207;
+  background: rgba(251, 191, 36, 0.08);
+  color: #fde68a;
+}
+.muted {
+  color: var(--dim);
+}
+.file-list,
+.note-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.file-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 7px;
+  background: var(--well);
+  border: 1px solid var(--line);
+}
+.file-list code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  word-break: break-all;
+}
+.note-list li {
+  padding-left: 14px;
+  position: relative;
+  color: var(--ink);
+}
+.note-list li::before {
+  content: '•';
+  position: absolute;
+  left: 2px;
+  color: var(--faint);
+}
+.dialog-actions.start {
+  justify-content: flex-start;
+}
+
 .toasts {
   position: fixed;
   left: 50%;

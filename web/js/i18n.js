@@ -260,7 +260,65 @@ const UI = {
     'Press Share in the top right to get a link that recreates this exact sound. Try the presets for more ideas.',
   ],
 
-  'serum.title': ['Serum 2 プリセットの書き出し', 'Export a Serum 2 preset'],
+  'serum.title': ['Serum 2 用に書き出す', 'Export for Serum 2'],
+  'serum.intro': [
+    'いまの音色を Serum 2 のプリセット（.SerumPreset）に変換します。Nami と Serum は別のシンセなので、同じ音にはなりません。つまみの位置・配線・エフェクトの並びを、できる範囲で移し替えます。',
+    'Converts the current sound into a Serum 2 preset (.SerumPreset). Nami and Serum are different synths, so it will not sound identical: knob positions, routings and the effect order are carried over as far as they can be.',
+  ],
+  'serum.caveat': [
+    '.SerumPreset は公開されていない形式で、コミュニティの解析結果をもとに書き出しています。Serum 2 本体での読み込みはまだ確認できていません。読み込めない・おかしい場合はご報告ください。',
+    'The .SerumPreset format is not published; this export follows what the community has worked out, and loading it in Serum 2 itself has not been verified yet. Please report it if a file does not load.',
+  ],
+  'serum.step1': ['1. プリセット', '1. The preset'],
+  'serum.step2': ['2. ウェーブテーブル', '2. The wavetables'],
+  'serum.tables.help': [
+    'Serum はウェーブテーブルを自分のフォルダから読み込みます。下の WAV を「Serum 2 Presets」フォルダの中の Tables / Nami フォルダ（なければ作成）に入れてください。',
+    'Serum loads wavetables from its own folder. Put the WAV files below into Tables / Nami inside your "Serum 2 Presets" folder (create the Nami folder if needed).',
+  ],
+  'serum.tables.none': ['このプリセットはウェーブテーブルを使いません。', 'This preset uses no wavetables.'],
+  'serum.zip': ['まとめてダウンロード（.zip）', 'Download everything (.zip)'],
+  'serum.preset': ['プリセットをダウンロード', 'Download preset'],
+  'serum.notes': ['変換メモ', 'Conversion notes'],
+  'serum.notes.none': ['すべての設定を移し替えました。', 'Every setting was carried over.'],
+  'serum.note.tables': [
+    'ウェーブテーブルは別ファイルです。上の手順 2 のとおり Serum 側に置いてください。',
+    'Wavetables are separate files: install them as described in step 2.',
+  ],
+  'serum.note.noise': [
+    'ノイズ（{detail}）は Serum の内蔵ノイズサンプルで代用しています。Serum 側で近いノイズを選び直してください。',
+    'The noise ({detail}) is replaced by one of Serum\'s stock noise samples. Pick the closest one in Serum.',
+  ],
+  'serum.note.filterType': [
+    '{detail} は、相当しそうな Serum のフィルターを推定で指定しています。',
+    '{detail}: the closest Serum filter type was guessed.',
+  ],
+  'serum.note.warpApprox': ['{detail} は Serum の近いワープで代用しています。', '{detail} is approximated by the nearest Serum warp.'],
+  'serum.note.warpDropped': ['{detail} のワープは移し替えていません。', '{detail}: this warp mode was not carried over.'],
+  'serum.note.modDropped': [
+    '配線「{detail}」は Serum 側の行き先が特定できず、移し替えていません。',
+    'Routing "{detail}" was not carried over: its Serum destination is unknown.',
+  ],
+  'serum.note.lfoRandom': [
+    '{detail} のランダム波形は、固定のパターンに置き換えています。',
+    '{detail}: the random shape became a fixed pattern.',
+  ],
+  'serum.note.lfoSmooth': ['{detail} のスムーズは移し替えていません。', '{detail}: smoothing was not carried over.'],
+  'serum.note.portamento': [
+    'グライドは時間だけを移し替えています（常にグライドの設定は Serum 側で確認してください）。',
+    'Glide: only the time was carried over; check the "always" setting in Serum.',
+  ],
+  'serum.note.bendRange': ['ベンド幅は上方向だけを設定しています。', 'Bend range: only the upward range was set.'],
+  'serum.note.masterPitch': ['全体のピッチは移し替えていません。', 'The global pitch offset was not carried over.'],
+  'serum.note.distApprox': ['ディストーションの {detail} は Downsample で代用しています。', 'Distortion {detail} is approximated by Downsample.'],
+  'serum.note.delayLong': ['8小節のディレイは Serum の最長（4小節）にしています。', 'An 8-bar delay was shortened to Serum\'s longest (4 bars).'],
+  'serum.note.reverbDecay': [
+    'Plate リバーブの長さは Serum ではサイズで決まるため、「長さ」は移し替えていません。',
+    'Plate reverb: Serum sets its length by size, so DECAY was not carried over.',
+  ],
+  'serum.readme': [
+    'Nami から書き出した Serum 2 用プリセットです。\n\n1. .SerumPreset ファイルを Serum 2 のプリセットフォルダ（Serum 2 Presets/Presets/User など）に入れるか、Serum 2 のメニューから読み込みます。\n2. Tables/Nami フォルダの中の WAV を、Serum 2 Presets/Tables/Nami に入れます（Nami フォルダがなければ作成）。\n\nNami と Serum は別のシンセなので、同じ音にはなりません。',
+    'A Serum 2 preset exported from Nami.\n\n1. Put the .SerumPreset file into your Serum 2 preset folder (for example Serum 2 Presets/Presets/User), or load it from Serum 2\'s menu.\n2. Copy the WAV files in Tables/Nami into Serum 2 Presets/Tables/Nami (create the Nami folder if needed).\n\nNami and Serum are different synths, so the result will not sound identical.',
+  ],
   'toast.patchInit': ['初期状態に戻しました', 'Reset to the initial sound'],
   'lang.switch': ['English', '日本語'],
 };

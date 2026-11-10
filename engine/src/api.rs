@@ -320,6 +320,60 @@ pub extern "C" fn curve(t: f32, c: f32) -> f32 {
     crate::util::curve_shape(t, c)
 }
 
+// --- Serum export ---------------------------------------------------------------
+
+static mut BLOB: Vec<u8> = Vec::new();
+
+fn set_blob(bytes: Vec<u8>) -> usize {
+    unsafe {
+        let blob = &mut *addr_of_mut!(BLOB);
+        *blob = bytes;
+        blob.len()
+    }
+}
+
+/// Start of the buffer holding the result of the last `serum_export` or
+/// `serum_table_wav` call (these can be larger than the IO buffer).
+#[no_mangle]
+pub extern "C" fn blob_ptr() -> *const u8 {
+    unsafe { (*addr_of_mut!(BLOB)).as_ptr() }
+}
+
+/// Builds a Serum 2 `.SerumPreset` from the current patch. Returns its
+/// length; the bytes are at `blob_ptr()`.
+#[no_mangle]
+pub extern "C" fn serum_export() -> usize {
+    set_blob(crate::serum::pack(&synth().patch).bytes)
+}
+
+/// Notes about what the Serum export could not translate exactly, one per
+/// line as `code` or `code<TAB>detail`. Written to the IO buffer.
+#[no_mangle]
+pub extern "C" fn serum_notes() -> usize {
+    write_bytes(crate::serum::pack(&synth().patch).notes.join("\n").as_bytes())
+}
+
+/// Indices of the wavetables the exported preset refers to, one byte each,
+/// written to the IO buffer. Returns how many.
+#[no_mangle]
+pub extern "C" fn serum_tables() -> usize {
+    let tables: Vec<u8> = crate::serum::pack(&synth().patch).tables.iter().map(|t| *t as u8).collect();
+    write_bytes(&tables)
+}
+
+/// A factory wavetable as a WAV file for Serum. Returns its length; the
+/// bytes are at `blob_ptr()`.
+#[no_mangle]
+pub extern "C" fn serum_table_wav(table: usize) -> usize {
+    set_blob(crate::serum::table_wav(synth().bank_mut(), table))
+}
+
+/// Path of that file relative to Serum's Tables folder, in the IO buffer.
+#[no_mangle]
+pub extern "C" fn serum_table_path(table: usize) -> usize {
+    write_bytes(format!("{}/{}", crate::serum::TABLE_DIR, crate::serum::table_file_name(table)).as_bytes())
+}
+
 // --- self description ---------------------------------------------------------
 
 fn json_str(out: &mut String, s: &str) {

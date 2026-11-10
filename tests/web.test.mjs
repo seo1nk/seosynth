@@ -188,3 +188,150 @@ test('value formatting', async () => {
   assert.equal(f('filter.on', 1), 'ON');
   assert.equal(f('filter.type', 2), 'LP24');
 });
+
+// --- Serum 2 export -------------------------------------------------------------
+
+import { zip, crc32 } from '../web/js/zip.js';
+
+/** Just enough CBOR to read back what the exporter writes. */
+function decodeCbor(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const text = new TextDecoder();
+  let i = 0;
+  const arg = (info) => {
+    if (info < 24) return info;
+    if (info === 24) return view.getUint8(i++);
+    if (info === 25) return (i += 2), view.getUint16(i - 2);
+    if (info === 26) return (i += 4), view.getUint32(i - 4);
+    throw new Error('unsupported length');
+  };
+  const item = () => {
+    const head = view.getUint8(i++);
+    const major = head >> 5;
+    const info = head & 31;
+    if (major === 7) {
+      if (info === 20) return false;
+      if (info === 21) return true;
+      if (info === 27) return (i += 8), view.getFloat64(i - 8);
+      throw new Error(`unsupported simple value ${info}`);
+    }
+    const n = arg(info);
+    if (major === 0) return n;
+    if (major === 1) return -1 - n;
+    if (major === 3) return (i += n), text.decode(bytes.subarray(i - n, i));
+    if (major === 4) return Array.from({ length: n }, item);
+    if (major === 5) {
+      const out = {};
+      for (let k = 0; k < n; k++) {
+        const key = item();
+        out[key] = item();
+      }
+      return out;
+    }
+    throw new Error(`unsupported major type ${major}`);
+  };
+  const value = item();
+  assert.equal(i, bytes.length, 'trailing bytes after CBOR item');
+  return value;
+}
+
+/** Reads a zstd frame made only of raw blocks. */
+function unstoreZstd(frame) {
+  assert.deepEqual(Array.from(frame.subarray(0, 4)), [0x28, 0xb5, 0x2f, 0xfd]);
+  const desc = frame[4];
+  let i = 5 + [1, 2, 4, 8][desc >> 6];
+  const chunks = [];
+  for (;;) {
+    const head = frame[i] | (frame[i + 1] << 8) | (frame[i + 2] << 16);
+    i += 3;
+    assert.equal((head >> 1) & 3, 0, 'raw block');
+    chunks.push(frame.subarray(i, i + (head >> 3)));
+    i += head >> 3;
+    if (head & 1) break;
+  }
+  assert.equal(i, frame.length);
+  return Uint8Array.from(chunks.flatMap((c) => Array.from(c)));
+}
+
+function unpackSerum(file) {
+  assert.equal(new TextDecoder().decode(file.subarray(0, 9)), 'XferJson\0');
+  const view = new DataView(file.buffer, file.byteOffset, file.byteLength);
+  const jsonLength = Number(view.getBigUint64(9, true));
+  const meta = JSON.parse(new TextDecoder().decode(file.subarray(17, 17 + jsonLength)));
+  const at = 17 + jsonLength;
+  assert.equal(view.getUint32(at + 4, true), 2, 'payload encoding');
+  const cbor = unstoreZstd(file.subarray(at + 8));
+  assert.equal(cbor.length, view.getUint32(at, true));
+  return { meta, data: decodeCbor(cbor) };
+}
+
+test('Serum export: every preset produces a well-formed file', async () => {
+  const { store } = await makeStore();
+  for (const preset of PRESETS) {
+    store.fromJSON(preset);
+    const { preset: file, notes, tables } = store.core.serumExport();
+    const { meta, data } = unpackSerum(file);
+    assert.equal(meta.fileType, 'SerumPreset');
+    assert.equal(meta.product, 'Serum2');
+    assert.equal(meta.presetName, preset.name);
+    assert.match(meta.hash, /^[0-9a-f]{32}$/);
+    assert.equal(Object.keys(data).length, 175, `${preset.name}: module count`);
+    assert.equal(data.presetName, preset.name);
+    assert.equal(notes[0].code, 'tables');
+    // Every table the preset points at is offered for download, and nothing else.
+    const referenced = ['Oscillator0', 'Oscillator1']
+      .filter((o) => data[o].plainParams.kParamEnable === 1)
+      .map((o, k) => data[o][`WTOsc${o.at(-1)}`].relativePathToWT);
+    assert.deepEqual([...new Set(referenced)].sort(), tables.map((t) => t.path).sort(), preset.name);
+    // Effects: one rack entry per enabled unit.
+    const enabled = store.info.fx.filter((k) => store.plain(`${k}.on`) >= 0.5).length;
+    assert.equal(data.FXRack0.FX.length, enabled, `${preset.name}: effect count`);
+    for (const n of notes) assert.match(n.code, /^[A-Za-z]+$/);
+  }
+});
+
+test('Serum export: values land in the right modules', async () => {
+  const { store } = await makeStore();
+  store.fromJSON(PRESETS.find((p) => p.name === 'Acid Line'));
+  const { data } = unpackSerum(store.core.serumExport().preset);
+  assert.equal(data.VoiceFilter0.plainParams.kParamType, 'MgL24');
+  assert.ok(Math.abs(data.VoiceFilter0.plainParams.kParamReso - 72) < 0.01);
+  assert.equal(data.Global0.plainParams.kParamMonoToggle, 1);
+  assert.equal(data.Oscillator0.plainParams.kParamOctave, -1);
+  const slot = data.ModSlot0;
+  assert.deepEqual(slot.source, [3, 0], 'ENV 2');
+  assert.equal(slot.destModuleTypeString, 'VoiceFilter');
+  assert.equal(slot.destModuleParamName, 'kParamFreq');
+  assert.deepEqual(data.FXRack0.FX.map((f) => f.type), [0, 4], 'distortion then delay');
+  assert.equal(data.tags[1], 'Mono');
+});
+
+test('Serum export: wavetable WAV', async () => {
+  const { store } = await makeStore();
+  const wav = store.core.serumTableWav(store.info.tables.indexOf('PWM'));
+  const text = new TextDecoder('latin1').decode(wav.subarray(0, 120));
+  assert.ok(text.startsWith('RIFF'));
+  assert.ok(text.includes('<!>2048'), 'cycle length marker for wavetable synths');
+  const view = new DataView(wav.buffer);
+  assert.equal(view.getUint32(4, true), wav.length - 8);
+  const samples = new Float32Array(wav.buffer.slice(wav.length - 256 * 2048 * 4));
+  assert.ok(samples.every((v) => Math.abs(v) <= 1.0001));
+  assert.ok(samples.some((v) => Math.abs(v) > 0.9));
+});
+
+test('zip writer', () => {
+  assert.equal(crc32(new TextEncoder().encode('123456789')), 0xcbf43926);
+  const archive = zip([
+    { name: 'a.txt', data: 'hello' },
+    { name: 'Tables/Nami/音.wav', data: Uint8Array.from([1, 2, 3, 4]) },
+  ]);
+  const view = new DataView(archive.buffer);
+  assert.equal(view.getUint32(0, true), 0x04034b50);
+  const end = archive.length - 22;
+  assert.equal(view.getUint32(end, true), 0x06054b50);
+  assert.equal(view.getUint16(end + 10, true), 2);
+  const dirStart = view.getUint32(end + 16, true);
+  assert.equal(view.getUint32(dirStart, true), 0x02014b50);
+  // Stored data is readable in place.
+  assert.equal(new TextDecoder().decode(archive.subarray(30 + 5, 30 + 5 + 5)), 'hello');
+});

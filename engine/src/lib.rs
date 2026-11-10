@@ -23,6 +23,7 @@ pub mod lfo;
 pub mod osc;
 pub mod params;
 pub mod patch;
+pub mod serum;
 pub mod sources;
 pub mod synth;
 pub mod tables;

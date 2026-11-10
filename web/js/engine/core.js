@@ -156,6 +156,39 @@ export class EngineCore {
     return this.x.curve(t, c);
   }
 
+  // --- Serum 2 export ---------------------------------------------------------
+
+  #blob(len) {
+    return new Uint8Array(this.x.memory.buffer, this.x.blob_ptr(), len).slice();
+  }
+
+  /**
+   * The current patch as a Serum 2 preset.
+   * `notes` lists what could not be translated exactly ({ code, detail });
+   * `tables` are the wavetables the preset expects in Serum's Tables folder.
+   */
+  serumExport() {
+    const preset = this.#blob(this.x.serum_export());
+    const notes = this.#readString(this.x.serum_notes())
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [code, detail = ''] = line.split('\t');
+        return { code, detail };
+      });
+    const count = this.x.serum_tables();
+    const tables = Array.from(this.#bytes().subarray(0, count)).map((index) => ({
+      index,
+      path: this.#readString(this.x.serum_table_path(index)),
+    }));
+    return { preset, notes, tables };
+  }
+
+  /** A factory wavetable as a WAV file Serum can load. */
+  serumTableWav(index) {
+    return this.#blob(this.x.serum_table_wav(index));
+  }
+
   // --- audio (tests and offline rendering) -----------------------------------
 
   noteOn(note, velocity = 0.8) {

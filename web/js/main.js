@@ -12,7 +12,7 @@ import { Cables } from './ui/cables.js';
 import { ScopeBank } from './ui/displays.js';
 import { buildStage } from './ui/modules.js';
 import { Keyboard } from './ui/keyboard.js';
-import { Help, Header, Tour, createToaster, popover, dialog } from './ui/chrome.js';
+import { Help, Header, Tour, createToaster, popover, dialog, openSerumExport } from './ui/chrome.js';
 
 const DESIGN_WIDTH = 1400;
 
@@ -81,6 +81,7 @@ async function boot() {
       el.classList.add('flash');
       setTimeout(() => el.classList.remove('flash'), 900);
     },
+    exportSerum: () => openSerumExport(app),
     demoPhrase: () => (app.presetIndex != null ? PRESETS[app.presetIndex].demo : 'arp'),
     loadPreset(index) {
       const preset = PRESETS[index];
