@@ -58,7 +58,6 @@ function tableFrames(core, table) {
 export function WavetableDisplay(app, name, color) {
   const { store, core, i18n } = app;
   const osc = name === 'oscB' ? 1 : 0;
-  const iWt = store.idx(`${name}.wt`);
   const iPos = store.idx(`${name}.pos`);
   const iAmt = store.idx(`${name}.warpAmt`);
   let dirty = true;
@@ -66,7 +65,7 @@ export function WavetableDisplay(app, name, color) {
 
   const view = autoCanvas('wt-display', (ctx, w, hgt) => {
     const pos = shown[0];
-    const frames = tableFrames(core, Math.round(store.getPlain(iWt)));
+    const frames = tableFrames(core, store.tableOf(name));
     const depthX = w * 0.2;
     const depthY = hgt * 0.42;
     const fw = w - depthX - 10;
@@ -111,9 +110,14 @@ export function WavetableDisplay(app, name, color) {
   // Anything that changes the picture: this oscillator's shape parameters,
   // and the other oscillator when it is used as an FM/AM/RM source.
   for (const p of store.params) {
-    if (/^osc[AB]\.(wt|pos|warp|warpAmt|oct|semi|coarse|on)$/.test(p.key)) app.watch(p.i, () => (dirty = true));
+    if (/^osc[AB]\.(wt|userTable|pos|warp|warpAmt|oct|semi|coarse|on)$/.test(p.key)) app.watch(p.i, () => (dirty = true));
   }
   app.on('patch', () => (dirty = true));
+  // A user table that was drawn on: its picture is out of date.
+  app.on('table', (slot) => {
+    tableCache.delete(store.info.tables.length + slot);
+    dirty = true;
+  });
   app.onFrame((live) => {
     const pos = live.param(iPos);
     const amt = live.param(iAmt);

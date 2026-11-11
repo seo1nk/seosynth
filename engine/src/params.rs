@@ -153,7 +153,9 @@ pub mod osc {
     pub const WARP: usize = 15;
     pub const WARP_AMT: usize = 16;
     pub const TO_FILTER: usize = 17;
-    pub const N: usize = 18;
+    /// 0: play the factory table `WT`; 1..: play that user table instead.
+    pub const USER: usize = 18;
+    pub const N: usize = 19;
 }
 
 pub mod sub {
@@ -427,6 +429,8 @@ pub const WARP_MODES: &[&str] = &[
     "Off", "Sync", "SyncWin", "Bend+", "Bend-", "PWM", "Asym+", "Asym-", "Flip", "Mirror",
     "Quantize", "FM", "AM", "RM",
 ];
+/// Which table an oscillator plays: a factory table, or one of the patch's own.
+pub const USER_TABLE_OPTIONS: &[&str] = &["Off", "User 1", "User 2"];
 pub const SUB_SHAPES: &[&str] = &["Sine", "Round", "Triangle", "Saw", "Square", "Pulse"];
 pub const NOISE_TYPES: &[&str] = &["White", "Pink", "Brown", "Digital", "Crackle"];
 pub const FILTER_TYPES: &[&str] = &[
@@ -584,6 +588,7 @@ fn build() -> Vec<ParamDef> {
         b.choice(i(osc::WARP), s + 15, k("warp"), WARP_MODES, 0, 0);
         b.num(i(osc::WARP_AMT), s + 16, k("warpAmt"), 0.0, 1.0, 0.0, Lin, "%", MS);
         b.flag(i(osc::TO_FILTER), s + 17, k("toFilter"), true, 0);
+        b.choice(i(osc::USER), s + 18, k("userTable"), USER_TABLE_OPTIONS, 0, 0);
     }
 
     // --- sub / noise ------------------------------------------------------
@@ -874,6 +879,8 @@ mod tests {
             ("master.volume", 1u16),
             ("oscA.pos", 102),
             ("oscB.pos", 152),
+            ("oscA.userTable", 118),
+            ("oscB.userTable", 168),
             ("filter.cutoff", 242),
             ("env1.attack", 300),
             ("env3.release", 344),

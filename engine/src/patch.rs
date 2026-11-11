@@ -17,6 +17,7 @@
 //!   6 fx chain  one byte per unit, in processing order: unit | lane << 6.
 //!               Only a prefix is written; units that are left out follow in
 //!               ascending order on the main lane.
+//!   7 user table  slot u8, then its frames: 128 signed bytes each
 //! ```
 //!
 //! Only values that differ from the defaults are written. Unknown sections
@@ -24,7 +25,8 @@
 //! patches and vice versa.
 
 use crate::lfo::{default_points, sanitize_points, LfoPoint};
-use crate::params::{self, defs, unit_on, NUM_FX, NUM_LFO, NUM_PARAMS, NUM_SLOTS, NUM_UNITS};
+use crate::params::{self, defs, osc, osc_idx, unit_on, NUM_FX, NUM_LFO, NUM_OSC, NUM_PARAMS, NUM_SLOTS, NUM_UNITS};
+use crate::wavetable::{UserTable, FACTORY_TABLES, USER_TABLES};
 
 pub const NO_DEST: u16 = 0xFFFF;
 pub const FORMAT_VERSION: u8 = 1;
@@ -62,6 +64,8 @@ pub struct Patch {
     pub fx_order: [u8; NUM_UNITS],
     /// Lane of each unit, indexed by unit: `lane::MAIN`, `lane::A` or `lane::B`.
     pub fx_lane: [u8; NUM_UNITS],
+    /// Wavetables drawn or imported by the user.
+    pub user_tables: [UserTable; USER_TABLES],
 }
 
 /// Where a unit sits relative to the fork in the effect chain.
@@ -152,6 +156,7 @@ impl Patch {
             lfo_shapes: core::array::from_fn(|_| default_points()),
             fx_order: DEFAULT_FX_ORDER,
             fx_lane: [lane::MAIN; NUM_UNITS],
+            user_tables: Default::default(),
         }
     }
 
@@ -173,6 +178,16 @@ impl Patch {
             true
         } else {
             false
+        }
+    }
+
+    /// The table oscillator `o` plays, as an index into the wavetable bank:
+    /// a factory table, or a user table (which follow the factory ones).
+    pub fn table_index(&self, o: usize) -> usize {
+        let o = o.min(NUM_OSC - 1);
+        match self.plain(osc_idx(o, osc::USER)) as usize {
+            0 => (self.plain(osc_idx(o, osc::WT)) as usize).min(FACTORY_TABLES - 1),
+            user => FACTORY_TABLES + (user - 1).min(USER_TABLES - 1),
         }
     }
 
@@ -272,6 +287,17 @@ impl Patch {
             buf.extend(self.fx_order[..keep].iter().map(|&u| u | self.fx_lane[u as usize] << 6));
             section(&mut out, 6, &buf);
         }
+
+        let untouched = UserTable::default();
+        for (slot, table) in self.user_tables.iter().enumerate() {
+            if *table == untouched {
+                continue;
+            }
+            buf.clear();
+            buf.push(slot as u8);
+            buf.extend(table.points().iter().map(|p| *p as u8));
+            section(&mut out, 7, &buf);
+        }
         out
     }
 
@@ -357,6 +383,13 @@ impl Patch {
                         }
                     }
                 }
+                7 => {
+                    let slot = s.u8()? as usize;
+                    let points: Vec<i8> = s.b[1..].iter().map(|b| *b as i8).collect();
+                    if let (true, Some(table)) = (slot < USER_TABLES, UserTable::new(&points)) {
+                        patch.user_tables[slot] = table;
+                    }
+                }
                 _ => {} // unknown section from a newer version: skip
             }
         }
@@ -434,7 +467,7 @@ impl<'a> Reader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::{filter, lfo_idx, osc, osc_idx, src, FILTER_BASE};
+    use crate::params::{filter, lfo_idx, src, FILTER_BASE};
 
     fn sample_patch() -> Patch {
         let mut p = Patch::init();
@@ -454,6 +487,9 @@ mod tests {
         ];
         p.fx_order = complete_order(&[7, 1, 2, 3, 4, 5, 6, 0, 8, 9]);
         p.fx_lane[11] = lane::B;
+        p.set_plain(osc_idx(1, osc::USER), 2.0);
+        let ramp: Vec<i8> = (0..2 * crate::wavetable::USER_POINTS).map(|i| (i as i32 - 128) as i8).collect();
+        p.user_tables[1] = UserTable::new(&ramp).unwrap();
         p
     }
 
@@ -472,6 +508,11 @@ mod tests {
         assert_eq!(q.name, p.name);
         assert_eq!(q.fx_order, p.fx_order);
         assert_eq!(q.fx_lane, p.fx_lane);
+        assert_eq!(q.user_tables, p.user_tables);
+        assert_eq!(q.user_tables[1].frames(), 2);
+        assert_eq!(q.user_tables[0], UserTable::default());
+        assert_eq!(q.table_index(0), 0);
+        assert_eq!(q.table_index(1), FACTORY_TABLES + 1);
         for i in 0..NUM_PARAMS {
             let d = &defs()[i];
             if d.is_discrete() {
@@ -590,6 +631,18 @@ mod tests {
         let g = p.fx_groups();
         assert_eq!(g, FxGroups { pre: vec![0, 1], a: vec![4, 7], b: vec![11], post: vec![5] });
         assert!(g.has_split());
+    }
+
+    #[test]
+    fn broken_user_tables_are_ignored() {
+        for payload in [vec![0u8; 1], vec![0u8; 100], vec![9u8; 129], vec![0u8; 1 + 128 * 17]] {
+            let mut bytes = vec![MAGIC, FORMAT_VERSION];
+            section(&mut bytes, 7, &payload);
+            assert_eq!(Patch::from_bytes(&bytes).unwrap().user_tables, Patch::init().user_tables);
+        }
+        let mut bytes = vec![MAGIC, FORMAT_VERSION];
+        section(&mut bytes, 7, &[]);
+        assert!(Patch::from_bytes(&bytes).is_err(), "a section cut short is an error, not a crash");
     }
 
     #[test]

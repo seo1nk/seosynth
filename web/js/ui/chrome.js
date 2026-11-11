@@ -361,8 +361,11 @@ function openShare(app) {
   const { store, i18n } = app;
   const t = i18n.t;
   const url = h('textarea', { class: 'share-url', readOnly: true, rows: 4, onfocus: () => url.select() });
+  // A sound that carries a table of its own makes a long link.
+  const long = h('p', { class: 'share-note', hidden: true }, t('share.long'));
   const refresh = () => {
     url.value = shareUrl(store.toBytes());
+    long.hidden = url.value.length < 2000;
   };
   const name = h('input', {
     type: 'text',
@@ -405,6 +408,7 @@ function openShare(app) {
       h('p', {}, t('share.body')),
       h('label', {}, h('span', {}, t('share.name')), name),
       h('label', {}, h('span', {}, t('share.link')), url),
+      long,
       h('div', { class: 'dialog-actions' }, native, copy),
     ),
   );

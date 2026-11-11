@@ -14,6 +14,7 @@ use crate::lfo::LfoPoint;
 use crate::params::{self, defs, Curve, NUM_LFO, NUM_PARAMS, NUM_SLOTS, NUM_UNITS};
 use crate::patch::{ModSlot, Patch, NO_DEST};
 use crate::synth::{tap, tele, Synth, MAX_VOICES};
+use crate::wavetable::{UserTable, USER_MAX_FRAMES, USER_POINTS, USER_TABLES};
 use crate::util::BLOCK;
 use core::ptr::addr_of_mut;
 
@@ -217,6 +218,31 @@ pub extern "C" fn lfo_shape_get(l: usize) -> usize {
     shape.len()
 }
 
+// --- user wavetables ----------------------------------------------------------
+
+/// Replaces user table `slot` with `frames` frames of `USER_POINTS` signed
+/// bytes each, read from the IO buffer. Returns 1 if that was a valid table.
+#[no_mangle]
+pub extern "C" fn user_table_set(slot: usize, frames: usize) -> u32 {
+    let len = frames.min(USER_MAX_FRAMES + 1) * USER_POINTS;
+    let points: Vec<i8> = io()[..len].iter().map(|b| *b as i8).collect();
+    match UserTable::new(&points) {
+        Some(table) if slot < USER_TABLES => {
+            synth().set_user_table(slot, table);
+            1
+        }
+        _ => 0,
+    }
+}
+
+/// Writes the points of user table `slot` to the IO buffer and returns how
+/// many there are (its frame count times `USER_POINTS`).
+#[no_mangle]
+pub extern "C" fn user_table_get(slot: usize) -> usize {
+    let bytes: Vec<u8> = synth().patch.user_tables[slot.min(USER_TABLES - 1)].points().iter().map(|p| *p as u8).collect();
+    write_bytes(&bytes)
+}
+
 // --- effect chain -------------------------------------------------------------
 
 /// Reads the processing order of the effect units (`NUM_UNITS` bytes) and
@@ -364,8 +390,8 @@ pub extern "C" fn serum_tables() -> usize {
     write_bytes(&tables)
 }
 
-/// A factory wavetable as a WAV file for Serum. Returns its length; the
-/// bytes are at `blob_ptr()`.
+/// A wavetable (factory or user) as a WAV file for Serum. Returns its
+/// length; the bytes are at `blob_ptr()`.
 #[no_mangle]
 pub extern "C" fn serum_table_wav(table: usize) -> usize {
     set_blob(crate::serum::table_wav(synth().bank_mut(), table))
@@ -374,7 +400,7 @@ pub extern "C" fn serum_table_wav(table: usize) -> usize {
 /// Path of that file relative to Serum's Tables folder, in the IO buffer.
 #[no_mangle]
 pub extern "C" fn serum_table_path(table: usize) -> usize {
-    write_bytes(format!("{}/{}", crate::serum::TABLE_DIR, crate::serum::table_file_name(table)).as_bytes())
+    write_bytes(format!("{}/{}", crate::serum::TABLE_DIR, crate::serum::table_file_name(&synth().patch, table)).as_bytes())
 }
 
 // --- self description ---------------------------------------------------------
@@ -445,8 +471,11 @@ pub fn describe_json() -> String {
     json_list(&mut o, &units);
     o.push_str(",\"fxKinds\":");
     json_list(&mut o, &params::FX_KEYS);
+    // The factory wavetables. In calls that take a table index, the user
+    // tables follow them: user table `slot` is table `tables.length + slot`.
     o.push_str(",\"tables\":");
     json_list(&mut o, crate::tables::TABLE_NAMES);
+    o.push_str(&format!(",\"userTables\":{USER_TABLES},\"userPoints\":{USER_POINTS},\"userMaxFrames\":{USER_MAX_FRAMES}"));
     o.push_str(",\"divisionBeats\":[");
     for (i, b) in params::DIVISION_BEATS.iter().enumerate() {
         if i > 0 {

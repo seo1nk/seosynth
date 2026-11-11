@@ -107,3 +107,56 @@ test('renders faster than real time with headroom', async () => {
   console.log(`  heavy patch: ${(load * 100).toFixed(1)}% of real time`);
   assert.ok(load < 0.5, `engine uses ${(load * 100).toFixed(0)}% of real time`);
 });
+
+test('user wavetables: set, play, preview, save', async () => {
+  const e = await make();
+  const { userTables, userPoints, userMaxFrames, tables } = e.info;
+  assert.deepEqual([userTables, userPoints, userMaxFrames], [2, 128, 16]);
+  // Untouched, a user table is one frame holding a sine.
+  const sine = e.getUserTable(0);
+  assert.equal(sine.length, userPoints);
+  assert.deepEqual([sine[0], sine[32], sine[96]], [0, 127, -127]);
+
+  // Two frames: a square, then a ramp.
+  const drawn = new Int8Array(2 * userPoints);
+  for (let i = 0; i < userPoints; i++) {
+    drawn[i] = i < userPoints / 2 ? 127 : -127;
+    drawn[userPoints + i] = i * 2 - 127;
+  }
+  assert.ok(e.setUserTable(1, drawn));
+  assert.equal(e.setUserTable(1, new Int8Array(100)), false, 'not whole frames');
+  assert.equal(e.setUserTable(1, new Int8Array(userPoints * (userMaxFrames + 1))), false, 'too many frames');
+  assert.equal(e.setUserTable(5, drawn), false, 'no such table');
+  assert.deepEqual(Array.from(e.getUserTable(1)), Array.from(drawn));
+  const index = tables.length + 1;
+  assert.equal(e.tableFrames(index), 2);
+  const first = e.previewTable(index, 0, 64);
+  assert.ok(first[8] > 0.8 && first[56] < -0.8, 'the square');
+  const last = e.previewTable(index, 1, 64);
+  assert.ok(last[8] < -0.5 && last[56] > 0.5, 'the ramp');
+
+  // An oscillator that plays it sounds different from the factory table.
+  const hear = async (user) => {
+    const f = await make();
+    f.setUserTable(1, drawn);
+    f.setPlain(f.idx('oscA.rand'), 0);
+    f.setPlain(f.idx('oscA.userTable'), user);
+    f.noteOn(48, 0.9);
+    return renderSeconds(f, 0.1);
+  };
+  const [factory, own] = [await hear(0), await hear(2)];
+  assert.ok(rms(own) > 0.02);
+  assert.ok(factory.some((v, i) => Math.abs(v - own[i]) > 0.05));
+
+  // It travels with the patch.
+  e.setPlain(e.idx('oscA.userTable'), 2);
+  const saved = e.save();
+  assert.ok(saved.length > 2 * userPoints && saved.length < 2 * userPoints + 40, `patch is ${saved.length} bytes`);
+  const g = await make();
+  assert.ok(g.load(saved));
+  assert.deepEqual(Array.from(g.getUserTable(1)), Array.from(drawn));
+  assert.equal(g.getUserTable(0).length, userPoints);
+  assert.equal(g.getPlain(g.idx('oscA.userTable')), 2);
+  g.init();
+  assert.deepEqual(Array.from(g.getUserTable(1)), Array.from(sine));
+});

@@ -11,7 +11,7 @@ use crate::params::{
 use crate::patch::{ModSlot, Patch};
 use crate::util::{fast_tanh, BLOCK};
 use crate::voice::{self, lfo_params, ActiveSlot, Shared, Voice, VoiceTaps};
-use crate::wavetable::{Bank, Wavetable};
+use crate::wavetable::{Bank, UserTable, Wavetable, FACTORY_TABLES, USER_TABLES};
 use std::rc::Rc;
 
 pub const MAX_VOICES: usize = 16;
@@ -147,9 +147,23 @@ impl Synth {
 
     /// Re-derives everything that depends on the patch.
     fn refresh(&mut self) {
+        // User tables that were edited: let go of them first, so the bank
+        // can rebuild just the frames that changed.
+        for slot in 0..USER_TABLES {
+            if self.bank.user(slot) == &self.patch.user_tables[slot] {
+                continue;
+            }
+            for o in 0..NUM_OSC {
+                if self.table_idx[o] == FACTORY_TABLES + slot {
+                    self.tables[o] = self.bank.get(0);
+                    self.table_idx[o] = usize::MAX;
+                }
+            }
+            self.bank.set_user(slot, &self.patch.user_tables[slot]);
+        }
         for o in 0..NUM_OSC {
-            let idx = self.patch.plain(osc_idx(o, osc::WT)) as usize;
-            if idx != self.table_idx[o] || self.table_idx[o] >= self.bank.count() {
+            let idx = self.patch.table_index(o);
+            if idx != self.table_idx[o] {
                 self.tables[o] = self.bank.get(idx);
                 self.table_idx[o] = idx;
             }
@@ -184,7 +198,7 @@ impl Synth {
             return;
         }
         self.patch.values[idx] = norm.max(0.0).min(1.0);
-        if idx == osc_idx(0, osc::WT) || idx == osc_idx(1, osc::WT) {
+        if (0..NUM_OSC).any(|o| idx == osc_idx(o, osc::WT) || idx == osc_idx(o, osc::USER)) {
             self.refresh();
         }
     }
@@ -204,6 +218,13 @@ impl Synth {
         if l < NUM_LFO {
             sanitize_points(&mut points);
             self.patch.lfo_shapes[l] = points;
+            self.refresh();
+        }
+    }
+
+    pub fn set_user_table(&mut self, slot: usize, table: UserTable) {
+        if slot < USER_TABLES {
+            self.patch.user_tables[slot] = table;
             self.refresh();
         }
     }
@@ -562,8 +583,8 @@ impl Synth {
         let o = o.min(NUM_OSC - 1);
         let other = 1 - o;
         let p = &self.patch;
-        let table = self.bank.get(p.plain(osc_idx(o, osc::WT)) as usize);
-        let other_table = self.bank.get(p.plain(osc_idx(other, osc::WT)) as usize);
+        let table = self.bank.get(p.table_index(o));
+        let other_table = self.bank.get(p.table_index(other));
         let warp = Warp::from_index(p.plain(osc_idx(o, osc::WARP)) as usize);
         let pitch = |x: usize| p.plain(osc_idx(x, osc::OCT)) * 12.0 + p.plain(osc_idx(x, osc::SEMI)) + p.plain(osc_idx(x, osc::COARSE));
         let ratio = (2.0f32).powf((pitch(other) - pitch(o)) / 12.0);
@@ -583,7 +604,8 @@ impl Synth {
         }
     }
 
-    /// One frame of a factory table, for the 3D table view.
+    /// One frame of a table of the bank (factory tables, then the user
+    /// tables), for the 3D table view.
     pub fn preview_table(&mut self, table: usize, pos: f32, out: &mut [f32]) {
         self.bank.get(table).render_cycle(pos, out);
     }
@@ -782,6 +804,48 @@ mod tests {
         assert_eq!(s.telemetry[tele::VOICES], 1.0);
         assert!(s.telemetry[tele::PEAK_L] > 0.0);
         assert!(s.telemetry[tele::ENV_VAL] > 0.9);
+    }
+
+    #[test]
+    fn an_oscillator_plays_a_user_table_and_hears_edits() {
+        use crate::wavetable::{UserTable, FACTORY_TABLES, USER_POINTS};
+        let play = |user: f32, table: Option<UserTable>| {
+            let mut s = Synth::new(48_000.0);
+            s.patch.set_plain(osc_idx(0, osc::RAND), 0.0);
+            s.patch.set_plain(osc_idx(0, osc::USER), user);
+            s.snap();
+            if let Some(table) = table {
+                s.set_user_table(0, table);
+            }
+            s.note_on(48, 0.9);
+            render(&mut s, 0.1)
+        };
+        let diff = |a: &[f32], b: &[f32]| a.iter().zip(b).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
+        let factory = play(0.0, None);
+        let sine = play(1.0, None);
+        assert!(rms(&sine) > 0.02);
+        assert!(diff(&factory, &sine) > 0.05, "the user table is heard instead of the factory one");
+        let square: Vec<i8> = (0..USER_POINTS).map(|i| if i < USER_POINTS / 2 { 127 } else { -127 }).collect();
+        let drawn = play(1.0, UserTable::new(&square));
+        assert!(diff(&sine, &drawn) > 0.05, "an edit changes the sound");
+        assert!(drawn.iter().all(|v| v.is_finite() && v.abs() <= 1.0));
+
+        // Editing while a note sounds, switching back and forth, and the
+        // preview all follow the table.
+        let mut s = Synth::new(48_000.0);
+        s.set_param(osc_idx(0, osc::USER), 0.5);
+        assert_eq!(s.patch.table_index(0), FACTORY_TABLES);
+        s.note_on(60, 0.9);
+        render(&mut s, 0.02);
+        s.set_user_table(0, UserTable::new(&square).unwrap());
+        assert!(render(&mut s, 0.05).iter().all(|v| v.is_finite()));
+        let mut buf = [0.0f32; 64];
+        s.preview_osc(0, 0.0, 0.0, &mut buf);
+        assert!(buf[4] > 0.8 && buf[60] < -0.8, "the preview shows the square, flat right after its edge");
+        s.set_param(osc_idx(0, osc::USER), 0.0);
+        s.preview_osc(0, 0.0, 0.0, &mut buf);
+        assert!(buf[4] < 0.8, "back on the factory table");
+        assert_eq!(s.table_frames(FACTORY_TABLES), 1);
     }
 
     #[test]

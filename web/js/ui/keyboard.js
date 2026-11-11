@@ -258,7 +258,8 @@ export class Keyboard {
       const tag = e.target?.tagName;
       if (tag === 'INPUT' && e.target.type !== 'range') return;
       if (tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable) return;
-      if (document.querySelector('dialog[open]')) return;
+      // Dialogs take the keys, except those that ask for notes (the wavetable editor).
+      if (document.querySelector('dialog[open]:not(.keys-through)')) return;
       if (e.code === 'BracketLeft') return this.shiftOctave(-1);
       if (e.code === 'BracketRight') return this.shiftOctave(1);
       const offset = KEYMAP[e.code];

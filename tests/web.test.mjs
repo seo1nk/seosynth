@@ -8,6 +8,7 @@ import { createI18n, hasParamText } from '../web/js/i18n.js';
 import { PRESETS, CATEGORIES } from '../web/js/presets.js';
 import { toBase64Url, fromBase64Url, patchToHash, hashToPatch, shareUrl } from '../web/js/share.js';
 import { formatValue } from '../web/js/format.js';
+import { audioToFrames, findPeriod, extractCycle, toMono, POINTS } from '../web/js/wavetable-import.js';
 
 const bytes = await readFile(new URL('../web/wasm/seosynth.wasm', import.meta.url));
 const makeStore = async () => {
@@ -435,4 +436,150 @@ test('old share links with a 10-unit effect order still open', async () => {
   const { order, lanes } = store.getFxChain();
   assert.deepEqual(order.slice(0, 11), [7, 0, 1, 2, 3, 4, 5, 6, 8, 9, 10]);
   assert.ok(lanes.every((l) => l === 0));
+});
+
+// --- wavetables from recordings --------------------------------------------------
+
+const SR = 48000;
+const record = (seconds, fn) => Float32Array.from({ length: Math.round(seconds * SR) }, (_, i) => fn(i / SR));
+const sawAt = (hz) => (t) => {
+  let v = 0;
+  for (let k = 1; k * hz < 20000; k++) v += Math.sin(2 * Math.PI * k * hz * t) / k;
+  return v * 0.5;
+};
+/** Strength of harmonic `k` in frame `f`, as [cosine part, sine part]. */
+const harmonic = (points, f, k) => {
+  let [c, s] = [0, 0];
+  for (let i = 0; i < POINTS; i++) {
+    const v = points[f * POINTS + i] / 127;
+    c += v * Math.cos((2 * Math.PI * k * i) / POINTS);
+    s += v * Math.sin((2 * Math.PI * k * i) / POINTS);
+  }
+  return [(2 * c) / POINTS, (2 * s) / POINTS];
+};
+
+test('recordings: the pitch is found across the range', () => {
+  for (const hz of [41.2, 110.3, 440, 987.8, 1760]) {
+    const x = record(0.5, sawAt(hz));
+    const { period, clarity } = findPeriod(x, x.length / 2, SR);
+    assert.ok(Math.abs(SR / period - hz) / hz < 0.005, `${hz} Hz was heard as ${(SR / period).toFixed(2)}`);
+    assert.ok(clarity > 0.9, `${hz} Hz: clarity ${clarity}`);
+  }
+  assert.equal(findPeriod(new Float32Array(8), 4, SR).clarity, 0, 'too short to tell');
+});
+
+test('recordings: a steady tone becomes one frame with the right harmonics', () => {
+  for (const hz of [55, 110.3, 440]) {
+    const result = audioToFrames(record(1, sawAt(hz)), SR, 8);
+    assert.equal(result.frames, 1, `${hz} Hz`);
+    assert.equal(result.points.length, POINTS);
+    assert.ok(result.pitched && Math.abs(result.hz - hz) / hz < 0.005);
+    assert.equal(Math.max(...result.points.map(Math.abs)), 127, 'full height');
+    // A saw: harmonic k at 1/k, all in phase with the fundamental.
+    const [c1, s1] = harmonic(result.points, 0, 1);
+    assert.ok(Math.abs(c1) < 0.01 && s1 > 0.4, 'the fundamental is lined up as a sine');
+    for (const k of [2, 3, 5, 8]) {
+      const [c, s] = harmonic(result.points, 0, k);
+      assert.ok(Math.abs(s / s1 - 1 / k) < 0.02 && Math.abs(c) < 0.02, `${hz} Hz harmonic ${k}: ${(s / s1).toFixed(3)}`);
+    }
+  }
+});
+
+test('recordings: a sound that changes becomes frames that follow it', () => {
+  // A sine that turns into a square over two seconds.
+  const x = record(2, (t) => {
+    let square = 0;
+    for (let k = 1; k < 40; k += 2) square += Math.sin(2 * Math.PI * k * 220 * t) / k;
+    return (1 - t / 2) * Math.sin(2 * Math.PI * 220 * t) + (t / 2) * square;
+  });
+  const result = audioToFrames(x, SR, 8);
+  assert.equal(result.frames, 8);
+  const third = Array.from({ length: 8 }, (_, f) => Math.hypot(...harmonic(result.points, f, 3)) / Math.hypot(...harmonic(result.points, f, 1)));
+  assert.ok(third[0] < 0.05, 'starts as a sine');
+  assert.ok(Math.abs(third[7] - 1 / 3) < 0.04, 'ends as a square');
+  for (let f = 1; f < 8; f++) assert.ok(third[f] > third[f - 1], 'and gets there step by step');
+  // Every frame starts the same way, so they morph without cancelling.
+  for (let f = 0; f < 8; f++) assert.ok(Math.abs(harmonic(result.points, f, 1)[0]) < 0.02);
+  assert.equal(audioToFrames(x, SR, 4).frames, 4);
+  assert.equal(audioToFrames(x, SR, 99).frames, 16, 'never more than sixteen');
+});
+
+test('recordings: single cycles, noise, silence and stereo', () => {
+  // A file that is exactly one cycle (600 samples, a rising ramp).
+  const one = audioToFrames(Float32Array.from({ length: 600 }, (_, i) => i / 300 - 1), SR, 8);
+  assert.equal(one.frames, 1);
+  assert.ok(Math.abs(one.hz - SR / 600) < 0.5);
+  const [, s1] = harmonic(one.points, 0, 1);
+  const [, s2] = harmonic(one.points, 0, 2);
+  assert.ok(Math.abs(Math.abs(s2 / s1) - 0.5) < 0.03, 'still a ramp');
+
+  // Noise has no pitch: fixed slices, and it says so.
+  let seed = 7;
+  const noise = record(1, () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 31 - 1) * 0.5);
+  const hiss = audioToFrames(noise, SR, 4);
+  assert.deepEqual([hiss.frames, hiss.pitched, hiss.hz], [4, false, 0]);
+  assert.ok(hiss.points.some((v) => v !== 0));
+
+  assert.equal(audioToFrames(new Float32Array(SR), SR, 8), null, 'silence');
+  assert.equal(audioToFrames(new Float32Array(4), SR, 8), null, 'nothing');
+
+  const mono = toMono([Float32Array.of(1, 0, -1), Float32Array.of(0, 0, -1)]);
+  assert.deepEqual(Array.from(mono), [0.5, 0, -1]);
+  const cycle = extractCycle(record(0.2, (t) => Math.cos(2 * Math.PI * 100 * t)), 4800, 480);
+  assert.equal(cycle.length, POINTS);
+  assert.ok(Math.abs(cycle[POINTS / 4] - 1) < 0.01, 'a cosine comes out as a sine');
+});
+
+test('user wavetables survive JSON, the share link and undo', async () => {
+  const { store } = await makeStore();
+  store.init();
+  const events = [];
+  store.on('table', (slot) => events.push(slot));
+  const per = store.info.userPoints;
+  const drawn = Int8Array.from({ length: 3 * per }, (_, i) => ((i * 7) % 255) - 127);
+  assert.equal(store.tableOf('oscA'), 0);
+  assert.ok(store.setUserTable(0, drawn));
+  assert.equal(store.setUserTable(0, new Int8Array(5)), false);
+  store.setPlain(store.idx('oscA.userTable'), 1);
+  store.commit();
+  assert.deepEqual(events, [0]);
+  assert.equal(store.tableOf('oscA'), store.info.tables.length);
+  assert.equal(store.tableOf('oscB'), 0);
+
+  const json = JSON.parse(JSON.stringify(store.toJSON()));
+  assert.deepEqual(Object.keys(json.userTables), ['1']);
+  assert.equal(json.userTables[1].length, 3);
+  assert.equal(json.params['oscA.userTable'], 'User 1');
+  const link = patchToHash(store.toBytes());
+  assert.ok(link.length > 3 * per && link.length < 3 * per * 1.5 + 80, `the link is ${link.length} characters`);
+
+  store.init();
+  assert.equal(store.toJSON().userTables, undefined, 'an untouched table is not written');
+  assert.deepEqual(store.fromJSON(json), []);
+  assert.deepEqual(Array.from(store.getUserTable(0)), Array.from(drawn));
+  store.init();
+  assert.ok(store.loadBytes(hashToPatch(link)));
+  assert.deepEqual(Array.from(store.getUserTable(0)), Array.from(drawn));
+  assert.equal(store.plain('oscA.userTable'), 1);
+
+  // Undo takes back an edit of the table.
+  const edited = drawn.slice(0, per);
+  store.setUserTable(0, edited);
+  store.commit();
+  assert.equal(store.getUserTable(0).length, per);
+  store.undo();
+  assert.equal(store.getUserTable(0).length, 3 * per);
+
+  assert.equal(store.fromJSON({ params: {}, userTables: { 1: [[1, 2, 3]], 9: 'x', 2: [Array(per).fill(300)] } }).length, 3);
+});
+
+test('wavetable editor strings exist', () => {
+  for (const lang of ['ja', 'en']) {
+    const { t, option } = createI18n(lang);
+    for (const key of ['table.user', 'table.mine', 'table.edit', 'table.edit.help', 'editor.title', 'editor.intro', 'editor.canvas', 'editor.start', 'editor.smooth', 'editor.listen', 'editor.frames', 'editor.frames.help', 'editor.frame', 'editor.addFrame', 'editor.removeFrame', 'editor.import.title', 'editor.import.body', 'editor.import.choose', 'editor.import.count', 'editor.import.working', 'editor.import.done', 'editor.import.one', 'editor.import.unpitched', 'editor.import.failed', 'editor.import.silent', 'editor.reset', 'editor.done', 'share.long']) {
+      assert.notEqual(t(key), key, `${lang}: ${key}`);
+    }
+    assert.ok(t('table.user', { n: 2 }).includes('2'));
+    assert.notEqual(option('User 1'), 'User 1');
+  }
 });

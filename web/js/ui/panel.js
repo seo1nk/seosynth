@@ -10,6 +10,7 @@ import { h, s, setupCanvas } from './dom.js';
 import { Slider, Stepper, Switch, Select, Segmented } from './controls.js';
 import { WavetableDisplay, FilterDisplay, EnvDisplay, LfoDisplay, LFO_SHAPE_POINTS, SpectrumDisplay, Meter } from './displays.js';
 import { colors, modColor } from '../theme.js';
+import { openTableEditor, userTableName } from './table-editor.js';
 import { SPLIT, LANE, isFx, isMover, isOn, hasSwitch, moverKind, fxKind, fxCopies, fxGroups, fxPeers, laneOf, taps, nodeOfParam, setOn, shiftFx, setLane, unsplit, duplicateFx } from './nodes.js';
 
 /** Shows `el` only while `predicate()` holds; re-checked when any of the
@@ -83,61 +84,95 @@ function filterGroups(i18n) {
   ];
 }
 
-/** Button that opens a gallery of the wavetables, drawn as small waves. */
+/** Two frames of a table as a small picture: a feel for how it changes. */
+function tableThumb(core, table) {
+  const canvas = h('canvas', {});
+  const ctx = setupCanvas(canvas, 104, 40);
+  const c = colors();
+  const frames = core.tableFrames(table) > 1 ? [[0.85, 0.3], [0.2, 1]] : [[0, 1]];
+  for (const [pos, opacity] of frames) {
+    const wave = core.previewTable(table, pos, 52);
+    ctx.beginPath();
+    wave.forEach((v, j) => {
+      const x = 2 + (j / 51) * 100;
+      const y = 20 - v * 15;
+      if (j) ctx.lineTo(x, y);
+      else ctx.moveTo(x, y);
+    });
+    ctx.globalAlpha = opacity;
+    ctx.strokeStyle = c.sound;
+    ctx.lineWidth = 1.6;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  }
+  return canvas;
+}
+
+/**
+ * Chooses the wavetable of an oscillator: a button that opens a gallery of
+ * the built-in tables, drawn as small waves, followed by the tables the
+ * user can make. While one of those is chosen, a second button opens the
+ * editor for it.
+ */
 function TablePicker(app, name) {
   const { store, core, i18n } = app;
-  const i = store.idx(`${name}.wt`);
+  const iWt = store.idx(`${name}.wt`);
+  const iUser = store.idx(`${name}.userTable`);
   const tables = store.info.tables;
+  const userSlot = () => Math.round(store.getPlain(iUser)) - 1; // -1: a built-in table
   const label = h('span', { class: 'table-pick-name' });
-  const btn = h(
+  const pick = h(
     'button',
     {
       type: 'button',
       class: 'table-pick',
       'aria-haspopup': 'true',
       onclick: () => {
-        const current = Math.round(store.getPlain(i));
-        const c = colors();
+        const builtIn = userSlot() < 0 ? Math.round(store.getPlain(iWt)) : -1;
+        const card = (table, text, pressed, choose) =>
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'table-card',
+              'aria-pressed': String(pressed),
+              onclick: () => {
+                close();
+                choose();
+              },
+            },
+            tableThumb(core, table),
+            h('span', {}, text),
+          );
         const close = app.popover(
-          btn,
+          pick,
           h(
             'div',
-            { class: 'table-gallery' },
-            tables.map((tableName, k) => {
-              const canvas = h('canvas', {});
-              const ctx = setupCanvas(canvas, 104, 40);
-              // Two frames give a feel for how the table changes.
-              for (const [pos, opacity] of [[0.85, 0.3], [0.2, 1]]) {
-                const wave = core.previewTable(k, pos, 52);
-                ctx.beginPath();
-                wave.forEach((v, j) => {
-                  const x = 2 + (j / 51) * 100;
-                  const y = 20 - v * 15;
-                  if (j) ctx.lineTo(x, y);
-                  else ctx.moveTo(x, y);
-                });
-                ctx.globalAlpha = opacity;
-                ctx.strokeStyle = c.sound;
-                ctx.lineWidth = 1.6;
-                ctx.lineJoin = 'round';
-                ctx.stroke();
-              }
-              return h(
-                'button',
-                {
-                  type: 'button',
-                  class: 'table-card',
-                  'aria-pressed': String(k === current),
-                  onclick: () => {
-                    store.setPlain(i, k);
-                    store.commit();
-                    close();
-                  },
-                },
-                canvas,
-                h('span', {}, tableName),
-              );
-            }),
+            { class: 'table-menu' },
+            h(
+              'div',
+              { class: 'table-gallery' },
+              tables.map((tableName, k) =>
+                card(k, tableName, k === builtIn, () => {
+                  store.setPlain(iWt, k);
+                  store.setPlain(iUser, 0);
+                  store.commit();
+                }),
+              ),
+            ),
+            h('div', { class: 'menu-sub' }, i18n.t('table.mine')),
+            h(
+              'div',
+              { class: 'table-gallery' },
+              Array.from({ length: store.info.userTables }, (_, slot) =>
+                // Choosing one of your own opens it for drawing straight away.
+                card(tables.length + slot, userTableName(i18n, slot), slot === userSlot(), () => {
+                  store.setPlain(iUser, slot + 1);
+                  store.commit();
+                  openTableEditor(app, name, slot);
+                }),
+              ),
+            ),
           ),
         );
       },
@@ -146,13 +181,18 @@ function TablePicker(app, name) {
     label,
     h('span', { class: 'caret', 'aria-hidden': 'true' }, '▾'),
   );
+  const edit = h('button', { type: 'button', class: 'btn small table-edit', onclick: () => openTableEditor(app, name, userSlot()) }, i18n.t('table.edit'));
   const render = () => {
-    label.textContent = tables[Math.round(store.getPlain(i))];
+    const slot = userSlot();
+    label.textContent = slot < 0 ? tables[Math.round(store.getPlain(iWt))] : userTableName(i18n, slot);
+    edit.hidden = slot < 0;
   };
-  app.watch(i, render);
+  app.watch(iWt, render);
+  app.watch(iUser, render);
   render();
-  app.help.attach(btn, () => ({ title: i18n.paramTitle(`${name}.wt`), body: i18n.paramHelp(`${name}.wt`), value: label.textContent }));
-  return btn;
+  app.help.attach(pick, () => ({ title: i18n.paramTitle(`${name}.wt`), body: i18n.paramHelp(`${name}.wt`), value: label.textContent }));
+  app.help.attach(edit, () => ({ title: i18n.t('table.edit'), body: i18n.t('table.edit.help') }));
+  return h('div', { class: 'table-picker' }, pick, edit);
 }
 
 const ICON = (d) => () => s('svg', { viewBox: '0 0 28 14', class: 'shape-icon' }, s('path', { d }));

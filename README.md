@@ -17,6 +17,11 @@ Rust で書いたシンセエンジンを WebAssembly にして、ブラウザ�
 
 ![エフェクトの分岐](docs/screenshot-split.png)
 
+- **波形を自分で描けます**。オシレーターのテーブル一覧から「自分のテーブル」を選ぶと、音の波 1 回ぶんをなぞって描く画面が開き、描いたそばから音が変わります。コマを足せば、パラパラ漫画のように形が移り変わるテーブルになります
+- **声や楽器の音からも作れます**。音声ファイルを選ぶと、音の高さを調べて波形を取り出し、コマに並べます。解析はブラウザの中だけで行い、音声はどこにも送りません
+
+![波形を描く画面](docs/screenshot-table.png)
+
 - ノードを押すと設定パネルが開きます（PC は右側、スマホは下からのシート）。どのパネルも「説明 → 図（入る音と出る音の波形つき）→ おもなスライダー → くわしい設定 → つながり」の順に並びます
 - つまみではなくスライダーを使います。左が少なく右が多い、という向きがすぐ分かり、名前を略さずに書けます
 - **うごき**（LFO、エンベロープ、マクロ、弾く強さなど）は経路とは別の層に浮かぶノードです。「うごきを足す」で追加し、設定パネルでつなぐ先のノードとスライダーを選びます。つないだノードには色のタグが付き、破線で結ばれ、スライダーには動く範囲といまの値が表示されます
@@ -29,7 +34,7 @@ Rust で書いたシンセエンジンを WebAssembly にして、ブラウザ�
 
 | | |
 |---|---|
-| オシレーター | ウェーブテーブル ×2（22 種類のテーブル、波形の位置のモーフィング、ユニゾン最大 16 声、ワープ 13 種：Sync / Bend / PWM / Asym / Flip / Mirror / Quantize / FM / AM / RM）、サブ、ノイズ |
+| オシレーター | ウェーブテーブル ×2（22 種類のテーブル＋自分で描く・音声から作るテーブル 2 つ、波形の位置のモーフィング、ユニゾン最大 16 声、ワープ 13 種：Sync / Bend / PWM / Asym / Flip / Mirror / Quantize / FM / AM / RM）、サブ、ノイズ |
 | フィルター | 19 種類（LP / HP / BP / ノッチ / ピーク / ラダー / モーフ / コム / フェイザー / フォルマント ほか）、ドライブ、キー追従、ステレオ |
 | うごき | エンベロープ ×3（AHDSR＋カーブ）、LFO ×4（プリセット波形または自分で描く、テンポ同期）、マクロ ×4、弾く強さ／音の高さ／MOD ホイールなど。最大 32 のつながり |
 | エフェクト | ハイパー、ディストーション、フランジャー、フェイザー、コーラス、ディレイ、コンプレッサー、リバーブ、EQ、全体フィルター。順番を入れ替え可能、同じものを 3 つまで重ねがけ、途中で 2 本に分岐（同じ音を 2 つに／低音と高音／中央と左右／左と右） |
@@ -68,7 +73,7 @@ Rust のユニットテスト（DSP・パッチ形式・Serum 書き出し）と
 ```
 engine/            Rust のシンセエンジン（依存クレートなし）
   src/params.rs      全パラメータの表（キー・範囲・単位・安定 ID）
-  src/wavetable.rs   帯域制限つきウェーブテーブル（ミップマップ）
+  src/wavetable.rs   帯域制限つきウェーブテーブル（ミップマップ）、自分のテーブル
   src/tables.rs      内蔵ウェーブテーブルの生成
   src/osc.rs         ウェーブテーブルオシレーター（ユニゾン・ワープ）
   src/filter.rs      フィルター
@@ -85,6 +90,8 @@ web/               Web アプリ（ビルド不要の ES モジュール）
   js/ui/nodes.js     ノードのつながり方と、エフェクトチェーンの編集
   js/ui/board.js     ホワイトボード（ノード、線、パン／ズーム）
   js/ui/panel.js     ノードごとの設定パネル
+  js/ui/table-editor.js  波形を描く画面
+  js/wavetable-import.js 音声ファイルから波形を取り出す解析
   js/ui/controls.js  スライダーなどの部品
   js/ui/displays.js  波形・フィルター特性・エンベロープ・LFO の表示
   js/ui/mods.js      「うごき」とスライダーのつながり
@@ -97,7 +104,7 @@ tests/             Node から wasm と Web 側モジュールを検証
 
 ### 共有 URL の形式
 
-パッチは「初期値と違うものだけ」をコンパクトなバイナリにし、base64url で URL のフラグメントに入れます（プリセットで 150〜300 文字程度）。パラメータは変更されない「安定 ID」で記録するので、あとからパラメータを追加しても古い URL は開けます。詳細は `engine/src/patch.rs` の冒頭にあります。
+パッチは「初期値と違うものだけ」をコンパクトなバイナリにし、base64url で URL のフラグメントに入れます（プリセットで 150〜300 文字程度）。自分で作ったテーブルも一緒に入るので、その分だけ長くなります（1 コマにつき約 170 文字、最大 16 コマ）。パラメータは変更されない「安定 ID」で記録するので、あとからパラメータを追加しても古い URL は開けます。詳細は `engine/src/patch.rs` の冒頭にあります。
 
 ## Serum 2 への書き出しについて
 
@@ -128,7 +135,7 @@ gh repo create seosynth --source . --public --push   # または git remote add 
 
 ## これから
 
-Serum 2 と比べて足りない機能と、作っていく順番を [docs/roadmap.md](docs/roadmap.md) にまとめています。次はウェーブテーブルの手描きと音声取り込みです。
+Serum 2 と比べて足りない機能と、作っていく順番を [docs/roadmap.md](docs/roadmap.md) にまとめています。次はフィルター 2 基目とオシレーター C です。
 
 そのほか：
 
@@ -147,7 +154,8 @@ seosynth is a wavetable synthesizer for the browser. The DSP engine is dependenc
 
 - **The whole sound as a graph.** The centre of the screen is a whiteboard you can drag and pinch-zoom. Nodes on the signal path have on/off switches, and the sound line runs through every node that is switched on to the output, brightening where sound flows. Sources run in parallel; effects that are off wait in a tray below. Effects can be stacked (up to three of each) and the chain can split into two lanes that run side by side (two copies, lows and highs, centre and sides, or left and right) and join again. Pressing a node opens its settings (a side panel on desktop, a bottom sheet on phones) with sliders, a picture of the sound going in and coming out, and an explanation.
 - **Movement on its own layer.** LFOs, envelopes, macros and playing gestures float on a separate plane. You add one, pick the node and slider it should move, and a coloured tag and dashed line show where it acts.
-- **Synth features** modelled on Serum's layout: two wavetable oscillators (22 generated tables, unison, 13 warp modes), sub, noise, a 19-type filter, 3 envelopes, 4 LFOs with drawable shapes, 4 macros, up to 32 connections and ten kinds of effect that can be reordered, stacked and run in parallel. Japanese and English, light and dark.
+- **Wavetables of your own.** Draw one cycle of the wave with the pointer and hear it change as you draw; add frames to make it morph. Or choose an audio file: its pitch is detected and its waveforms become the frames, all inside the browser. These tables travel in the share link too.
+- **Synth features** modelled on Serum's layout: two wavetable oscillators (22 generated tables plus two of your own, unison, 13 warp modes), sub, noise, a 19-type filter, 3 envelopes, 4 LFOs with drawable shapes, 4 macros, up to 32 connections and ten kinds of effect that can be reordered, stacked and run in parallel. Japanese and English, light and dark.
 - **Sharing.** The whole patch is encoded into the URL fragment, so a link is the preset. Presets can also be saved as JSON.
 - **Serum 2 export.** Writes a `.SerumPreset` plus the wavetables as WAV. The format is unpublished and the export follows community reverse-engineering; files round-trip through independent decoders and match the structure of a real init preset, but loading in Serum 2 itself has not been verified yet. It is a translation of settings, not a clone of the sound.
 

@@ -25,6 +25,7 @@ export class Store {
   // 'slots'  modulation routings changed
   // 'lfo'    (index) an LFO shape changed
   // 'fx'     the effect chain changed (order or lanes)
+  // 'table'  (slot) a user wavetable changed
   // 'name'   patch name changed
   // 'commit' an edit was completed (good moment to update the share URL)
 
@@ -137,6 +138,25 @@ export class Store {
     this.emit('lfo', l);
   }
 
+  /** Index of the wavetable oscillator `name` ("oscA") plays, for previews:
+   * a factory table, or a user table (those follow the factory ones). */
+  tableOf(name) {
+    const user = Math.round(this.plain(`${name}.userTable`));
+    return user > 0 ? this.info.tables.length + user - 1 : Math.round(this.plain(`${name}.wt`));
+  }
+
+  /** The points of a user wavetable: frames of `info.userPoints` signed bytes. */
+  getUserTable(slot) {
+    return this.core.getUserTable(slot);
+  }
+
+  setUserTable(slot, points) {
+    if (!this.core.setUserTable(slot, points)) return false;
+    this.#sync();
+    this.emit('table', slot);
+    return true;
+  }
+
   /** { order, lanes }: see EngineCore.getFxChain. */
   getFxChain() {
     return this.core.getFxChain();
@@ -168,6 +188,7 @@ export class Store {
     this.emit('patch');
     this.emit('slots');
     this.emit('fx');
+    for (let slot = 0; slot < this.info.userTables; slot++) this.emit('table', slot);
     this.emit('name');
   }
 
@@ -230,6 +251,15 @@ export class Store {
       const onLane = listed.filter((u) => lanes[u] > 0);
       if (onLane.length) out.fxLanes = Object.fromEntries(onLane.map((u) => [this.info.fx[u], lanes[u] === 1 ? 'a' : 'b']));
     }
+    // User wavetables that are not the untouched sine, frame by frame.
+    const per = this.info.userPoints;
+    const tables = {};
+    for (let slot = 0; slot < this.info.userTables; slot++) {
+      const points = Array.from(c.getUserTable(slot));
+      const untouched = points.length === per && points.every((v, i) => v === Math.round(127 * Math.sin((2 * Math.PI * i) / per)));
+      if (!untouched) tables[slot + 1] = Array.from({ length: points.length / per }, (_, f) => points.slice(f * per, (f + 1) * per));
+    }
+    if (Object.keys(tables).length) out.userTables = tables;
     return out;
   }
 
@@ -298,6 +328,11 @@ export class Store {
       else lanes[unit] = lane;
     }
     c.setFxChain([...start, ...fx.map((_, u) => u).filter((u) => !start.includes(u))], lanes);
+    for (const [key, frames] of Object.entries(obj.userTables ?? {})) {
+      const flat = Array.isArray(frames) ? frames.flat() : [];
+      const ok = flat.length > 0 && flat.every((v) => Number.isInteger(v) && v >= -128 && v <= 127);
+      if (!ok || !c.setUserTable(Number(key) - 1, Int8Array.from(flat))) warnings.push(`skipped wavetable: ${key}`);
+    }
     c.setName(typeof obj.name === 'string' ? obj.name : 'Untitled');
     this.#reloaded();
     if (commit) this.commit();

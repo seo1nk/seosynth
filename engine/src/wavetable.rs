@@ -5,6 +5,10 @@
 //! alias, so every frame is stored at 11 mip levels, each keeping half as many
 //! harmonics as the previous one. The oscillator picks the level that fits
 //! under Nyquist for the pitch being played.
+//!
+//! Besides the factory tables there are a few *user tables*: wavetables the
+//! user draws or imports. They are part of the patch (and so of a share URL),
+//! which is why they are stored small: a few frames of 128 eight-bit points.
 
 use crate::fft::Fft;
 use std::rc::Rc;
@@ -19,6 +23,28 @@ pub const STRIDE: usize = TABLE_SIZE + 4;
 pub struct Wavetable {
     pub frames: usize,
     data: Vec<f32>,
+}
+
+/// Scratch space for turning single-cycle waves into band-limited frames.
+pub struct FrameBuilder {
+    fft: Fft,
+    re: Vec<f32>,
+    im: Vec<f32>,
+    sre: Vec<f32>,
+    sim: Vec<f32>,
+}
+
+impl Default for FrameBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FrameBuilder {
+    pub fn new() -> Self {
+        let zeros = || vec![0.0f32; TABLE_SIZE];
+        FrameBuilder { fft: Fft::new(TABLE_SIZE), re: zeros(), im: zeros(), sre: zeros(), sim: zeros() }
+    }
 }
 
 /// Highest harmonic kept at a mip level.
@@ -52,50 +78,53 @@ impl Wavetable {
     /// the mip levels.
     pub fn from_frames(src: &[f32], frames: usize) -> Self {
         assert!(frames >= 1 && src.len() == frames * TABLE_SIZE);
-        let fft = Fft::new(TABLE_SIZE);
-        let mut data = vec![0.0f32; NUM_MIPS * frames * STRIDE];
-        let mut re = vec![0.0f32; TABLE_SIZE];
-        let mut im = vec![0.0f32; TABLE_SIZE];
-        let mut sre = vec![0.0f32; TABLE_SIZE];
-        let mut sim = vec![0.0f32; TABLE_SIZE];
-
+        let mut table = Wavetable { frames, data: vec![0.0f32; NUM_MIPS * frames * STRIDE] };
+        let mut work = FrameBuilder::new();
         for f in 0..frames {
-            sre.copy_from_slice(&src[f * TABLE_SIZE..(f + 1) * TABLE_SIZE]);
-            sim.iter_mut().for_each(|v| *v = 0.0);
-            fft.forward(&mut sre, &mut sim);
-            sre[0] = 0.0;
-            sim[0] = 0.0;
-            sre[TABLE_SIZE / 2] = 0.0;
-            sim[TABLE_SIZE / 2] = 0.0;
-
-            let mut scale = 1.0;
-            for mip in 0..NUM_MIPS {
-                let h = mip_harmonics(mip);
-                re.iter_mut().for_each(|v| *v = 0.0);
-                im.iter_mut().for_each(|v| *v = 0.0);
-                for k in 1..=h {
-                    re[k] = sre[k];
-                    im[k] = sim[k];
-                    re[TABLE_SIZE - k] = sre[TABLE_SIZE - k];
-                    im[TABLE_SIZE - k] = sim[TABLE_SIZE - k];
-                }
-                fft.inverse(&mut re, &mut im);
-                if mip == 0 {
-                    let peak = re.iter().fold(0.0f32, |m, v| m.max(v.abs()));
-                    scale = if peak > 1e-6 { 1.0 / peak } else { 1.0 };
-                }
-                let base = (mip * frames + f) * STRIDE;
-                let dst = &mut data[base..base + STRIDE];
-                dst[0] = re[TABLE_SIZE - 1] * scale;
-                for i in 0..TABLE_SIZE {
-                    dst[i + 1] = re[i] * scale;
-                }
-                dst[TABLE_SIZE + 1] = re[0] * scale;
-                dst[TABLE_SIZE + 2] = re[1] * scale;
-                dst[TABLE_SIZE + 3] = re[2] * scale;
-            }
+            table.set_frame(&mut work, f, &src[f * TABLE_SIZE..(f + 1) * TABLE_SIZE]);
         }
-        Wavetable { frames, data }
+        table
+    }
+
+    /// Replaces frame `f` with the single-cycle wave `src` (`TABLE_SIZE`
+    /// samples): removes DC, normalises to peak 1, generates the mip levels.
+    pub fn set_frame(&mut self, work: &mut FrameBuilder, f: usize, src: &[f32]) {
+        assert!(f < self.frames && src.len() == TABLE_SIZE);
+        let FrameBuilder { fft, re, im, sre, sim } = work;
+        sre.copy_from_slice(src);
+        sim.iter_mut().for_each(|v| *v = 0.0);
+        fft.forward(sre, sim);
+        sre[0] = 0.0;
+        sim[0] = 0.0;
+        sre[TABLE_SIZE / 2] = 0.0;
+        sim[TABLE_SIZE / 2] = 0.0;
+
+        let mut scale = 1.0;
+        for mip in 0..NUM_MIPS {
+            let h = mip_harmonics(mip);
+            re.iter_mut().for_each(|v| *v = 0.0);
+            im.iter_mut().for_each(|v| *v = 0.0);
+            for k in 1..=h {
+                re[k] = sre[k];
+                im[k] = sim[k];
+                re[TABLE_SIZE - k] = sre[TABLE_SIZE - k];
+                im[TABLE_SIZE - k] = sim[TABLE_SIZE - k];
+            }
+            fft.inverse(re, im);
+            if mip == 0 {
+                let peak = re.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+                scale = if peak > 1e-6 { 1.0 / peak } else { 1.0 };
+            }
+            let base = (mip * self.frames + f) * STRIDE;
+            let dst = &mut self.data[base..base + STRIDE];
+            dst[0] = re[TABLE_SIZE - 1] * scale;
+            for i in 0..TABLE_SIZE {
+                dst[i + 1] = re[i] * scale;
+            }
+            dst[TABLE_SIZE + 1] = re[0] * scale;
+            dst[TABLE_SIZE + 2] = re[1] * scale;
+            dst[TABLE_SIZE + 3] = re[2] * scale;
+        }
     }
 
     /// Padded frame (`STRIDE` samples) at a mip level.
@@ -148,10 +177,77 @@ pub fn hermite(ym1: f32, y0: f32, y1: f32, y2: f32, x: f32) -> f32 {
     ((c3 * x + c2) * x + c1) * x + y0
 }
 
-/// Lazily generated set of factory wavetables.
+// ---------------------------------------------------------------------------
+// User tables
+// ---------------------------------------------------------------------------
+
+/// How many wavetables of their own a patch can carry.
+pub const USER_TABLES: usize = 2;
+/// Points per frame of a user table.
+pub const USER_POINTS: usize = 128;
+pub const USER_MAX_FRAMES: usize = 16;
+
+/// A wavetable drawn or imported by the user: 1 to `USER_MAX_FRAMES` frames
+/// of `USER_POINTS` points each, one signed byte per point. A frame is one
+/// cycle; the points are joined by straight lines, as the editor draws them.
+#[derive(Clone, PartialEq, Debug)]
+pub struct UserTable {
+    points: Vec<i8>,
+}
+
+impl Default for UserTable {
+    /// One frame holding a sine.
+    fn default() -> Self {
+        let sine = |i: usize| (127.0 * (crate::util::TAU * i as f32 / USER_POINTS as f32).sin()).round() as i8;
+        UserTable { points: (0..USER_POINTS).map(sine).collect() }
+    }
+}
+
+impl UserTable {
+    /// `points` holds whole frames, one after the other. Returns `None` if
+    /// it is not 1 to `USER_MAX_FRAMES` frames long.
+    pub fn new(points: &[i8]) -> Option<UserTable> {
+        let frames = points.len() / USER_POINTS;
+        let whole = points.len() % USER_POINTS == 0;
+        (whole && (1..=USER_MAX_FRAMES).contains(&frames)).then(|| UserTable { points: points.to_vec() })
+    }
+
+    pub fn frames(&self) -> usize {
+        self.points.len() / USER_POINTS
+    }
+
+    pub fn points(&self) -> &[i8] {
+        &self.points
+    }
+
+    pub fn frame(&self, f: usize) -> &[i8] {
+        &self.points[f * USER_POINTS..(f + 1) * USER_POINTS]
+    }
+
+    /// Renders frame `f` as a full-resolution cycle of `TABLE_SIZE` samples.
+    pub fn render(&self, f: usize, out: &mut [f32]) {
+        let pts = self.frame(f);
+        let step = USER_POINTS as f32 / out.len() as f32;
+        for (i, o) in out.iter_mut().enumerate() {
+            let x = i as f32 * step;
+            let k = (x as usize).min(USER_POINTS - 1);
+            let (a, b) = (pts[k] as f32, pts[(k + 1) % USER_POINTS] as f32);
+            *o = (a + (b - a) * (x - k as f32)) / 127.0;
+        }
+    }
+}
+
+/// The wavetables a synth can play: the factory tables, generated on first
+/// use, followed by the patch's user tables.
 pub struct Bank {
     tables: Vec<Option<Rc<Wavetable>>>,
+    /// What the user tables were built from.
+    user: [UserTable; USER_TABLES],
+    work: Option<FrameBuilder>,
 }
+
+/// Number of factory tables. User table `slot` is table `FACTORY_TABLES + slot`.
+pub const FACTORY_TABLES: usize = crate::tables::TABLE_NAMES.len();
 
 impl Default for Bank {
     fn default() -> Self {
@@ -161,7 +257,7 @@ impl Default for Bank {
 
 impl Bank {
     pub fn new() -> Self {
-        Bank { tables: (0..crate::tables::TABLE_NAMES.len()).map(|_| None).collect() }
+        Bank { tables: (0..FACTORY_TABLES + USER_TABLES).map(|_| None).collect(), user: Default::default(), work: None }
     }
 
     pub fn count(&self) -> usize {
@@ -172,10 +268,50 @@ impl Bank {
     pub fn get(&mut self, index: usize) -> Rc<Wavetable> {
         let index = index.min(self.tables.len() - 1);
         if self.tables[index].is_none() {
-            let (frames, data) = crate::tables::generate(index);
+            let (frames, data) = if index < FACTORY_TABLES {
+                crate::tables::generate(index)
+            } else {
+                let user = &self.user[index - FACTORY_TABLES];
+                let mut data = vec![0.0f32; user.frames() * TABLE_SIZE];
+                for (f, frame) in data.chunks_mut(TABLE_SIZE).enumerate() {
+                    user.render(f, frame);
+                }
+                (user.frames(), data)
+            };
             self.tables[index] = Some(Rc::new(Wavetable::from_frames(&data, frames)));
         }
         self.tables[index].as_ref().unwrap().clone()
+    }
+
+    pub fn user(&self, slot: usize) -> &UserTable {
+        &self.user[slot]
+    }
+
+    /// Replaces a user table. Returns true if it changed. Only the frames
+    /// that differ are rebuilt when nobody else holds the table (callers
+    /// should let go of their `Rc` first); drawing changes one frame at a
+    /// time, and this keeps it cheap enough for the audio thread.
+    pub fn set_user(&mut self, slot: usize, table: &UserTable) -> bool {
+        if self.user[slot] == *table {
+            return false;
+        }
+        let index = FACTORY_TABLES + slot;
+        let old = std::mem::replace(&mut self.user[slot], table.clone());
+        let built = self.tables[index].as_mut().and_then(Rc::get_mut).filter(|_| old.frames() == table.frames());
+        match built {
+            Some(built) => {
+                let work = self.work.get_or_insert_with(FrameBuilder::new);
+                let mut cycle = vec![0.0f32; TABLE_SIZE];
+                for f in 0..table.frames() {
+                    if old.frame(f) != table.frame(f) {
+                        table.render(f, &mut cycle);
+                        built.set_frame(work, f, &cycle);
+                    }
+                }
+            }
+            None => self.tables[index] = None,
+        }
+        true
     }
 }
 
@@ -232,6 +368,76 @@ mod tests {
         assert_eq!(f[0], f[TABLE_SIZE]);
         assert_eq!(f[TABLE_SIZE + 1], f[1]);
         assert_eq!(f[TABLE_SIZE + 3], f[3]);
+    }
+
+    #[test]
+    fn user_table_default_is_a_sine_and_frames_are_validated() {
+        let t = UserTable::default();
+        assert_eq!(t.frames(), 1);
+        let mut cycle = vec![0.0f32; TABLE_SIZE];
+        t.render(0, &mut cycle);
+        for (i, v) in cycle.iter().enumerate() {
+            let sine = (TAU * i as f32 / TABLE_SIZE as f32).sin();
+            assert!((v - sine).abs() < 0.01, "sample {i}: {v} vs {sine}");
+        }
+        assert!(UserTable::new(&[]).is_none());
+        assert!(UserTable::new(&[0; USER_POINTS + 1]).is_none());
+        assert!(UserTable::new(&[0; USER_POINTS * (USER_MAX_FRAMES + 1)]).is_none());
+        assert_eq!(UserTable::new(&[0; USER_POINTS * 3]).unwrap().frames(), 3);
+    }
+
+    #[test]
+    fn user_tables_join_their_points_with_straight_lines() {
+        // A square drawn point by point keeps its steep edges.
+        let pts: Vec<i8> = (0..USER_POINTS).map(|i| if i < USER_POINTS / 2 { 127 } else { -127 }).collect();
+        let t = UserTable::new(&pts).unwrap();
+        let mut cycle = vec![0.0f32; TABLE_SIZE];
+        t.render(0, &mut cycle);
+        assert_eq!(cycle[0], 1.0);
+        assert_eq!(cycle[TABLE_SIZE / 4], 1.0);
+        assert_eq!(cycle[3 * TABLE_SIZE / 4], -1.0);
+        // The edge takes one point (16 samples); half way down it crosses zero.
+        let edge = TABLE_SIZE / 2 - TABLE_SIZE / USER_POINTS;
+        assert_eq!(cycle[edge], 1.0);
+        assert!(cycle[edge + 8].abs() < 1e-6);
+        // The last point leads back to the first.
+        assert!(cycle[TABLE_SIZE - 8].abs() < 1e-6);
+    }
+
+    #[test]
+    fn bank_serves_user_tables_and_rebuilds_only_what_changed() {
+        let mut bank = Bank::new();
+        assert_eq!(bank.count(), FACTORY_TABLES + USER_TABLES);
+        let index = FACTORY_TABLES + 1;
+        assert_eq!(bank.get(index).frames, 1);
+        assert!((bank.get(index).sample(0, 0.0, 0.25) - 1.0).abs() < 0.01, "a sine by default");
+
+        // Two frames: a sine and a square.
+        let mut pts = UserTable::default().points().to_vec();
+        pts.extend((0..USER_POINTS).map(|i| if i < USER_POINTS / 2 { 127i8 } else { -127 }));
+        let two = UserTable::new(&pts).unwrap();
+        assert!(bank.set_user(1, &two));
+        assert!(!bank.set_user(1, &two), "setting the same table again changes nothing");
+        let table = bank.get(index);
+        assert_eq!(table.frames, 2);
+        assert!(table.sample(0, 1.0, 0.75) < -0.8, "the square is the last frame");
+        drop(table);
+
+        // Changing one frame in place gives the same result as building anew.
+        pts[..USER_POINTS].iter_mut().for_each(|p| *p = 0);
+        pts[10] = 127;
+        let edited = UserTable::new(&pts).unwrap();
+        assert!(bank.set_user(1, &edited));
+        let mut fresh = Bank::new();
+        fresh.set_user(1, &edited);
+        let (a, b) = (bank.get(index), fresh.get(index));
+        for mip in [0, 5, NUM_MIPS - 1] {
+            for f in 0..2 {
+                assert_eq!(a.frame(mip, f), b.frame(mip, f), "mip {mip} frame {f}");
+            }
+        }
+        // The other user table is untouched.
+        assert_eq!(bank.get(FACTORY_TABLES).frames, 1);
     }
 
     #[test]

@@ -18,7 +18,7 @@ use crate::lfo::{LfoKind, LfoPoint};
 use crate::params::{self, defs, unit_key, DIVISIONS, FX_KEYS, NUM_ENV, NUM_FX, NUM_LFO, NUM_MACRO, NUM_OSC};
 use crate::patch::Patch;
 use crate::tables::TABLE_NAMES;
-use crate::wavetable::{Bank, TABLE_SIZE};
+use crate::wavetable::{Bank, FACTORY_TABLES, TABLE_SIZE, USER_TABLES};
 use value::{empty, map, Value};
 
 /// Folder (inside Serum's Tables folder) the exported wavetables belong in.
@@ -35,15 +35,24 @@ pub struct Export {
     pub bytes: Vec<u8>,
     /// What could not be translated exactly: `code` or `code\tdetail`.
     pub notes: Vec<String>,
-    /// Indices of the factory wavetables the preset refers to.
+    /// The wavetables the preset refers to, as indices into the bank.
     pub tables: Vec<usize>,
 }
 
-pub fn table_file_name(index: usize) -> String {
-    format!("{}.wav", TABLE_NAMES[index.min(TABLE_NAMES.len() - 1)])
+/// File name of a table of the bank. A user table is named after what is in
+/// it, so tables from different presets do not overwrite each other in
+/// Serum's folder.
+pub fn table_file_name(patch: &Patch, index: usize) -> String {
+    if index < FACTORY_TABLES {
+        return format!("{}.wav", TABLE_NAMES[index]);
+    }
+    let table = &patch.user_tables[(index - FACTORY_TABLES).min(USER_TABLES - 1)];
+    // FNV-1a over the points.
+    let hash = table.points().iter().fold(0x811c_9dc5u32, |h, p| (h ^ *p as u8 as u32).wrapping_mul(0x0100_0193));
+    format!("User {hash:08x}.wav")
 }
 
-/// A factory wavetable as a WAV file Serum can load.
+/// A wavetable of the bank as a WAV file Serum can load.
 pub fn table_wav(bank: &mut Bank, index: usize) -> Vec<u8> {
     let table = bank.get(index);
     let mut samples = vec![0.0f32; TABLE_FRAMES * TABLE_SIZE];
@@ -170,7 +179,7 @@ fn oscillator(c: &mut Ctx, o: usize, tables: &mut Vec<usize>) -> Value {
     let name = if o == 0 { "oscA" } else { "oscB" };
     let label = if o == 0 { "OSC A" } else { "OSC B" };
     let k = |p: &str| format!("{name}.{p}");
-    let table = c.v(&k("wt")) as usize;
+    let table = c.patch.table_index(o);
     if c.on(&k("on")) && !tables.contains(&table) {
         tables.push(table);
     }
@@ -231,7 +240,7 @@ fn oscillator(c: &mut Ctx, o: usize, tables: &mut Vec<usize>) -> Value {
             ("numChannels", Value::Int(1)),
             ("numFrames", Value::Int((TABLE_FRAMES * TABLE_SIZE) as i64)),
             ("plainParams", plain(wt)),
-            ("relativePathToWT", Value::from(format!("{TABLE_DIR}/{}", table_file_name(table)))),
+            ("relativePathToWT", Value::from(format!("{TABLE_DIR}/{}", table_file_name(c.patch, table)))),
             ("sampleRate", Value::Int(44_100)),
         ]),
     );
@@ -1205,6 +1214,28 @@ mod tests {
     }
 
     #[test]
+    fn user_tables_are_exported_under_a_name_of_their_own() {
+        let mut p = Patch::init();
+        set(&mut p, "oscA.userTable", 2.0);
+        let saw: Vec<i8> = (0..crate::wavetable::USER_POINTS).map(|i| (i as i32 * 2 - 127) as i8).collect();
+        p.user_tables[1] = crate::wavetable::UserTable::new(&saw).unwrap();
+        let (d, _, tables) = build(&p);
+        assert_eq!(tables, vec![FACTORY_TABLES + 1]);
+        let name = table_file_name(&p, FACTORY_TABLES + 1);
+        assert!(name.starts_with("User ") && name.ends_with(".wav") && name.len() == 17, "{name}");
+        assert_eq!(plain_of(&d, &["Oscillator0", "WTOsc0", "relativePathToWT"]), &Value::from(format!("seosynth/{name}")));
+        // Another drawing gets another name.
+        assert_ne!(table_file_name(&Patch::init(), FACTORY_TABLES + 1), name);
+        // The WAV carries the drawn shape: a rising saw.
+        let mut bank = Bank::new();
+        bank.set_user(1, &p.user_tables[1]);
+        let wav = table_wav(&mut bank, FACTORY_TABLES + 1);
+        let data = wav.windows(4).position(|w| w == b"data").unwrap() + 8;
+        let sample = |i: usize| f32::from_le_bytes(wav[data + i * 4..data + i * 4 + 4].try_into().unwrap());
+        assert!(sample(TABLE_SIZE / 4) < -0.3 && sample(3 * TABLE_SIZE / 4) > 0.3);
+    }
+
+    #[test]
     fn helper_laws() {
         assert!((comp_threshold_knob(0.0) - 0.0).abs() < 1e-6);
         assert!((comp_threshold_knob(-17.2) - 0.482).abs() < 1e-3);
@@ -1226,6 +1257,6 @@ mod tests {
         let data = wav.windows(4).position(|w| w == b"data").unwrap();
         let len = u32::from_le_bytes(wav[data + 4..data + 8].try_into().unwrap()) as usize;
         assert_eq!(len, TABLE_FRAMES * TABLE_SIZE * 4);
-        assert_eq!(table_file_name(0), "Basic Shapes.wav");
+        assert_eq!(table_file_name(&Patch::init(), 0), "Basic Shapes.wav");
     }
 }

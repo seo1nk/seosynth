@@ -99,6 +99,24 @@ export class EngineCore {
     this.x.lfo_shape_set(l, pts.length);
   }
 
+  // --- user wavetables --------------------------------------------------------
+  // A patch carries a few wavetables of its own (`info.userTables` of them).
+  // Each is 1..`info.userMaxFrames` frames of `info.userPoints` points, one
+  // signed byte per point. Where a table index is asked for (previewTable,
+  // tableFrames), user table `slot` is table `info.tables.length + slot`.
+
+  getUserTable(slot) {
+    const n = this.x.user_table_get(slot);
+    return new Int8Array(this.#bytes().subarray(0, n));
+  }
+  /** Returns false, changing nothing, if `points` is not whole frames. */
+  setUserTable(slot, points) {
+    const per = this.info.userPoints;
+    if (points.length % per !== 0 || points.length > per * this.info.userMaxFrames) return false;
+    this.#bytes().set(new Uint8Array(points.buffer, points.byteOffset, points.length));
+    return this.x.user_table_set(slot, points.length / per) === 1;
+  }
+
   /**
    * The effect chain: `order` lists every unit (as an index into `info.fx`)
    * in processing order, `lanes` gives the lane of each unit, indexed by
