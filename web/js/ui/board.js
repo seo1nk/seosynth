@@ -251,9 +251,15 @@ export class Board {
     });
   }
 
+  /** How many path nodes fit on one row at a readable size. */
+  #perRow() {
+    return Math.max(3, Math.floor((this.el.clientWidth / 0.92 - NW - 60) / (NW + GAP_X)));
+  }
+
   #resized() {
     const vertical = this.el.clientWidth < NARROW;
-    if (vertical !== this.vertical) this.layout(false);
+    // Opening or closing the panel changes the room: re-wrap the chain if needed.
+    if (vertical !== this.vertical || (!vertical && this.#perRow() !== this.perRow)) this.layout(!!this.pos.size);
     else if (!this.userMoved) this.fit(false);
   }
 
@@ -276,7 +282,7 @@ export class Board {
       SOURCES.forEach((id, i) => target.set(id, { x: 0, y: i * stepY }));
       const mainY = 1.5 * stepY;
       // A long chain wraps onto further rows so the nodes stay readable.
-      const perRow = Math.max(3, Math.floor((this.el.clientWidth / 0.92 - NW - 60) / stepX));
+      const perRow = (this.perRow = this.#perRow());
       path.forEach((id, n) => target.set(id, { x: ((n % perRow) + 1) * stepX, y: mainY + Math.floor(n / perRow) * (NH + ROW_GAP), row: Math.floor(n / perRow) }));
       const rows = Math.ceil(path.length / perRow);
       // Effects that are off wait below the path, five to a row.
@@ -386,8 +392,9 @@ export class Board {
       const badge = this.nodes.get(l.to).querySelector(`.buff[data-src="${l.key}"]`);
       return {
         ...l,
-        // Where the tag sits on its node, measured in layout pixels.
-        dx: badge.offsetLeft + badge.offsetWidth / 2 + badge.offsetParent.offsetLeft,
+        // Where the tag sits on its node, in layout pixels. (All zero while
+        // the board is not in the document yet; it lays out again once it is.)
+        dx: badge.offsetLeft + badge.offsetWidth / 2 + badge.parentElement.offsetLeft,
         badge,
         path: s('path', { class: 'tether', stroke: modColor(l.key) }),
         src: sources.indexOf(l.key),

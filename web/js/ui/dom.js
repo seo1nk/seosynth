@@ -76,7 +76,3 @@ export function setupCanvas(canvas, width, height) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   return ctx;
 }
-
-export function cssVar(name, el = document.documentElement) {
-  return getComputedStyle(el).getPropertyValue(name).trim();
-}

@@ -10,7 +10,7 @@ import { h, s, setupCanvas } from './dom.js';
 import { Slider, Stepper, Switch, Select, Segmented } from './controls.js';
 import { WavetableDisplay, FilterDisplay, EnvDisplay, LfoDisplay, LFO_SHAPE_POINTS, SpectrumDisplay, Meter } from './displays.js';
 import { colors, modColor } from '../theme.js';
-import { SOURCES, isFx, isMover, isOn, hasSwitch, moverKind, fxChain, taps, nodeOfParam, setOn, shiftFx } from './nodes.js';
+import { isFx, isMover, isOn, hasSwitch, moverKind, fxChain, taps, nodeOfParam, setOn, shiftFx } from './nodes.js';
 
 /** Shows `el` only while `predicate()` holds; re-checked when any of the
  * given parameters changes. */
@@ -409,5 +409,3 @@ export function buildPanel(app, id) {
   }
   return el;
 }
-
-export { SOURCES };

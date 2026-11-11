@@ -30,7 +30,7 @@ const UI = {
   // The settings panel
   'panel.on': ['オン', 'On'],
   'panel.more': ['くわしい設定', 'More settings'],
-  'panel.removeMover': ['{name} をボードから外す', 'Remove {name} from the board'],
+  'panel.removeMover': ['「{name}」をボードから外す', 'Remove {name} from the board'],
   'io.in': ['入る音', 'Sound in'],
   'io.out': ['出る音', 'Sound out'],
   'io.outOnly': ['このノードから出る音', 'Sound leaving this node'],
@@ -51,7 +51,7 @@ const UI = {
   // Connections between movers and sliders
   'mod.add': ['このスライダーを自動で動かす', 'Make this slider move by itself'],
   'mod.sentence': ['{src}が「{dst}」を動かす', '{src} moves {dst}'],
-  'mod.menuTitle': ['{name} を動かす', 'Move {name}'],
+  'mod.menuTitle': ['「{name}」を動かす', 'Move {name}'],
   'mod.choose': ['何で動かしますか', 'Move it with'],
   'reach.title': ['つないでいるスライダー', 'Connected sliders'],
   'reach.env1': ['このエンベロープでほかのスライダーも動かす', 'Move other sliders with this envelope too'],
@@ -611,7 +611,9 @@ export function createI18n(lang) {
       const [mod] = key.split('.');
       const node = mod === 'master' ? '' : mod === 'env1' ? api.nodeName('amp') : api.nodeName(mod);
       if (!node || node === mod) return label;
-      return lang === 'ja' ? `${node}の${label}` : `${node} ${label.charAt(0).toLowerCase()}${label.slice(1)}`;
+      // "オシレーター A の…": a space after a name that ends in a letter or digit.
+      const gap = /[A-Za-z0-9]$/.test(node) ? ' ' : '';
+      return lang === 'ja' ? `${node}${gap}の${label}` : `${node} ${label.charAt(0).toLowerCase()}${label.slice(1)}`;
     },
     sourceName: (key) => (SOURCE[key] ? SOURCE[key][0][li] : key),
     sourceHelp: (key) => (SOURCE[key] ? SOURCE[key][1][li] : ''),

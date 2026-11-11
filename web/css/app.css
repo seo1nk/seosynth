@@ -1051,6 +1051,7 @@ select {
 }
 .segmented button {
   flex: 1;
+  white-space: nowrap;
   padding: 6px 8px;
   border: 0;
   background: var(--paper);
@@ -1397,7 +1398,10 @@ input[type='range'] {
   font-size: 13px;
 }
 .menu-choice .segmented button {
-  padding: 4px 10px;
+  padding: 4px 12px;
+}
+.main-menu {
+  min-width: 290px;
 }
 .control-menu {
   width: min(340px, calc(100vw - 32px));
