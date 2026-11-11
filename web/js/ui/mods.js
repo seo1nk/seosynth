@@ -1,195 +1,85 @@
-// Modulation routing: connecting sources (envelopes, LFOs, macros...) to
-// knobs by drag and drop, and editing or removing those connections.
+// Connecting things that move (LFOs, envelopes, macros, how you play) to
+// sliders, and editing or removing those connections.
 
-import { h, clamp, drag } from './dom.js';
-import { SOURCE_COLORS } from './controls.js';
+import { h } from './dom.js';
+import { modColor } from '../theme.js';
+import { nodeOfParam, nodeOfSource, movableParams, movableNodes } from './nodes.js';
 
 export class Mods {
   constructor(app) {
     this.app = app;
-    this.assigning = 0;
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.assigning) this.#endAssign();
-    });
   }
 
-  #srcKey(src) {
+  key(src) {
     return this.app.store.info.sources[src];
+  }
+
+  color(src) {
+    return modColor(this.key(src));
   }
 
   describe(slot) {
     const { store, i18n } = this.app;
-    return `${i18n.sourceName(this.#srcKey(slot.src))} → ${i18n.paramTitle(store.def(slot.dst).key)}`;
+    return i18n.t('mod.sentence', { src: i18n.sourceName(this.key(slot.src)), dst: i18n.paramTitle(store.def(slot.dst).key) });
   }
 
-  /** Connects a source to a knob with a sensible starting amount. */
+  /** Connects a source to a slider with a sensible starting amount. */
   connect(src, dst) {
     const { store, i18n } = this.app;
-    if (!store.def(dst).mod) return;
-    const existing = store.slots.findIndex((s) => s.src === src && s.dst === dst);
-    if (existing < 0) {
-      // A knob near its top has no room to go up, so start by pulling it
+    if (!store.def(dst).mod) return false;
+    if (store.slots.findIndex((s) => s.src === src && s.dst === dst) < 0) {
+      // A slider near its top has no room to go up, so start by pulling it
       // down: otherwise the new connection would seem to do nothing.
       const amount = store.get(dst) > 0.7 ? -0.4 : 0.3;
       if (store.addMod(src, dst, amount, false) < 0) {
         this.app.toast(i18n.t('matrix.full'));
-        return;
+        return false;
       }
       store.commit();
     }
-    this.app.toast(
-      i18n.t('modhint.connected', { src: i18n.sourceName(this.#srcKey(src)), dst: i18n.paramTitle(store.def(dst).key) }),
-    );
-    this.app.flash(dst);
+    this.app.toast(this.describe({ src, dst }));
+    return true;
+  }
+
+  /** Removes every connection made by one source. */
+  disconnectAll(src) {
+    const { store } = this.app;
+    for (const slot of store.activeSlots()) if (slot.src === src) store.clearSlot(slot.index);
+    store.commit();
+  }
+
+  /** The coloured dot next to a slider for one connection. */
+  badge(index) {
+    const { store } = this.app;
+    const s = store.slots[index];
+    const el = h('button', {
+      type: 'button',
+      class: 'mod-badge',
+      style: { '--c': this.color(s.src) },
+      'aria-label': this.describe(s),
+      onclick: () => this.controlMenu(s.dst, el),
+    });
+    this.app.help.attach(el, () => {
+      const cur = store.slots[index];
+      if (!cur || cur.src === 0) return null;
+      return { title: this.describe(cur), body: this.app.i18n.t('hint.modAmount'), value: this.#amountText(cur) };
+    });
+    return el;
+  }
+
+  #amountText(s) {
+    return `${s.amount >= 0 ? '+' : ''}${Math.round(s.amount * 100)}%`;
   }
 
   /**
-   * The draggable ● of a modulation source. Drag it onto a knob, or click
-   * it and then click the knob.
+   * One editable line for a connection: how far it moves the slider, in
+   * which direction, and a button to remove it.
+   * `show` picks what the line is labelled with: the source or the target.
    */
-  sourceChip(srcKey, { label = false } = {}) {
-    const { store, i18n } = this.app;
-    const src = store.info.sources.indexOf(srcKey);
-    const name = i18n.sourceName(srcKey);
-    const el = h(
-      'button',
-      {
-        type: 'button',
-        class: `mod-src ${label ? 'with-label' : ''}`,
-        'aria-label': name,
-        dataset: { src },
-        style: { '--c': SOURCE_COLORS[src] },
-      },
-      h('span', { class: 'mod-src-dot' }),
-      label ? h('span', { class: 'mod-src-name' }, name) : null,
-    );
-    let ghost = null;
-    let target = null;
-    let moved = false;
-    const knobAt = (x, y) => document.elementFromPoint(x, y)?.closest?.('.knob[data-mod]') ?? null;
-    drag(el, {
-      onStart: (e) => {
-        moved = false;
-        target = null;
-        ghost = h('div', { class: 'mod-ghost', style: { '--c': SOURCE_COLORS[src] } }, h('span', { class: 'mod-src-dot' }), name);
-        document.body.append(ghost);
-        ghost.style.transform = `translate(${e.clientX + 10}px, ${e.clientY + 10}px)`;
-        this.app.root.classList.add('mod-dragging');
-        this.app.help.show({ title: name, body: i18n.t('modhint.drag') });
-        this.highlight(src);
-      },
-      onMove: (dx, dy, e) => {
-        if (Math.hypot(dx, dy) > 5) moved = true;
-        ghost.style.transform = `translate(${e.clientX + 10}px, ${e.clientY + 10}px)`;
-        const next = knobAt(e.clientX, e.clientY);
-        if (next !== target) {
-          target?.classList.remove('drop-hot');
-          target = next;
-          target?.classList.add('drop-hot');
-        }
-      },
-      onEnd: () => {
-        ghost?.remove();
-        ghost = null;
-        this.app.root.classList.remove('mod-dragging');
-        this.highlight(0);
-        if (target) {
-          target.classList.remove('drop-hot');
-          this.connect(src, Number(target.dataset.param));
-        } else if (!moved) {
-          this.#beginAssign(src);
-        }
-      },
-    });
-    el.addEventListener('pointerenter', () => !this.app.root.classList.contains('mod-dragging') && this.highlight(src));
-    el.addEventListener('pointerleave', () => !this.app.root.classList.contains('mod-dragging') && this.highlight(0));
-    this.app.help.attach(el, () => ({
-      title: name,
-      body: [i18n.sourceHelp(srcKey), i18n.t('hint.modSource', { name })].filter(Boolean).join(' '),
-    }));
-    return el;
-  }
-
-  /** Emphasises the wires of one source (0 = none). */
-  highlight(src) {
-    this.app.cables?.highlight(src);
-  }
-
-  // Click-to-assign, for touch screens and anyone who prefers not to drag.
-  #beginAssign(src) {
-    const { i18n } = this.app;
-    this.#endAssign();
-    this.assigning = src;
-    this.app.root.classList.add('mod-dragging');
-    this.app.toast(i18n.t('modhint.assign'), 6000);
-    this.highlight(src);
-    this.onAssignClick = (e) => {
-      const chip = e.target.closest?.('.mod-src');
-      if (chip) return; // picking another source restarts via its own handler
-      const knob = e.target.closest?.('.knob[data-mod]');
-      e.preventDefault();
-      e.stopPropagation();
-      const chosen = this.assigning;
-      this.#endAssign();
-      if (knob) this.connect(chosen, Number(knob.dataset.param));
-    };
-    // Capture phase so the knob itself does not start a drag.
-    document.addEventListener('pointerdown', this.onAssignClick, true);
-  }
-
-  #endAssign() {
-    if (!this.assigning) return;
-    this.assigning = 0;
-    document.removeEventListener('pointerdown', this.onAssignClick, true);
-    this.app.root.classList.remove('mod-dragging');
-    this.highlight(0);
-  }
-
-  /** The small coloured dot next to a knob for one routing. */
-  badge(index) {
-    const { store, i18n } = this.app;
-    const slot = () => store.slots[index];
-    const el = h('button', { type: 'button', class: 'mod-badge', style: { '--c': SOURCE_COLORS[slot().src] }, 'aria-label': this.describe(slot()) });
-    let start = 0;
-    drag(el, {
-      cursor: 'ns-resize',
-      onStart: (e) => {
-        e.stopPropagation();
-        start = slot().amount;
-      },
-      onMove: (_dx, dy, e) => {
-        const amount = clamp(start - dy / (e.shiftKey ? 800 : 120), -1, 1);
-        store.setSlot(index, { ...slot(), amount });
-        this.app.help.show(this.#badgeHelp(index));
-      },
-      onEnd: () => store.commit(),
-    });
-    el.addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      store.clearSlot(index);
-      store.commit();
-      this.app.toast(i18n.t('modhint.removed'));
-    });
-    el.addEventListener('pointerenter', () => this.highlight(slot().src));
-    el.addEventListener('pointerleave', () => this.highlight(0));
-    this.app.help.attach(el, () => this.#badgeHelp(index));
-    return el;
-  }
-
-  #badgeHelp(index) {
-    const s = this.app.store.slots[index];
-    if (!s || s.src === 0) return null;
-    return {
-      title: this.describe(s),
-      body: this.app.i18n.t('hint.modAmount'),
-      value: `${s.amount >= 0 ? '+' : ''}${Math.round(s.amount * 100)}%${s.bipolar ? ' ±' : ''}`,
-    };
-  }
-
-  /** One editable line for a routing: amount slider, direction, remove. */
-  routingRow(index, { showTarget = true } = {}) {
+  routingRow(index, { show = 'both' } = {}) {
     const { store, i18n } = this.app;
     const s = store.slots[index];
+    const amount = h('output', { class: 'route-amount' }, this.#amountText(s));
     const slider = h('input', {
       type: 'range',
       min: -100,
@@ -198,123 +88,179 @@ export class Mods {
       value: Math.round(s.amount * 100),
       'aria-label': i18n.t('matrix.amount'),
       oninput: () => {
-        store.setSlot(index, { ...store.slots[index], amount: Number(slider.value) / 100 });
-        amount.textContent = `${slider.value > 0 ? '+' : ''}${slider.value}%`;
+        const next = { ...store.slots[index], amount: Number(slider.value) / 100 };
+        store.setSlot(index, next);
+        amount.textContent = this.#amountText(next);
       },
       onchange: () => store.commit(),
     });
-    const amount = h('span', { class: 'route-amount' }, `${s.amount >= 0 ? '+' : ''}${Math.round(s.amount * 100)}%`);
-    const bipolar = h(
+    const both = h(
       'button',
       {
         type: 'button',
-        class: `toggle small ${s.bipolar ? 'on' : ''}`,
+        class: 'chip-toggle',
+        'aria-pressed': String(s.bipolar),
         title: i18n.t('matrix.bipolar.help'),
         onclick: () => {
           const cur = store.slots[index];
           store.setSlot(index, { ...cur, bipolar: !cur.bipolar });
-          bipolar.classList.toggle('on', !cur.bipolar);
+          both.setAttribute('aria-pressed', String(!cur.bipolar));
           store.commit();
         },
       },
-      '±',
+      i18n.t('matrix.bipolar'),
     );
+    const sourceKey = this.key(s.src);
+    const targetKey = store.def(s.dst).key;
+    const link = (text, node) => h('button', { type: 'button', class: 'link', onclick: () => this.app.select(node) }, text);
+    const name =
+      show === 'source'
+        ? link(i18n.sourceName(sourceKey), nodeOfSource(sourceKey))
+        : show === 'target'
+          ? link(i18n.paramTitle(targetKey), nodeOfParam(targetKey))
+          : h('span', {}, this.describe(s));
     return h(
       'div',
-      { class: 'route-row', style: { '--c': SOURCE_COLORS[s.src] } },
-      h('span', { class: 'mod-src-dot' }),
-      h('span', { class: 'route-name' }, showTarget ? this.describe(s) : i18n.sourceName(this.#srcKey(s.src))),
-      slider,
-      amount,
-      bipolar,
+      { class: 'route-row', style: { '--c': this.color(s.src) } },
+      h('div', { class: 'route-head' }, h('span', { class: 'mod-dot' }), h('span', { class: 'route-name' }, name), amount),
       h(
-        'button',
-        {
-          type: 'button',
-          class: 'icon-btn',
-          title: i18n.t('matrix.remove'),
-          'aria-label': i18n.t('matrix.remove'),
-          onclick: () => {
-            store.clearSlot(index);
-            store.commit();
+        'div',
+        { class: 'route-controls' },
+        slider,
+        both,
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'icon-btn',
+            title: i18n.t('matrix.remove'),
+            'aria-label': i18n.t('matrix.remove'),
+            onclick: () => {
+              store.clearSlot(index);
+              store.commit();
+            },
           },
-        },
-        '×',
+          '×',
+        ),
       ),
     );
   }
 
-  /** Right-click menu of a knob. */
-  knobMenu(i, anchor) {
-    const { store, i18n } = this.app;
-    const p = store.def(i);
-    const body = h('div', { class: 'menu' });
-    const sig = () => store.modsFor(i).map((m) => `${m.index}:${m.src}`).join();
+  /**
+   * A list of connections that keeps itself up to date.
+   * `filter(slot)` picks which ones; `empty` is shown when there are none.
+   */
+  routeList({ filter, show, empty }) {
+    const { store } = this.app;
+    const list = h('div', { class: 'route-list' });
     let last = null;
     const render = () => {
-      if (sig() === last) return;
-      last = sig();
-      const mods = store.modsFor(i);
-      const items = [
-        h('div', { class: 'menu-title' }, i18n.paramTitle(p.key)),
-        h('button', { type: 'button', class: 'menu-item', onclick: () => { store.reset(i); store.commit(); close(); } }, i18n.t('menu.reset')),
-        p.curve === 'bool' || p.curve === 'enum'
-          ? null
-          : h('button', { type: 'button', class: 'menu-item', onclick: () => { close(); this.#enterValue(i); } }, i18n.t('menu.enter')),
-        mods.length ? h('div', { class: 'menu-sub' }, i18n.t('menu.mods')) : null,
-        mods.map((m) => this.routingRow(m.index, { showTarget: false })),
-        p.mod ? h('div', { class: 'menu-sub' }, i18n.t('menu.addMod')) : null,
-        p.mod
-          ? h(
-              'div',
-              { class: 'menu-sources' },
-              store.info.sources.slice(1).map((key, k) =>
-                h(
-                  'button',
-                  { type: 'button', class: 'menu-source', style: { '--c': SOURCE_COLORS[k + 1] }, onclick: () => this.connect(k + 1, i) },
-                  h('span', { class: 'mod-src-dot' }),
-                  i18n.sourceName(key),
-                ),
-              ),
-            )
-          : null,
-      ];
-      body.replaceChildren(...items.flat().filter(Boolean));
+      const slots = store.activeSlots().filter(filter);
+      const sig = slots.map((m) => `${m.index}:${m.src}:${m.dst}`).join();
+      if (sig === last) return;
+      last = sig;
+      list.replaceChildren(...(slots.length ? slots.map((m) => this.routingRow(m.index, { show })) : empty ? [h('p', { class: 'empty' }, empty)] : []));
     };
     render();
-    const off = store.on('slots', render);
-    const close = this.app.popover(anchor, body, { onClose: off });
+    return { el: list, render };
   }
 
-  #enterValue(i) {
+  /**
+   * "Connect to..." form for a source: pick a node, then one of its sliders.
+   * This is how a mover is tied to a node of the signal path.
+   */
+  linkForm(sourceKey) {
     const { store, i18n } = this.app;
-    const text = window.prompt(`${i18n.paramTitle(store.def(i).key)} — ${i18n.t('menu.enter.prompt')}`, String(Number(store.getPlain(i).toPrecision(5))));
+    const src = store.info.sources.indexOf(sourceKey);
+    const nodes = movableNodes(store).filter((id) => movableParams(store, id).length);
+    const nodeSel = h('select', { 'aria-label': i18n.t('link.node') }, nodes.map((id) => h('option', { value: id }, i18n.nodeName(id))));
+    const paramSel = h('select', { 'aria-label': i18n.t('link.param') });
+    const fill = () => {
+      paramSel.replaceChildren(...movableParams(store, nodeSel.value).map((p) => h('option', { value: p.i }, i18n.paramLabel(p.key))));
+    };
+    nodeSel.addEventListener('change', fill);
+    // Start on the filter cutoff: the classic first thing to move.
+    if (nodes.includes('filter')) nodeSel.value = 'filter';
+    fill();
+    const cutoff = [...paramSel.options].find((o) => store.def(Number(o.value)).key === 'filter.cutoff');
+    if (cutoff) paramSel.value = cutoff.value;
+    return h(
+      'form',
+      {
+        class: 'link-form',
+        onsubmit: (e) => {
+          e.preventDefault();
+          this.connect(src, Number(paramSel.value));
+        },
+      },
+      h('label', {}, h('span', {}, i18n.t('link.node')), nodeSel),
+      h('label', {}, h('span', {}, i18n.t('link.param')), paramSel),
+      h('button', { type: 'submit', class: 'btn primary' }, i18n.t('link.connect')),
+    );
+  }
+
+  /** "What moves this slider" pop-over, opened from the + next to it. */
+  controlMenu(i, anchor) {
+    const { store, i18n } = this.app;
+    const p = store.def(i);
+    const routes = this.routeList({ filter: (s) => s.dst === i, show: 'source' });
+    const choices = h('div', { class: 'source-list' });
+    const renderChoices = () => {
+      const taken = new Set(store.modsFor(i).map((m) => m.src));
+      choices.replaceChildren(
+        ...store.info.sources
+          .slice(1)
+          .map((key, k) =>
+            taken.has(k + 1)
+              ? null
+              : h(
+                  'button',
+                  { type: 'button', class: 'source-choice', style: { '--c': this.color(k + 1) }, onclick: () => this.connect(k + 1, i) },
+                  h('span', { class: 'mod-dot' }),
+                  h('span', { class: 'source-name' }, i18n.sourceName(key)),
+                  h('span', { class: 'source-what' }, i18n.sourceHelp(key)),
+                ),
+          )
+          .filter(Boolean),
+      );
+    };
+    renderChoices();
+    const body = h(
+      'div',
+      { class: 'menu control-menu' },
+      h('div', { class: 'menu-title' }, i18n.t('mod.menuTitle', { name: i18n.paramTitle(p.key) })),
+      routes.el,
+      h('div', { class: 'menu-sub' }, i18n.t('mod.choose')),
+      choices,
+      h('div', { class: 'menu-rule' }),
+      h('button', { type: 'button', class: 'menu-item', onclick: () => { store.reset(i); store.commit(); } }, i18n.t('menu.reset')),
+    );
+    const off = store.on('slots', () => {
+      routes.render();
+      renderChoices();
+    });
+    this.app.popover(anchor, body, { onClose: off });
+  }
+
+  enterValue(i) {
+    const { store, i18n } = this.app;
+    const p = store.def(i);
+    if (p.curve === 'bool' || p.curve === 'enum') return;
+    const shown = p.unit === '%' ? store.getPlain(i) * 100 : store.getPlain(i);
+    const text = window.prompt(`${i18n.paramTitle(p.key)}: ${i18n.t('menu.enter.prompt')}`, String(Number(shown.toPrecision(5))));
     if (text === null) return;
     const v = Number(String(text).replace(',', '.').replace(/[^0-9eE+\-.]/g, ''));
     if (Number.isFinite(v)) {
-      const p = store.def(i);
-      // Percent parameters are typed as 0..100.
       store.setPlain(i, p.unit === '%' ? v / 100 : v);
       store.commit();
     }
   }
 
-  /** The list of all routings in plain words. */
+  /** Every connection in the sound, in plain sentences. */
   matrixPanel() {
     const { store, i18n } = this.app;
-    const list = h('div', { class: 'route-list' });
-    let last = null;
-    const render = () => {
-      const slots = store.activeSlots();
-      const sig = slots.map((m) => `${m.index}:${m.src}:${m.dst}`).join();
-      if (sig === last) return;
-      last = sig;
-      list.replaceChildren(
-        ...(slots.length ? slots.map((m) => this.routingRow(m.index)) : [h('p', { class: 'empty' }, i18n.t('matrix.empty'))]),
-      );
-    };
-    render();
-    const off = store.on('slots', render);
-    this.app.dialog(i18n.t('matrix.title'), list, { onClose: off, wide: true });
+    const routes = this.routeList({ filter: () => true, show: 'both', empty: i18n.t('matrix.empty') });
+    const off = store.on('slots', routes.render);
+    this.app.dialog(i18n.t('matrix.title'), routes.el, { onClose: off, wide: true });
   }
 }

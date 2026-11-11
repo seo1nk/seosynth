@@ -3,6 +3,7 @@
 
 import { h, clamp } from './dom.js';
 import { noteName } from '../format.js';
+import { Slider, Switch } from './controls.js';
 
 const LOW = 36; // C2
 const KEYS = 49; // four octaves and a top C
@@ -157,9 +158,8 @@ export class Keyboard {
     };
     piano.addEventListener('pointerup', up);
     piano.addEventListener('pointercancel', up);
-    this.app.help.attach(piano, () => ({ title: i18n.lang === 'ja' ? '鍵盤' : 'Keyboard', body: `${i18n.t('kb.hint')}　${i18n.t('kb.velocity')}` }));
 
-    const octLabel = h('span', { class: 'readout' }, 'C3');
+    const octLabel = h('output', { class: 'kb-octave' }, 'C3');
     const shift = (d) => {
       this.allOff();
       this.octave = clamp(this.octave + d, -2, 3);
@@ -171,14 +171,29 @@ export class Keyboard {
     };
     this.shiftOctave = shift;
 
-    const holdBtn = h('button', { type: 'button', class: 'toggle', onclick: () => {
-      this.hold = !this.hold;
-      holdBtn.classList.toggle('on', this.hold);
-      if (!this.hold) this.allOff();
-    } }, i18n.t('btn.hold'));
-    this.demoBtn = h('button', { type: 'button', class: 'toggle demo-btn', onclick: () => this.toggleDemo() }, `▶ ${i18n.t('btn.demo')}`);
-    this.midiBtn = h('button', { type: 'button', class: 'toggle', onclick: () => this.#connectMidi() }, i18n.t('kb.midi'));
-    const bend = h('input', { type: 'range', class: 'bend', min: -100, max: 100, value: 0, 'aria-label': i18n.sourceName('pitchBend'),
+    const holdBtn = h(
+      'button',
+      {
+        type: 'button',
+        class: 'chip-toggle',
+        'aria-pressed': 'false',
+        title: i18n.t('kb.hold.help'),
+        onclick: () => {
+          this.hold = !this.hold;
+          holdBtn.setAttribute('aria-pressed', String(this.hold));
+          if (!this.hold) this.allOff();
+        },
+      },
+      i18n.t('btn.hold'),
+    );
+    this.midiBtn = h('button', { type: 'button', class: 'chip-toggle', 'aria-pressed': 'false', onclick: () => this.#connectMidi() }, i18n.t('kb.midi'));
+    const bend = h('input', {
+      type: 'range',
+      class: 'bend',
+      min: -100,
+      max: 100,
+      value: 0,
+      'aria-label': i18n.sourceName('pitchBend'),
       oninput: () => this.app.audio.post(['bend', Number(bend.value) / 100]),
     });
     const spring = () => {
@@ -187,7 +202,34 @@ export class Keyboard {
     };
     bend.addEventListener('pointerup', spring);
     bend.addEventListener('keyup', spring);
-    this.app.help.attach(bend, () => ({ title: i18n.sourceName('pitchBend'), body: i18n.paramHelp('master.bendRange') }));
+
+    // How the instrument answers the keys: these belong with the keyboard.
+    const settings = h(
+      'button',
+      {
+        type: 'button',
+        class: 'chip-toggle',
+        'aria-haspopup': 'true',
+        onclick: () => {
+          const app = this.app;
+          const [content, scope] = app.inScope(() =>
+            h(
+              'div',
+              { class: 'menu play-settings' },
+              h('div', { class: 'menu-title' }, i18n.t('kb.settings')),
+              Switch(app, 'master.mono'),
+              Switch(app, 'master.legato'),
+              Slider(app, 'master.porta'),
+              Switch(app, 'master.portaAlways'),
+              Slider(app, 'master.voices'),
+              Slider(app, 'master.bendRange'),
+            ),
+          );
+          app.popover(settings, content, { onClose: () => scope.dispose() });
+        },
+      },
+      i18n.t('kb.settings'),
+    );
 
     return h(
       'div',
@@ -195,14 +237,16 @@ export class Keyboard {
       h(
         'div',
         { class: 'kb-side' },
-        h('div', { class: 'kb-row' }, this.demoBtn, holdBtn),
-        h('div', { class: 'kb-row' },
-          h('button', { type: 'button', class: 'step', 'aria-label': `${i18n.t('kb.octave')} −`, onclick: () => shift(-1) }, '‹'),
+        h(
+          'div',
+          { class: 'kb-row' },
+          h('span', { class: 'ctl-label' }, i18n.t('kb.octave')),
+          h('button', { type: 'button', class: 'step', 'aria-label': i18n.t('kb.octave.down'), onclick: () => shift(-1) }, '‹'),
           octLabel,
-          h('button', { type: 'button', class: 'step', 'aria-label': `${i18n.t('kb.octave')} +`, onclick: () => shift(1) }, '›'),
-          this.midiBtn,
+          h('button', { type: 'button', class: 'step', 'aria-label': i18n.t('kb.octave.up'), onclick: () => shift(1) }, '›'),
         ),
-        h('div', { class: 'kb-row' }, h('span', { class: 'knob-label' }, 'BEND'), bend),
+        h('div', { class: 'kb-row' }, holdBtn, this.midiBtn, settings),
+        h('label', { class: 'kb-row' }, h('span', { class: 'ctl-label' }, i18n.sourceName('pitchBend')), bend),
       ),
       piano,
     );
@@ -264,7 +308,7 @@ export class Keyboard {
           input.onmidimessage = (e) => this.#midi(e.data);
           count++;
         }
-        this.midiBtn.classList.toggle('on', count > 0);
+        this.midiBtn.setAttribute('aria-pressed', String(count > 0));
         return count;
       };
       access.onstatechange = attach;
@@ -298,8 +342,7 @@ export class Keyboard {
     this.app.audio.resume();
     const state = { step: 0, next: performance.now() + 60, timers: new Set(), sounding: [] };
     this.demo = state;
-    this.demoBtn.classList.add('on');
-    this.demoBtn.textContent = `■ ${this.app.i18n.t('btn.demo')}`;
+    this.app.onDemo?.(true);
     const tick = () => {
       if (this.demo !== state) return;
       const phrase = PHRASES[this.app.demoPhrase?.() ?? 'arp'] ?? PHRASES.arp;
@@ -328,8 +371,7 @@ export class Keyboard {
     clearTimeout(this.demo.timer);
     for (const t of this.demo.timers) clearTimeout(t);
     this.demo = null;
-    this.demoBtn?.classList.remove('on');
-    if (this.demoBtn) this.demoBtn.textContent = `▶ ${this.app.i18n.t('btn.demo')}`;
+    this.app.onDemo?.(false);
     this.allOff();
   }
 }

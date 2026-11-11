@@ -2,12 +2,13 @@
 // and the small oscilloscopes that show the signal along the chain.
 
 import { h, clamp, drag, setupCanvas } from './dom.js';
-import { SOURCE_COLORS } from './controls.js';
+import { colors, alpha, modColor } from '../theme.js';
 import { TAP_WINDOW } from '../engine/audio.js';
 
-const INK = '#e6e8ee';
-const DIM = 'rgba(230,232,238,0.16)';
-const GRID = 'rgba(230,232,238,0.07)';
+// Colours come from the theme at draw time so both themes work.
+const ink = () => colors().ink;
+const grid = () => alpha(colors().ink, 0.09);
+const handleFill = () => colors().paper;
 
 /**
  * A canvas that fills its container and redraws when asked or resized.
@@ -33,11 +34,6 @@ function autoCanvas(className, draw) {
     redraw();
   }).observe(el);
   return { el, canvas, redraw, size: () => [w, hgt] };
-}
-
-function hexAlpha(hex, a) {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +85,7 @@ export function WavetableDisplay(app, name, color) {
         if (j) ctx.lineTo(x, y);
         else ctx.moveTo(x, y);
       }
-      ctx.strokeStyle = hexAlpha(color, 0.1 + 0.16 * (1 - Math.abs(t - pos)));
+      ctx.strokeStyle = alpha(color, 0.16 + 0.22 * (1 - Math.abs(t - pos)));
       ctx.stroke();
     }
     // The waveform that is actually playing, including warp.
@@ -104,23 +100,20 @@ export function WavetableDisplay(app, name, color) {
     }
     ctx.strokeStyle = color;
     ctx.lineWidth = 1.8;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 6;
     ctx.stroke();
-    ctx.shadowBlur = 0;
     ctx.lineTo(ox + fw, oy);
     ctx.lineTo(ox, oy);
     ctx.closePath();
-    ctx.fillStyle = hexAlpha(color, 0.12);
+    ctx.fillStyle = alpha(color, 0.12);
     ctx.fill();
   });
 
   // Anything that changes the picture: this oscillator's shape parameters,
   // and the other oscillator when it is used as an FM/AM/RM source.
   for (const p of store.params) {
-    if (/^osc[AB]\.(wt|pos|warp|warpAmt|oct|semi|coarse|on)$/.test(p.key)) store.watch(p.i, () => (dirty = true));
+    if (/^osc[AB]\.(wt|pos|warp|warpAmt|oct|semi|coarse|on)$/.test(p.key)) app.watch(p.i, () => (dirty = true));
   }
-  store.on('patch', () => (dirty = true));
+  app.on('patch', () => (dirty = true));
   app.onFrame((live) => {
     const pos = live.param(iPos);
     const amt = live.param(iAmt);
@@ -166,10 +159,10 @@ export function FilterDisplay(app, prefix, color) {
   const dy = (db, hgt) => ((DB_TOP - db) / (DB_TOP - DB_BOTTOM)) * hgt;
 
   const view = autoCanvas('filter-display', (ctx, w, hgt) => {
-    ctx.strokeStyle = GRID;
+    ctx.strokeStyle = grid();
     ctx.lineWidth = 1;
-    ctx.fillStyle = 'rgba(230,232,238,0.3)';
-    ctx.font = '9px system-ui, sans-serif';
+    ctx.fillStyle = alpha(colors().muted, 0.9);
+    ctx.font = '10px sans-serif';
     for (const [f, label] of [[100, '100'], [1000, '1k'], [10000, '10k']]) {
       const x = Math.round(fx(f, w)) + 0.5;
       ctx.beginPath();
@@ -191,8 +184,8 @@ export function FilterDisplay(app, prefix, color) {
     const hx = fx(cutoff, w);
     if (!resp) {
       // Not a classic filter: no curve to show, just mark the frequency.
-      ctx.fillStyle = hexAlpha(color, 0.7);
-      ctx.font = '11px system-ui, sans-serif';
+      ctx.fillStyle = alpha(color, 0.7);
+      ctx.font = '12px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(i18n.option(store.def(iType).options[type]), w / 2, hgt / 2 - 4);
       ctx.textAlign = 'left';
@@ -219,22 +212,22 @@ export function FilterDisplay(app, prefix, color) {
     ctx.lineTo(0, hgt);
     ctx.closePath();
     const grad = ctx.createLinearGradient(0, 0, 0, hgt);
-    grad.addColorStop(0, hexAlpha(color, 0.3));
-    grad.addColorStop(1, hexAlpha(color, 0.02));
+    grad.addColorStop(0, alpha(color, 0.3));
+    grad.addColorStop(1, alpha(color, 0.02));
     ctx.fillStyle = grad;
     ctx.fill();
     // Handle on the curve at the cutoff.
     ctx.beginPath();
     ctx.arc(clamp(hx, 5, w - 5), clamp(hy, 5, hgt - 5), 4.5, 0, Math.PI * 2);
-    ctx.fillStyle = '#14161c';
+    ctx.fillStyle = handleFill();
     ctx.fill();
-    ctx.strokeStyle = INK;
+    ctx.strokeStyle = ink();
     ctx.lineWidth = 1.6;
     ctx.stroke();
   });
 
-  for (const i of [iType, iCut, iRes, iVar]) store.watch(i, () => (dirty = true));
-  store.on('patch', () => (dirty = true));
+  for (const i of [iType, iCut, iRes, iVar]) app.watch(i, () => (dirty = true));
+  app.on('patch', () => (dirty = true));
   let skip = false;
   app.onFrame((live) => {
     const now = [live.param(iCut), live.param(iRes), live.param(iVar)];
@@ -327,10 +320,10 @@ export function EnvDisplay(app, e, color) {
     ctx.stroke();
     ctx.lineTo(g.x0, g.bottom);
     ctx.closePath();
-    ctx.fillStyle = hexAlpha(color, 0.13);
+    ctx.fillStyle = alpha(color, 0.13);
     ctx.fill();
     // "Key held" region marker.
-    ctx.strokeStyle = GRID;
+    ctx.strokeStyle = grid();
     ctx.setLineDash([2, 3]);
     ctx.beginPath();
     ctx.moveTo(g.xS + 0.5, g.top);
@@ -340,16 +333,16 @@ export function EnvDisplay(app, e, color) {
     for (const [x, y] of handles(g)) {
       ctx.beginPath();
       ctx.arc(x, y, 3.8, 0, Math.PI * 2);
-      ctx.fillStyle = '#14161c';
+      ctx.fillStyle = handleFill();
       ctx.fill();
-      ctx.strokeStyle = INK;
+      ctx.strokeStyle = ink();
       ctx.lineWidth = 1.4;
       ctx.stroke();
     }
     if (playhead) {
       ctx.beginPath();
       ctx.arc(playhead[0], playhead[1], 3.2, 0, Math.PI * 2);
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = ink();
       ctx.shadowColor = color;
       ctx.shadowBlur = 10;
       ctx.fill();
@@ -363,8 +356,8 @@ export function EnvDisplay(app, e, color) {
     [g.xR, g.bottom],
   ];
 
-  for (const i of Object.values(idx)) store.watch(i, () => (dirty = true));
-  store.on('patch', () => (dirty = true));
+  for (const i of Object.values(idx)) app.watch(i, () => (dirty = true));
+  app.on('patch', () => (dirty = true));
 
   app.onFrame((live) => {
     let next = null;
@@ -438,7 +431,7 @@ export const LFO_SHAPE_POINTS = {
 
 export function LfoDisplay(app, l) {
   const { store, core, i18n } = app;
-  const color = SOURCE_COLORS[4 + l];
+  const color = modColor(`lfo${l + 1}`);
   const iShape = store.idx(`lfo${l + 1}.shape`);
   const shapeDef = store.def(iShape);
   const CUSTOM = shapeDef.options.indexOf('Custom');
@@ -452,7 +445,7 @@ export function LfoDisplay(app, l) {
   const py = (y, hgt) => hgt - PAD - y * (hgt - PAD * 2);
 
   const view = autoCanvas('lfo-display', (ctx, w, hgt) => {
-    ctx.strokeStyle = GRID;
+    ctx.strokeStyle = grid();
     ctx.lineWidth = 1;
     for (let k = 1; k < 4; k++) {
       const x = Math.round(px(k / 4, w)) + 0.5;
@@ -477,22 +470,22 @@ export function LfoDisplay(app, l) {
     ctx.lineTo(px(1, w), hgt - PAD);
     ctx.lineTo(px(0, w), hgt - PAD);
     ctx.closePath();
-    ctx.fillStyle = hexAlpha(color, 0.12);
+    ctx.fillStyle = alpha(color, 0.12);
     ctx.fill();
     if (isCustom()) {
       for (const p of points) {
         ctx.beginPath();
         ctx.arc(px(p.x, w), py(p.y, hgt), 3.6, 0, Math.PI * 2);
-        ctx.fillStyle = '#14161c';
+        ctx.fillStyle = handleFill();
         ctx.fill();
-        ctx.strokeStyle = INK;
+        ctx.strokeStyle = ink();
         ctx.lineWidth = 1.4;
         ctx.stroke();
       }
     }
     if (head) {
       const x = px(head[0], w);
-      ctx.strokeStyle = hexAlpha(color, 0.45);
+      ctx.strokeStyle = alpha(color, 0.45);
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(x, PAD);
@@ -500,7 +493,7 @@ export function LfoDisplay(app, l) {
       ctx.stroke();
       ctx.beginPath();
       ctx.arc(x, py(head[1], hgt), 3.2, 0, Math.PI * 2);
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = ink();
       ctx.shadowColor = color;
       ctx.shadowBlur = 10;
       ctx.fill();
@@ -512,9 +505,9 @@ export function LfoDisplay(app, l) {
     points = store.getLfoShape(l);
     dirty = true;
   };
-  store.watch(iShape, () => (dirty = true));
-  store.on('lfo', (which) => which === l && refresh());
-  store.on('patch', refresh);
+  app.watch(iShape, () => (dirty = true));
+  app.on('lfo', (which) => which === l && refresh());
+  app.on('patch', refresh);
 
   app.onFrame((live) => {
     const next = live.active ? [live.lfoPhase(l), live.lfoVal(l)] : null;
@@ -615,12 +608,16 @@ export class ScopeBank {
     this.window = [TAP_WINDOW - 256, 256];
   }
 
-  /** Adds a scope for tap `index`. Returns its element. */
-  add(index, color, className = 'mini-scope') {
+  /** Adds a scope for tap `index`. Returns its element. The scope is
+   * dropped again when the part of the UI that created it is disposed. */
+  add(index, className = 'mini-scope', color = null) {
     const scope = { index, color };
     const view = autoCanvas(className, (ctx, w, hgt) => this.#draw(ctx, w, hgt, scope));
     scope.view = view;
     this.scopes.push(scope);
+    this.app.onDispose(() => {
+      this.scopes = this.scopes.filter((sc) => sc !== scope);
+    });
     return view.el;
   }
 
@@ -673,7 +670,7 @@ export class ScopeBank {
 
   #draw(ctx, w, hgt, scope) {
     const mid = hgt / 2;
-    ctx.strokeStyle = DIM;
+    ctx.strokeStyle = alpha(colors().ink, 0.14);
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(0, Math.round(mid) + 0.5);
@@ -697,15 +694,15 @@ export class ScopeBank {
       if (j) ctx.lineTo(x, y);
       else ctx.moveTo(x, y);
     }
-    ctx.strokeStyle = scope.color;
-    ctx.lineWidth = 1.3;
+    ctx.strokeStyle = scope.color ?? colors().sound;
+    ctx.lineWidth = 1.5;
     ctx.lineJoin = 'round';
     ctx.stroke();
   }
 }
 
 /** Spectrum of the final output (log frequency axis). */
-export function SpectrumDisplay(app, color) {
+export function SpectrumDisplay(app) {
   let data = null;
   const view = autoCanvas('spectrum', (ctx, w, hgt) => {
     const analyser = app.audio.analyser;
@@ -714,7 +711,7 @@ export function SpectrumDisplay(app, color) {
     analyser.getByteFrequencyData(data);
     const nyquist = app.audio.sampleRate / 2;
     const bars = Math.max(16, Math.floor(w / 3));
-    ctx.fillStyle = hexAlpha(color, 0.75);
+    ctx.fillStyle = alpha(colors().sound, 0.8);
     for (let b = 0; b < bars; b++) {
       const f0 = F_MIN * Math.pow(F_MAX / F_MIN, b / bars);
       const f1 = F_MIN * Math.pow(F_MAX / F_MIN, (b + 1) / bars);
@@ -744,7 +741,7 @@ export function Meter(app) {
       held[k] = Math.max(p, held[k] * 0.93);
       // -48 dB .. 0 dB across the bar.
       const db = 20 * Math.log10(Math.max(held[k], 1e-4));
-      bars[k].style.transform = `scaleY(${clamp((db + 48) / 48)})`;
+      bars[k].style.transform = `scaleX(${clamp((db + 48) / 48)})`;
       bars[k].classList.toggle('hot', held[k] > 0.92);
     });
   });

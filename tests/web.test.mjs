@@ -26,8 +26,17 @@ test('every parameter has a label and help text in both languages', async () => 
       assert.ok(i18n.paramHelp(p.key).length > 0, `no ${lang} help for ${p.key}`);
       assert.ok(!i18n.paramTitle(p.key).includes('undefined'));
     }
-    for (const key of store.info.sources) assert.notEqual(i18n.sourceName(key), '', key);
-    for (const key of store.info.fx) assert.notEqual(i18n.fxName(key), key, `no ${lang} name for effect ${key}`);
+    for (const key of store.info.sources.slice(1)) {
+      assert.notEqual(i18n.sourceName(key), key, `no ${lang} name for source ${key}`);
+      assert.ok(i18n.sourceHelp(key).length > 0, `no ${lang} description for source ${key}`);
+    }
+    for (const key of ['oscA', 'oscB', 'sub', 'noise', 'filter', 'amp', 'out', ...store.info.fx]) {
+      assert.notEqual(i18n.nodeName(key), key, `no ${lang} name for node ${key}`);
+      assert.ok(i18n.nodeRole(key).length > 0, `no ${lang} role for node ${key}`);
+      assert.ok(i18n.nodeAbout(key).length > 0, `no ${lang} explanation for node ${key}`);
+    }
+    // English labels are sentence case, not shouting.
+    if (lang === 'en') for (const p of store.params) assert.doesNotMatch(i18n.paramLabel(p.key), /^[A-Z]{4,}/, p.key);
   }
 });
 

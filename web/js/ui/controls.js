@@ -1,35 +1,8 @@
-// Basic controls bound to engine parameters: knob, switch, menu.
+// Controls bound to engine parameters: slider, stepper, switch, menu.
 
-import { h, s, clamp, drag } from './dom.js';
+import { h, clamp, drag } from './dom.js';
 import { formatValue } from '../format.js';
-
-/** Colour of each modulation source, indexed like `info.sources`. */
-export const SOURCE_COLORS = [
-  '#888888', // none
-  '#fb7185', '#fb923c', '#facc15', // env 1-3
-  '#4ade80', '#2dd4bf', '#60a5fa', '#e879f9', // lfo 1-4
-  '#cbd5e1', '#cbd5e1', '#cbd5e1', '#cbd5e1', '#cbd5e1', // velocity, note, wheel, aftertouch, bend
-  '#f472b6', '#f472b6', '#f472b6', '#f472b6', // macros
-  '#cbd5e1', // random
-];
-
-const START = 135; // degrees, knob minimum (7:30 on a clock face)
-const SWEEP = 270;
-
-function polar(cx, cy, r, norm) {
-  const a = ((START + SWEEP * norm) * Math.PI) / 180;
-  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
-}
-
-function arc(cx, cy, r, from, to) {
-  const a = clamp(Math.min(from, to));
-  const b = clamp(Math.max(from, to));
-  if (b - a < 0.002) return '';
-  const [x0, y0] = polar(cx, cy, r, a);
-  const [x1, y1] = polar(cx, cy, r, b);
-  const large = (b - a) * SWEEP > 180 ? 1 : 0;
-  return `M${x0.toFixed(2)} ${y0.toFixed(2)}A${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
-}
+import { modColor } from '../theme.js';
 
 /** Number of discrete positions of a parameter, or 0 if continuous. */
 function steps(p) {
@@ -37,184 +10,207 @@ function steps(p) {
   return p.curve === 'bool' ? 1 : 0;
 }
 
+const pct = (v) => `${(clamp(v) * 100).toFixed(2)}%`;
+
 /**
- * Rotary knob for a continuous or integer parameter.
- * Drag up/down, wheel, arrow keys; double-click resets; Shift is fine.
- * Shows modulation: a coloured arc per routing and a dot at the live value.
+ * Horizontal slider for a continuous or integer parameter.
+ *
+ * Left is less, right is more. Click the track to jump, drag to adjust,
+ * arrow keys step, double-click resets, Shift is fine. When something
+ * modulates the parameter, a coloured bar under the track shows how far it
+ * is moved and a dot shows where the value is right now.
  */
-export function Knob(app, key, opts = {}) {
+export function Slider(app, key, opts = {}) {
   const { store, i18n } = app;
   const i = store.idx(key);
   const p = store.def(i);
   const n = steps(p);
   const quant = (v) => (n ? Math.round(clamp(v) * n) / n : clamp(v));
-  const C = 22;
-  const R = 15;
-  // Parameters that are centred on zero fill from the middle.
+  // Parameters centred on zero fill from the middle.
   const origin = p.min < 0 && p.max > 0 ? store.core.toNorm(i, 0) : 0;
+  const label = opts.label ?? i18n.paramLabel(key);
+  const sub = opts.sub ?? i18n.paramSub(key);
 
-  const valueArc = s('path', { class: 'knob-value' });
-  const modArcs = s('g', {});
-  const pointer = s('line', { class: 'knob-pointer' });
-  const liveDot = s('circle', { class: 'knob-live', r: 2.2, visibility: 'hidden' });
-  const svg = s(
-    'svg',
-    { viewBox: '0 0 44 44', class: 'knob-dial' },
-    s('path', { class: 'knob-track', d: arc(C, C, R, 0, 1) }),
-    valueArc,
-    modArcs,
-    s('circle', { class: 'knob-cap', cx: C, cy: C, r: 10.5 }),
-    pointer,
-    liveDot,
-  );
-  const valueEl = h('div', { class: 'knob-val' });
-  const badges = h('div', { class: 'knob-mods' });
+  const fill = h('div', { class: 'track-fill' });
+  const ranges = h('div', { class: 'track-ranges' });
+  const live = h('div', { class: 'track-live', hidden: true });
+  const thumb = h('div', { class: 'thumb' });
+  const track = h('div', { class: 'track' }, h('div', { class: 'track-rail' }, fill), ranges, live, thumb);
+  const valueEl = h('button', { type: 'button', class: 'ctl-value', tabindex: -1, title: i18n.t('menu.enter') });
+  const slot = h('div', { class: 'mod-slot' });
   const el = h(
     'div',
     {
-      class: `knob ${opts.class ?? ''}`,
+      class: `ctl slider ${opts.class ?? ''}`,
       tabindex: 0,
       role: 'slider',
       'aria-label': i18n.paramTitle(key),
-      dataset: { param: i, key, ...(p.mod ? { mod: '1' } : {}) },
+      'aria-valuemin': 0,
+      'aria-valuemax': 100,
+      dataset: { param: i, key, ...(p.mod && !opts.noMod ? { mod: '1' } : {}) },
     },
-    h('div', { class: 'knob-wrap' }, svg, badges),
-    h('div', { class: 'knob-label' }, opts.label ?? i18n.paramLabel(key)),
-    valueEl,
+    opts.bare ? null : h('div', { class: 'ctl-head' }, h('span', { class: 'ctl-label' }, label, sub ? h('small', {}, sub) : null), valueEl),
+    h('div', { class: 'ctl-row' }, track, p.mod && !opts.noMod ? slot : null),
   );
-  if (opts.color) el.style.setProperty('--accent', opts.color);
 
   let mods = [];
-
-  function drawMods(norm) {
-    modArcs.replaceChildren(
-      ...mods.slice(0, 3).map((m, k) => {
-        const r = R + 3.5 + k * 2.6;
-        const from = m.bipolar ? norm - Math.abs(m.amount) : norm;
-        const to = m.bipolar ? norm + Math.abs(m.amount) : norm + m.amount;
-        return s('path', { class: 'knob-mod', d: arc(C, C, r, from, to), stroke: SOURCE_COLORS[m.src] });
+  const drawRanges = (norm) => {
+    ranges.replaceChildren(
+      ...mods.slice(0, 3).map((m) => {
+        const a = clamp(m.bipolar ? norm - Math.abs(m.amount) : Math.min(norm, norm + m.amount));
+        const b = clamp(m.bipolar ? norm + Math.abs(m.amount) : Math.max(norm, norm + m.amount));
+        return h('span', { style: { left: pct(a), width: pct(b - a), background: modColor(store.info.sources[m.src]) } });
       }),
     );
-  }
+  };
 
-  function render(norm) {
-    valueArc.setAttribute('d', arc(C, C, R, origin, norm));
-    const [x0, y0] = polar(C, C, 4, norm);
-    const [x1, y1] = polar(C, C, 10, norm);
-    pointer.setAttribute('x1', x0);
-    pointer.setAttribute('y1', y0);
-    pointer.setAttribute('x2', x1);
-    pointer.setAttribute('y2', y1);
+  const render = (norm) => {
+    const a = Math.min(origin, norm);
+    const b = Math.max(origin, norm);
+    fill.style.left = pct(a);
+    fill.style.width = pct(b - a);
+    thumb.style.left = pct(norm);
     const text = formatValue(p, store.core.toPlain(i, norm), i18n.option);
     valueEl.textContent = text;
+    el.setAttribute('aria-valuenow', Math.round(norm * 100));
     el.setAttribute('aria-valuetext', text);
-    drawMods(norm);
-  }
-
-  let signature = '';
-  function renderMods() {
-    mods = store.modsFor(i);
-    el.classList.toggle('has-mod', mods.length > 0);
-    liveDot.setAttribute('visibility', mods.length ? 'visible' : 'hidden');
-    // Rebuild the badges only when the set of routings changes: an amount
-    // change must not replace a badge that is being dragged.
-    const sig = mods.map((m) => `${m.index}:${m.src}`).join();
-    if (sig !== signature) {
-      signature = sig;
-      badges.replaceChildren(...mods.map((m) => app.mods.badge(m.index)));
-    }
-    drawMods(store.get(i));
-  }
-
-  store.watch(i, render);
+    drawRanges(norm);
+  };
+  app.watch(i, render);
   render(store.get(i));
-  if (p.mod) {
-    app.onSlots(renderMods);
+
+  if (p.mod && !opts.noMod) {
+    const add = h(
+      'button',
+      { type: 'button', class: 'mod-add', title: i18n.t('mod.add'), 'aria-label': `${i18n.paramTitle(key)}: ${i18n.t('mod.add')}`, onclick: () => app.mods.controlMenu(i, add) },
+      '＋',
+    );
+    let signature = null;
+    const renderMods = () => {
+      mods = store.modsFor(i);
+      el.classList.toggle('has-mod', mods.length > 0);
+      live.hidden = mods.length === 0;
+      // Rebuild the badges only when the set of routings changes.
+      const sig = mods.map((m) => `${m.index}:${m.src}`).join();
+      if (sig !== signature) {
+        signature = sig;
+        slot.replaceChildren(...mods.map((m) => app.mods.badge(m.index)), add);
+        if (mods.length) live.style.background = modColor(store.info.sources[mods[0].src]);
+      }
+      drawRanges(store.get(i));
+    };
+    app.on('slots', renderMods);
     renderMods();
-    // Live value from the audio thread, drawn only while modulated.
-    app.onFrame((live) => {
-      if (!mods.length || !live) return;
-      const [x, y] = polar(C, C, R + 3.5, clamp(live.param(i)));
-      liveDot.setAttribute('cx', x);
-      liveDot.setAttribute('cy', y);
+    let shown = -1;
+    app.onFrame((liveState) => {
+      if (!mods.length) return;
+      const v = clamp(liveState.param(i));
+      if (Math.abs(v - shown) > 0.002) {
+        shown = v;
+        live.style.left = pct(v);
+      }
     });
   }
 
-  let startNorm = 0;
-  drag(svg, {
-    cursor: 'ns-resize',
-    onStart: () => {
-      startNorm = store.get(i);
-      el.classList.add('dragging');
+  // Dragging is relative, so grabbing the thumb never makes the value jump;
+  // a plain click on the track moves the value there.
+  drag(track, {
+    onStart: (e) => {
       el.focus({ preventScroll: true });
+      el.classList.add('dragging');
+      const r = track.getBoundingClientRect();
+      const at = clamp((e.clientX - r.left) / r.width);
+      const onThumb = Math.abs(at - store.get(i)) * r.width < 12;
+      if (!onThumb) store.set(i, quant(at));
+      return { start: store.get(i), width: r.width };
     },
-    onMove: (_dx, dy, e) => {
-      const range = e.shiftKey ? 1600 : 180;
-      store.set(i, quant(startNorm - dy / range));
-    },
+    onMove: (dx, _dy, e, st) => store.set(i, quant(st.start + dx / (st.width * (e.shiftKey ? 8 : 1)))),
     onEnd: () => {
       el.classList.remove('dragging');
       store.commit();
     },
   });
-  svg.addEventListener('dblclick', () => {
+  track.addEventListener('dblclick', () => {
     store.reset(i);
     store.commit();
   });
-  el.addEventListener(
-    'wheel',
-    (e) => {
-      e.preventDefault();
-      const step = n ? 1 / n : e.shiftKey ? 0.002 : 0.02;
-      store.set(i, quant(store.get(i) - Math.sign(e.deltaY) * step));
-      app.commitSoon();
-    },
-    { passive: false },
-  );
+  valueEl.addEventListener('click', () => app.mods.enterValue(i));
   el.addEventListener('keydown', (e) => {
     const step = n ? 1 / n : e.shiftKey ? 0.002 : 0.02;
-    if (e.key === 'ArrowUp' || e.key === 'ArrowRight') store.set(i, quant(store.get(i) + step));
-    else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') store.set(i, quant(store.get(i) - step));
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') store.set(i, quant(store.get(i) + step));
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') store.set(i, quant(store.get(i) - step));
     else if (e.key === 'Delete' || e.key === 'Backspace') store.reset(i);
     else return;
     e.preventDefault();
     app.commitSoon();
   });
   el.addEventListener('contextmenu', (e) => {
+    if (!p.mod || opts.noMod) return;
     e.preventDefault();
-    app.mods.knobMenu(i, el);
+    app.mods.controlMenu(i, slot);
   });
   app.help.attach(el, () => ({ title: i18n.paramTitle(key), body: i18n.paramHelp(key), value: valueEl.textContent }));
   return el;
 }
 
-/** On/off switch. `power: true` draws a round power button. */
-export function Toggle(app, key, opts = {}) {
+/** Minus / plus buttons around a value, for small whole-number ranges. */
+export function Stepper(app, key, opts = {}) {
+  const { store, i18n } = app;
+  const i = store.idx(key);
+  const p = store.def(i);
+  const valueEl = h('output', { class: 'stepper-value' });
+  const bump = (d) => {
+    store.setPlain(i, clamp(Math.round(store.getPlain(i)) + d, p.min, p.max));
+    store.commit();
+  };
+  const minus = h('button', { type: 'button', 'aria-label': '−', onclick: () => bump(-1) }, '−');
+  const plus = h('button', { type: 'button', 'aria-label': '+', onclick: () => bump(1) }, '＋');
+  const el = h(
+    'div',
+    { class: `ctl stepper ${opts.class ?? ''}`, dataset: { param: i, key } },
+    h('span', { class: 'ctl-label' }, opts.label ?? i18n.paramLabel(key)),
+    h('div', { class: 'stepper-row', role: 'group', 'aria-label': i18n.paramTitle(key) }, minus, valueEl, plus),
+  );
+  const render = () => {
+    const v = Math.round(store.getPlain(i));
+    valueEl.textContent = formatValue(p, v, i18n.option);
+    minus.disabled = v <= p.min;
+    plus.disabled = v >= p.max;
+  };
+  app.watch(i, render);
+  render();
+  app.help.attach(el, () => ({ title: i18n.paramTitle(key), body: i18n.paramHelp(key), value: valueEl.textContent }));
+  return el;
+}
+
+/** On/off switch with its label. */
+export function Switch(app, key, opts = {}) {
   const { store, i18n } = app;
   const i = store.idx(key);
   const label = opts.label ?? i18n.paramLabel(key);
   const el = h(
     'button',
     {
-      class: `toggle ${opts.power ? 'power' : ''} ${opts.class ?? ''}`,
       type: 'button',
-      title: opts.power ? label : null,
-      'aria-label': i18n.paramTitle(key),
+      class: `switch ${opts.class ?? ''}`,
+      role: 'switch',
       dataset: { param: i, key },
       onclick: () => {
-        store.set(i, store.get(i) >= 0.5 ? 0 : 1);
+        const on = store.get(i) < 0.5;
+        // `onToggle` lets a caller do more than flip the value.
+        if (opts.onToggle) opts.onToggle(on);
+        else store.set(i, on ? 1 : 0);
         store.commit();
       },
     },
-    opts.power ? s('svg', { viewBox: '0 0 16 16' }, s('path', { d: 'M8 2v6M4.6 4.4a5 5 0 1 0 6.8 0' })) : label,
+    h('span', { class: 'switch-track' }, h('span', { class: 'switch-thumb' })),
+    opts.hideLabel ? null : h('span', { class: 'switch-label' }, label),
   );
-  const render = (v) => {
-    el.classList.toggle('on', v >= 0.5);
-    el.setAttribute('aria-pressed', v >= 0.5);
-  };
-  store.watch(i, render);
+  if (opts.hideLabel) el.setAttribute('aria-label', label);
+  const render = (v) => el.setAttribute('aria-checked', String(v >= 0.5));
+  app.watch(i, render);
   render(store.get(i));
-  app.help.attach(el, () => ({ title: i18n.paramTitle(key), body: i18n.paramHelp(key), value: store.get(i) >= 0.5 ? 'ON' : 'OFF' }));
+  app.help.attach(el, () => ({ title: i18n.paramTitle(key), body: i18n.paramHelp(key) }));
   return el;
 }
 
@@ -225,46 +221,34 @@ export function Select(app, key, opts = {}) {
   const i = store.idx(key);
   const p = store.def(i);
   const option = (name) => h('option', { value: p.options.indexOf(name) }, (opts.optionLabel ?? i18n.option)(name));
-  const select = h(
-    'select',
-    {
-      'aria-label': i18n.paramTitle(key),
-      onchange: () => {
-        const prev = Math.round(store.getPlain(i));
-        const next = Number(select.value);
-        store.setPlain(i, next);
-        opts.onUserChange?.(prev, next);
-        store.commit();
-      },
-    },
-    opts.groups
-      ? opts.groups.map(([label, names]) => h('optgroup', { label }, names.map(option)))
-      : p.options.map(option),
-  );
-  const step = (d) => {
-    const count = p.options.length;
+  const change = (next) => {
     const prev = Math.round(store.getPlain(i));
-    const next = (prev + d + count) % count;
     store.setPlain(i, next);
     opts.onUserChange?.(prev, next);
     store.commit();
   };
+  const select = h(
+    'select',
+    { 'aria-label': i18n.paramTitle(key), onchange: () => change(Number(select.value)) },
+    opts.groups ? opts.groups.map(([label, names]) => h('optgroup', { label }, names.map(option))) : p.options.map(option),
+  );
+  const step = (d) => change((Math.round(store.getPlain(i)) + d + p.options.length) % p.options.length);
   const el = h(
     'div',
-    { class: `select ${opts.class ?? ''}`, dataset: { param: i, key } },
-    opts.label === false ? null : h('span', { class: 'select-label' }, opts.label ?? i18n.paramLabel(key)),
+    { class: `ctl select ${opts.class ?? ''}`, dataset: { param: i, key } },
+    opts.label === false ? null : h('span', { class: 'ctl-label' }, opts.label ?? i18n.paramLabel(key)),
     h(
       'div',
       { class: 'select-row' },
-      opts.arrows ? h('button', { type: 'button', class: 'step', 'aria-label': '◀', onclick: () => step(-1) }, '‹') : null,
+      opts.arrows ? h('button', { type: 'button', class: 'step', 'aria-label': i18n.t('btn.prevOption'), onclick: () => step(-1) }, '‹') : null,
       select,
-      opts.arrows ? h('button', { type: 'button', class: 'step', 'aria-label': '▶', onclick: () => step(1) }, '›') : null,
+      opts.arrows ? h('button', { type: 'button', class: 'step', 'aria-label': i18n.t('btn.nextOption'), onclick: () => step(1) }, '›') : null,
     ),
   );
   const render = () => {
     select.value = String(Math.round(store.getPlain(i)));
   };
-  store.watch(i, render);
+  app.watch(i, render);
   render();
   app.help.attach(el, () => ({
     title: i18n.paramTitle(key),
@@ -274,31 +258,43 @@ export function Select(app, key, opts = {}) {
   return el;
 }
 
-/** Row of buttons for an enum with few options. */
+/** Row of buttons for an enum with few options. `icons` maps option names
+ * to SVG path data drawn in a 24x16 box. */
 export function Segmented(app, key, opts = {}) {
   const { store, i18n } = app;
   const i = store.idx(key);
   const p = store.def(i);
-  const buttons = p.options.map((name, k) =>
-    h(
+  const text = opts.optionLabel ?? i18n.option;
+  const buttons = p.options.map((name, k) => {
+    const icon = opts.icons?.[name];
+    return h(
       'button',
       {
         type: 'button',
+        title: icon ? text(name) : null,
+        'aria-label': icon ? text(name) : null,
         onclick: () => {
+          const prev = Math.round(store.getPlain(i));
           store.setPlain(i, k);
+          opts.onUserChange?.(prev, k);
           store.commit();
         },
       },
-      (opts.optionLabel ?? i18n.option)(name),
-    ),
+      icon ? icon() : text(name),
+    );
+  });
+  const el = h(
+    'div',
+    { class: `ctl segmented-ctl ${opts.class ?? ''}`, dataset: { param: i, key } },
+    opts.label === false ? null : h('span', { class: 'ctl-label' }, opts.label ?? i18n.paramLabel(key)),
+    h('div', { class: 'segmented', role: 'group', 'aria-label': i18n.paramTitle(key) }, buttons),
   );
-  const el = h('div', { class: `segmented ${opts.class ?? ''}`, role: 'group', 'aria-label': i18n.paramTitle(key), dataset: { param: i, key } }, buttons);
   const render = () => {
     const cur = Math.round(store.getPlain(i));
-    buttons.forEach((b, k) => b.classList.toggle('on', k === cur));
+    buttons.forEach((b, k) => b.setAttribute('aria-pressed', String(k === cur)));
   };
-  store.watch(i, render);
+  app.watch(i, render);
   render();
-  app.help.attach(el, () => ({ title: i18n.paramTitle(key), body: i18n.paramHelp(key) }));
+  app.help.attach(el, () => ({ title: i18n.paramTitle(key), body: i18n.paramHelp(key), value: text(p.options[Math.round(store.getPlain(i))]) }));
   return el;
 }
