@@ -15,7 +15,13 @@ pub const NUM_ENV: usize = 3;
 pub const NUM_LFO: usize = 4;
 pub const NUM_MACRO: usize = 4;
 pub const NUM_SLOTS: usize = 32;
+/// Kinds of effect.
 pub const NUM_FX: usize = 10;
+/// Copies of each kind, so the same effect can be stacked.
+pub const FX_COPIES: usize = 3;
+/// Effect units: every copy of every kind. Unit `u` is copy `u / NUM_FX` of
+/// kind `u % NUM_FX`, so the first `NUM_FX` units are the first copies.
+pub const NUM_UNITS: usize = NUM_FX * FX_COPIES;
 
 /// Modulatable from the mod matrix.
 pub const F_MOD: u8 = 1;
@@ -330,6 +336,15 @@ pub mod fxfilter {
     pub const N: usize = 7;
 }
 
+/// The fork in the effect chain: how the sound is divided between the two
+/// lanes and how they are mixed again.
+pub mod split {
+    pub const MODE: usize = 0;
+    pub const FREQ: usize = 1;
+    pub const BALANCE: usize = 2;
+    pub const N: usize = 3;
+}
+
 pub const OSC_BASE: usize = master::N;
 pub const SUB_BASE: usize = OSC_BASE + NUM_OSC * osc::N;
 pub const NOISE_BASE: usize = SUB_BASE + sub::N;
@@ -346,7 +361,11 @@ pub const COMP_BASE: usize = DELAY_BASE + delay::N;
 pub const REVERB_BASE: usize = COMP_BASE + comp::N;
 pub const EQ_BASE: usize = REVERB_BASE + reverb::N;
 pub const FXFILTER_BASE: usize = EQ_BASE + eq::N;
-pub const NUM_PARAMS: usize = FXFILTER_BASE + fxfilter::N;
+/// Parameters of one copy of all the effects. Copy `c` of an effect lives
+/// `c * FX_BLOCK` after the first copy.
+pub const FX_BLOCK: usize = FXFILTER_BASE + fxfilter::N - HYPER_BASE;
+pub const SPLIT_BASE: usize = HYPER_BASE + FX_COPIES * FX_BLOCK;
+pub const NUM_PARAMS: usize = SPLIT_BASE + split::N;
 
 #[inline]
 pub const fn osc_idx(o: usize, p: usize) -> usize {
@@ -361,8 +380,29 @@ pub const fn lfo_idx(l: usize, p: usize) -> usize {
     LFO_BASE + l * lfo::N + p
 }
 
-/// FX units in their fixed id order. The processing order is a separate,
-/// user-editable permutation stored in the patch.
+/// Offset from a first-copy parameter to the same parameter of `unit`.
+#[inline]
+pub const fn unit_shift(unit: usize) -> usize {
+    (unit / NUM_FX) * FX_BLOCK
+}
+
+/// Index of the on/off switch of an effect unit.
+#[inline]
+pub const fn unit_on(unit: usize) -> usize {
+    FX_BASES[unit % NUM_FX] + unit_shift(unit)
+}
+
+/// Key prefix of an effect unit: "dist", "dist2", "dist3".
+pub fn unit_key(unit: usize) -> String {
+    let kind = FX_KEYS[unit % NUM_FX];
+    match unit / NUM_FX {
+        0 => kind.to_string(),
+        copy => format!("{kind}{}", copy + 1),
+    }
+}
+
+/// The kinds of effect in their fixed id order. The processing order of the
+/// units is a separate, user-editable permutation stored in the patch.
 pub const FX_KEYS: [&str; NUM_FX] = [
     "hyper", "dist", "flanger", "phaser", "chorus", "delay", "comp", "reverb", "eq", "fxfilter",
 ];
@@ -434,6 +474,7 @@ pub const DELAY_MODES: &[&str] = &["Normal", "PingPong", "Tap"];
 pub const REVERB_MODES: &[&str] = &["Plate", "Hall"];
 pub const EQ_LOW_TYPES: &[&str] = &["Shelf", "Peak", "HP"];
 pub const EQ_HIGH_TYPES: &[&str] = &["Shelf", "Peak", "LP"];
+pub const SPLIT_MODES: &[&str] = &["Copy", "Bands", "MidSide", "LeftRight"];
 
 // ---------------------------------------------------------------------------
 // Table construction
@@ -606,107 +647,122 @@ fn build() -> Vec<ParamDef> {
     }
 
     // --- effects ----------------------------------------------------------
-    let i = |p: usize| HYPER_BASE + p;
-    b.flag(i(hyper::ON), 500, "hyper.on", false, F_GLOBAL);
-    b.num(i(hyper::RATE), 501, "hyper.rate", 0.0, 1.0, 0.4, Lin, "%", GMS);
-    b.num(i(hyper::DETUNE), 502, "hyper.detune", 0.0, 1.0, 0.3, Lin, "%", GMS);
-    b.int(i(hyper::VOICES), 503, "hyper.voices", 1, 7, 4, "", F_GLOBAL);
-    b.num(i(hyper::MIX), 504, "hyper.mix", 0.0, 1.0, 0.5, Lin, "%", GMS);
-    b.num(i(hyper::DIM_SIZE), 505, "hyper.dimSize", 0.0, 1.0, 0.5, Lin, "%", GMS);
-    b.num(i(hyper::DIM_MIX), 506, "hyper.dimMix", 0.0, 1.0, 0.0, Lin, "%", GMS);
+    // Every copy has the same parameters. The first copy keeps the original
+    // keys and ids; copy 2 is "dist2.drive" with id 1522, copy 3 "dist3.drive"
+    // with id 2522.
+    for copy in 0..FX_COPIES {
+        let shift = copy * FX_BLOCK;
+        let sid = 1000 * copy as u16;
+        let k = |kind: &str, p: &str| if copy == 0 { format!("{kind}.{p}") } else { format!("{kind}{}.{p}", copy + 1) };
 
-    let i = |p: usize| DIST_BASE + p;
-    b.flag(i(dist::ON), 520, "dist.on", false, F_GLOBAL);
-    b.choice(i(dist::MODE), 521, "dist.mode", DIST_MODES, 0, F_GLOBAL);
-    b.num(i(dist::DRIVE), 522, "dist.drive", 0.0, 1.0, 0.3, Lin, "%", GMS);
-    b.num(i(dist::MIX), 523, "dist.mix", 0.0, 1.0, 1.0, Lin, "%", GMS);
-    b.choice(i(dist::FILTER_MODE), 524, "dist.filterMode", DIST_FILTER_MODES, 0, F_GLOBAL);
-    b.choice(i(dist::FILTER_TYPE), 525, "dist.filterType", DIST_FILTER_TYPES, 0, F_GLOBAL);
-    b.num(i(dist::FILTER_FREQ), 526, "dist.filterFreq", 20.0, 20000.0, 2000.0, Log, "Hz", GMS);
-    b.num(i(dist::FILTER_Q), 527, "dist.filterQ", 0.0, 1.0, 0.2, Lin, "%", GMS);
+        let i = |p: usize| HYPER_BASE + shift + p;
+        b.flag(i(hyper::ON), sid + 500, k("hyper", "on"), false, F_GLOBAL);
+        b.num(i(hyper::RATE), sid + 501, k("hyper", "rate"), 0.0, 1.0, 0.4, Lin, "%", GMS);
+        b.num(i(hyper::DETUNE), sid + 502, k("hyper", "detune"), 0.0, 1.0, 0.3, Lin, "%", GMS);
+        b.int(i(hyper::VOICES), sid + 503, k("hyper", "voices"), 1, 7, 4, "", F_GLOBAL);
+        b.num(i(hyper::MIX), sid + 504, k("hyper", "mix"), 0.0, 1.0, 0.5, Lin, "%", GMS);
+        b.num(i(hyper::DIM_SIZE), sid + 505, k("hyper", "dimSize"), 0.0, 1.0, 0.5, Lin, "%", GMS);
+        b.num(i(hyper::DIM_MIX), sid + 506, k("hyper", "dimMix"), 0.0, 1.0, 0.0, Lin, "%", GMS);
 
-    let i = |p: usize| FLANGER_BASE + p;
-    b.flag(i(flanger::ON), 540, "flanger.on", false, F_GLOBAL);
-    b.num(i(flanger::RATE), 541, "flanger.rate", 0.02, 10.0, 0.3, Log, "Hz", GMS);
-    b.num(i(flanger::DEPTH), 542, "flanger.depth", 0.0, 1.0, 0.6, Lin, "%", GMS);
-    b.num(i(flanger::FEEDBACK), 543, "flanger.feedback", 0.0, 0.95, 0.5, Lin, "%", GMS);
-    b.num(i(flanger::PHASE), 544, "flanger.phase", 0.0, 1.0, 0.25, Lin, "%", GS);
-    b.num(i(flanger::MIX), 545, "flanger.mix", 0.0, 1.0, 0.5, Lin, "%", GMS);
+        let i = |p: usize| DIST_BASE + shift + p;
+        b.flag(i(dist::ON), sid + 520, k("dist", "on"), false, F_GLOBAL);
+        b.choice(i(dist::MODE), sid + 521, k("dist", "mode"), DIST_MODES, 0, F_GLOBAL);
+        b.num(i(dist::DRIVE), sid + 522, k("dist", "drive"), 0.0, 1.0, 0.3, Lin, "%", GMS);
+        b.num(i(dist::MIX), sid + 523, k("dist", "mix"), 0.0, 1.0, 1.0, Lin, "%", GMS);
+        b.choice(i(dist::FILTER_MODE), sid + 524, k("dist", "filterMode"), DIST_FILTER_MODES, 0, F_GLOBAL);
+        b.choice(i(dist::FILTER_TYPE), sid + 525, k("dist", "filterType"), DIST_FILTER_TYPES, 0, F_GLOBAL);
+        b.num(i(dist::FILTER_FREQ), sid + 526, k("dist", "filterFreq"), 20.0, 20000.0, 2000.0, Log, "Hz", GMS);
+        b.num(i(dist::FILTER_Q), sid + 527, k("dist", "filterQ"), 0.0, 1.0, 0.2, Lin, "%", GMS);
 
-    let i = |p: usize| PHASER_BASE + p;
-    b.flag(i(phaser::ON), 560, "phaser.on", false, F_GLOBAL);
-    b.num(i(phaser::RATE), 561, "phaser.rate", 0.02, 10.0, 0.3, Log, "Hz", GMS);
-    b.num(i(phaser::DEPTH), 562, "phaser.depth", 0.0, 1.0, 0.6, Lin, "%", GMS);
-    b.num(i(phaser::FREQ), 563, "phaser.freq", 50.0, 8000.0, 600.0, Log, "Hz", GMS);
-    b.num(i(phaser::FEEDBACK), 564, "phaser.feedback", 0.0, 0.95, 0.5, Lin, "%", GMS);
-    b.num(i(phaser::PHASE), 565, "phaser.phase", 0.0, 1.0, 0.25, Lin, "%", GS);
-    b.num(i(phaser::MIX), 566, "phaser.mix", 0.0, 1.0, 0.5, Lin, "%", GMS);
+        let i = |p: usize| FLANGER_BASE + shift + p;
+        b.flag(i(flanger::ON), sid + 540, k("flanger", "on"), false, F_GLOBAL);
+        b.num(i(flanger::RATE), sid + 541, k("flanger", "rate"), 0.02, 10.0, 0.3, Log, "Hz", GMS);
+        b.num(i(flanger::DEPTH), sid + 542, k("flanger", "depth"), 0.0, 1.0, 0.6, Lin, "%", GMS);
+        b.num(i(flanger::FEEDBACK), sid + 543, k("flanger", "feedback"), 0.0, 0.95, 0.5, Lin, "%", GMS);
+        b.num(i(flanger::PHASE), sid + 544, k("flanger", "phase"), 0.0, 1.0, 0.25, Lin, "%", GS);
+        b.num(i(flanger::MIX), sid + 545, k("flanger", "mix"), 0.0, 1.0, 0.5, Lin, "%", GMS);
 
-    let i = |p: usize| CHORUS_BASE + p;
-    b.flag(i(chorus::ON), 580, "chorus.on", false, F_GLOBAL);
-    b.num(i(chorus::RATE), 581, "chorus.rate", 0.02, 10.0, 0.5, Log, "Hz", GMS);
-    b.num(i(chorus::DELAY1), 582, "chorus.delay1", 0.5, 20.0, 5.0, Lin, "ms", GS);
-    b.num(i(chorus::DELAY2), 583, "chorus.delay2", 0.5, 20.0, 9.0, Lin, "ms", GS);
-    b.num(i(chorus::DEPTH), 584, "chorus.depth", 0.0, 1.0, 0.4, Lin, "%", GMS);
-    b.num(i(chorus::FEEDBACK), 585, "chorus.feedback", 0.0, 0.95, 0.1, Lin, "%", GMS);
-    b.num(i(chorus::LPF), 586, "chorus.lpf", 200.0, 20000.0, 8000.0, Log, "Hz", GMS);
-    b.num(i(chorus::MIX), 587, "chorus.mix", 0.0, 1.0, 0.5, Lin, "%", GMS);
+        let i = |p: usize| PHASER_BASE + shift + p;
+        b.flag(i(phaser::ON), sid + 560, k("phaser", "on"), false, F_GLOBAL);
+        b.num(i(phaser::RATE), sid + 561, k("phaser", "rate"), 0.02, 10.0, 0.3, Log, "Hz", GMS);
+        b.num(i(phaser::DEPTH), sid + 562, k("phaser", "depth"), 0.0, 1.0, 0.6, Lin, "%", GMS);
+        b.num(i(phaser::FREQ), sid + 563, k("phaser", "freq"), 50.0, 8000.0, 600.0, Log, "Hz", GMS);
+        b.num(i(phaser::FEEDBACK), sid + 564, k("phaser", "feedback"), 0.0, 0.95, 0.5, Lin, "%", GMS);
+        b.num(i(phaser::PHASE), sid + 565, k("phaser", "phase"), 0.0, 1.0, 0.25, Lin, "%", GS);
+        b.num(i(phaser::MIX), sid + 566, k("phaser", "mix"), 0.0, 1.0, 0.5, Lin, "%", GMS);
 
-    let i = |p: usize| DELAY_BASE + p;
-    b.flag(i(delay::ON), 600, "delay.on", false, F_GLOBAL);
-    b.flag(i(delay::SYNC), 601, "delay.sync", true, F_GLOBAL);
-    b.num(i(delay::TIME_L), 602, "delay.timeL", 0.001, 2.0, 0.25, Log, "s", GMS);
-    b.num(i(delay::TIME_R), 603, "delay.timeR", 0.001, 2.0, 0.25, Log, "s", GMS);
-    b.choice(i(delay::DIV_L), 604, "delay.divL", DIVISIONS, 11, F_GLOBAL);
-    b.choice(i(delay::DIV_R), 605, "delay.divR", DIVISIONS, 11, F_GLOBAL);
-    b.flag(i(delay::LINK), 606, "delay.link", true, F_GLOBAL);
-    b.num(i(delay::FEEDBACK), 607, "delay.feedback", 0.0, 0.95, 0.4, Lin, "%", GMS);
-    b.choice(i(delay::MODE), 608, "delay.mode", DELAY_MODES, 0, F_GLOBAL);
-    b.num(i(delay::FILTER_FREQ), 609, "delay.filterFreq", 40.0, 18000.0, 1200.0, Log, "Hz", GMS);
-    b.num(i(delay::FILTER_Q), 610, "delay.filterQ", 0.0, 1.0, 0.0, Lin, "%", GMS);
-    b.num(i(delay::MIX), 611, "delay.mix", 0.0, 1.0, 0.3, Lin, "%", GMS);
+        let i = |p: usize| CHORUS_BASE + shift + p;
+        b.flag(i(chorus::ON), sid + 580, k("chorus", "on"), false, F_GLOBAL);
+        b.num(i(chorus::RATE), sid + 581, k("chorus", "rate"), 0.02, 10.0, 0.5, Log, "Hz", GMS);
+        b.num(i(chorus::DELAY1), sid + 582, k("chorus", "delay1"), 0.5, 20.0, 5.0, Lin, "ms", GS);
+        b.num(i(chorus::DELAY2), sid + 583, k("chorus", "delay2"), 0.5, 20.0, 9.0, Lin, "ms", GS);
+        b.num(i(chorus::DEPTH), sid + 584, k("chorus", "depth"), 0.0, 1.0, 0.4, Lin, "%", GMS);
+        b.num(i(chorus::FEEDBACK), sid + 585, k("chorus", "feedback"), 0.0, 0.95, 0.1, Lin, "%", GMS);
+        b.num(i(chorus::LPF), sid + 586, k("chorus", "lpf"), 200.0, 20000.0, 8000.0, Log, "Hz", GMS);
+        b.num(i(chorus::MIX), sid + 587, k("chorus", "mix"), 0.0, 1.0, 0.5, Lin, "%", GMS);
 
-    let i = |p: usize| COMP_BASE + p;
-    b.flag(i(comp::ON), 620, "comp.on", false, F_GLOBAL);
-    b.num(i(comp::THRESHOLD), 621, "comp.threshold", -60.0, 0.0, -18.0, Lin, "dB", GMS);
-    b.num(i(comp::RATIO), 622, "comp.ratio", 1.0, 20.0, 4.0, Log, "x", GMS);
-    b.num(i(comp::ATTACK), 623, "comp.attack", 0.1, 500.0, 10.0, Log, "ms", GS);
-    b.num(i(comp::RELEASE), 624, "comp.release", 5.0, 2000.0, 150.0, Log, "ms", GS);
-    b.num(i(comp::GAIN), 625, "comp.gain", 0.0, 24.0, 0.0, Lin, "dB", GMS);
-    b.flag(i(comp::MULTIBAND), 626, "comp.multiband", false, F_GLOBAL);
-    b.num(i(comp::MIX), 627, "comp.mix", 0.0, 1.0, 1.0, Lin, "%", GMS);
+        let i = |p: usize| DELAY_BASE + shift + p;
+        b.flag(i(delay::ON), sid + 600, k("delay", "on"), false, F_GLOBAL);
+        b.flag(i(delay::SYNC), sid + 601, k("delay", "sync"), true, F_GLOBAL);
+        b.num(i(delay::TIME_L), sid + 602, k("delay", "timeL"), 0.001, 2.0, 0.25, Log, "s", GMS);
+        b.num(i(delay::TIME_R), sid + 603, k("delay", "timeR"), 0.001, 2.0, 0.25, Log, "s", GMS);
+        b.choice(i(delay::DIV_L), sid + 604, k("delay", "divL"), DIVISIONS, 11, F_GLOBAL);
+        b.choice(i(delay::DIV_R), sid + 605, k("delay", "divR"), DIVISIONS, 11, F_GLOBAL);
+        b.flag(i(delay::LINK), sid + 606, k("delay", "link"), true, F_GLOBAL);
+        b.num(i(delay::FEEDBACK), sid + 607, k("delay", "feedback"), 0.0, 0.95, 0.4, Lin, "%", GMS);
+        b.choice(i(delay::MODE), sid + 608, k("delay", "mode"), DELAY_MODES, 0, F_GLOBAL);
+        b.num(i(delay::FILTER_FREQ), sid + 609, k("delay", "filterFreq"), 40.0, 18000.0, 1200.0, Log, "Hz", GMS);
+        b.num(i(delay::FILTER_Q), sid + 610, k("delay", "filterQ"), 0.0, 1.0, 0.0, Lin, "%", GMS);
+        b.num(i(delay::MIX), sid + 611, k("delay", "mix"), 0.0, 1.0, 0.3, Lin, "%", GMS);
 
-    let i = |p: usize| REVERB_BASE + p;
-    b.flag(i(reverb::ON), 640, "reverb.on", false, F_GLOBAL);
-    b.choice(i(reverb::MODE), 641, "reverb.mode", REVERB_MODES, 0, F_GLOBAL);
-    b.num(i(reverb::SIZE), 642, "reverb.size", 0.0, 1.0, 0.5, Lin, "%", GMS);
-    b.num(i(reverb::DECAY), 643, "reverb.decay", 0.0, 1.0, 0.5, Lin, "%", GMS);
-    b.num(i(reverb::PREDELAY), 644, "reverb.predelay", 0.0, 0.25, 0.01, Pow(2.0), "s", GS);
-    b.num(i(reverb::LOWCUT), 645, "reverb.lowcut", 0.0, 1.0, 0.1, Lin, "%", GMS);
-    b.num(i(reverb::HIGHCUT), 646, "reverb.highcut", 0.0, 1.0, 0.3, Lin, "%", GMS);
-    b.num(i(reverb::DAMP), 647, "reverb.damp", 0.0, 1.0, 0.4, Lin, "%", GMS);
-    b.num(i(reverb::WIDTH), 648, "reverb.width", 0.0, 1.0, 1.0, Lin, "%", GMS);
-    b.num(i(reverb::MIX), 649, "reverb.mix", 0.0, 1.0, 0.25, Lin, "%", GMS);
+        let i = |p: usize| COMP_BASE + shift + p;
+        b.flag(i(comp::ON), sid + 620, k("comp", "on"), false, F_GLOBAL);
+        b.num(i(comp::THRESHOLD), sid + 621, k("comp", "threshold"), -60.0, 0.0, -18.0, Lin, "dB", GMS);
+        b.num(i(comp::RATIO), sid + 622, k("comp", "ratio"), 1.0, 20.0, 4.0, Log, "x", GMS);
+        b.num(i(comp::ATTACK), sid + 623, k("comp", "attack"), 0.1, 500.0, 10.0, Log, "ms", GS);
+        b.num(i(comp::RELEASE), sid + 624, k("comp", "release"), 5.0, 2000.0, 150.0, Log, "ms", GS);
+        b.num(i(comp::GAIN), sid + 625, k("comp", "gain"), 0.0, 24.0, 0.0, Lin, "dB", GMS);
+        b.flag(i(comp::MULTIBAND), sid + 626, k("comp", "multiband"), false, F_GLOBAL);
+        b.num(i(comp::MIX), sid + 627, k("comp", "mix"), 0.0, 1.0, 1.0, Lin, "%", GMS);
 
-    let i = |p: usize| EQ_BASE + p;
-    b.flag(i(eq::ON), 660, "eq.on", false, F_GLOBAL);
-    b.choice(i(eq::LOW_TYPE), 661, "eq.lowType", EQ_LOW_TYPES, 0, F_GLOBAL);
-    b.num(i(eq::LOW_FREQ), 662, "eq.lowFreq", 20.0, 20000.0, 120.0, Log, "Hz", GMS);
-    b.num(i(eq::LOW_Q), 663, "eq.lowQ", 0.0, 1.0, 0.3, Lin, "%", GMS);
-    b.num(i(eq::LOW_GAIN), 664, "eq.lowGain", -18.0, 18.0, 0.0, Lin, "dB", GMS);
-    b.choice(i(eq::HIGH_TYPE), 665, "eq.highType", EQ_HIGH_TYPES, 0, F_GLOBAL);
-    b.num(i(eq::HIGH_FREQ), 666, "eq.highFreq", 20.0, 20000.0, 6000.0, Log, "Hz", GMS);
-    b.num(i(eq::HIGH_Q), 667, "eq.highQ", 0.0, 1.0, 0.3, Lin, "%", GMS);
-    b.num(i(eq::HIGH_GAIN), 668, "eq.highGain", -18.0, 18.0, 0.0, Lin, "dB", GMS);
+        let i = |p: usize| REVERB_BASE + shift + p;
+        b.flag(i(reverb::ON), sid + 640, k("reverb", "on"), false, F_GLOBAL);
+        b.choice(i(reverb::MODE), sid + 641, k("reverb", "mode"), REVERB_MODES, 0, F_GLOBAL);
+        b.num(i(reverb::SIZE), sid + 642, k("reverb", "size"), 0.0, 1.0, 0.5, Lin, "%", GMS);
+        b.num(i(reverb::DECAY), sid + 643, k("reverb", "decay"), 0.0, 1.0, 0.5, Lin, "%", GMS);
+        b.num(i(reverb::PREDELAY), sid + 644, k("reverb", "predelay"), 0.0, 0.25, 0.01, Pow(2.0), "s", GS);
+        b.num(i(reverb::LOWCUT), sid + 645, k("reverb", "lowcut"), 0.0, 1.0, 0.1, Lin, "%", GMS);
+        b.num(i(reverb::HIGHCUT), sid + 646, k("reverb", "highcut"), 0.0, 1.0, 0.3, Lin, "%", GMS);
+        b.num(i(reverb::DAMP), sid + 647, k("reverb", "damp"), 0.0, 1.0, 0.4, Lin, "%", GMS);
+        b.num(i(reverb::WIDTH), sid + 648, k("reverb", "width"), 0.0, 1.0, 1.0, Lin, "%", GMS);
+        b.num(i(reverb::MIX), sid + 649, k("reverb", "mix"), 0.0, 1.0, 0.25, Lin, "%", GMS);
 
-    let i = |p: usize| FXFILTER_BASE + p;
-    b.flag(i(fxfilter::ON), 680, "fxfilter.on", false, F_GLOBAL);
-    b.choice(i(fxfilter::TYPE), 681, "fxfilter.type", FILTER_TYPES, 2, F_GLOBAL);
-    b.num(i(fxfilter::CUTOFF), 682, "fxfilter.cutoff", 20.0, 20000.0, 2000.0, Log, "Hz", GMS);
-    b.num(i(fxfilter::RES), 683, "fxfilter.res", 0.0, 1.0, 0.1, Lin, "%", GMS);
-    b.num(i(fxfilter::DRIVE), 684, "fxfilter.drive", 0.0, 1.0, 0.0, Lin, "%", GMS);
-    b.num(i(fxfilter::VAR), 685, "fxfilter.var", 0.0, 1.0, 0.0, Lin, "%", GMS);
-    b.num(i(fxfilter::MIX), 686, "fxfilter.mix", 0.0, 1.0, 1.0, Lin, "%", GMS);
+        let i = |p: usize| EQ_BASE + shift + p;
+        b.flag(i(eq::ON), sid + 660, k("eq", "on"), false, F_GLOBAL);
+        b.choice(i(eq::LOW_TYPE), sid + 661, k("eq", "lowType"), EQ_LOW_TYPES, 0, F_GLOBAL);
+        b.num(i(eq::LOW_FREQ), sid + 662, k("eq", "lowFreq"), 20.0, 20000.0, 120.0, Log, "Hz", GMS);
+        b.num(i(eq::LOW_Q), sid + 663, k("eq", "lowQ"), 0.0, 1.0, 0.3, Lin, "%", GMS);
+        b.num(i(eq::LOW_GAIN), sid + 664, k("eq", "lowGain"), -18.0, 18.0, 0.0, Lin, "dB", GMS);
+        b.choice(i(eq::HIGH_TYPE), sid + 665, k("eq", "highType"), EQ_HIGH_TYPES, 0, F_GLOBAL);
+        b.num(i(eq::HIGH_FREQ), sid + 666, k("eq", "highFreq"), 20.0, 20000.0, 6000.0, Log, "Hz", GMS);
+        b.num(i(eq::HIGH_Q), sid + 667, k("eq", "highQ"), 0.0, 1.0, 0.3, Lin, "%", GMS);
+        b.num(i(eq::HIGH_GAIN), sid + 668, k("eq", "highGain"), -18.0, 18.0, 0.0, Lin, "dB", GMS);
+
+        let i = |p: usize| FXFILTER_BASE + shift + p;
+        b.flag(i(fxfilter::ON), sid + 680, k("fxfilter", "on"), false, F_GLOBAL);
+        b.choice(i(fxfilter::TYPE), sid + 681, k("fxfilter", "type"), FILTER_TYPES, 2, F_GLOBAL);
+        b.num(i(fxfilter::CUTOFF), sid + 682, k("fxfilter", "cutoff"), 20.0, 20000.0, 2000.0, Log, "Hz", GMS);
+        b.num(i(fxfilter::RES), sid + 683, k("fxfilter", "res"), 0.0, 1.0, 0.1, Lin, "%", GMS);
+        b.num(i(fxfilter::DRIVE), sid + 684, k("fxfilter", "drive"), 0.0, 1.0, 0.0, Lin, "%", GMS);
+        b.num(i(fxfilter::VAR), sid + 685, k("fxfilter", "var"), 0.0, 1.0, 0.0, Lin, "%", GMS);
+        b.num(i(fxfilter::MIX), sid + 686, k("fxfilter", "mix"), 0.0, 1.0, 1.0, Lin, "%", GMS);
+    }
+
+    // --- the fork in the effect chain -------------------------------------
+    let i = |p: usize| SPLIT_BASE + p;
+    b.choice(i(split::MODE), 700, "split.mode", SPLIT_MODES, 0, F_GLOBAL);
+    b.num(i(split::FREQ), 701, "split.freq", 40.0, 12000.0, 400.0, Log, "Hz", GMS);
+    b.num(i(split::BALANCE), 702, "split.balance", 0.0, 1.0, 0.5, Lin, "ab", GMS);
 
     assert_eq!(b.defs.len(), NUM_PARAMS);
     b.defs
@@ -796,6 +852,22 @@ mod tests {
     }
 
     #[test]
+    fn effect_copies_share_one_layout() {
+        let d = defs();
+        for unit in 0..NUM_UNITS {
+            let first = FX_BASES[unit % NUM_FX];
+            let on = unit_on(unit);
+            assert_eq!(d[on].key, format!("{}.on", unit_key(unit)));
+            assert_eq!(d[on].sid, d[first].sid + 1000 * (unit / NUM_FX) as u16);
+            assert_eq!(d[on].curve, Curve::Bool);
+        }
+        // The last parameter of the last copy sits right before the fork.
+        assert_eq!(d[SPLIT_BASE - 1].key, "fxfilter3.mix");
+        assert_eq!(unit_key(1), "dist");
+        assert_eq!(unit_key(NUM_FX + 1), "dist2");
+    }
+
+    #[test]
     fn stable_ids_are_frozen() {
         // Guards against accidental renumbering: shared URLs depend on these.
         let expect = [
@@ -809,6 +881,9 @@ mod tests {
             ("lfo4.phase", 468),
             ("reverb.mix", 649),
             ("fxfilter.mix", 686),
+            ("dist2.drive", 1522),
+            ("fxfilter3.mix", 2686),
+            ("split.balance", 702),
         ];
         for (key, sid) in expect {
             let i = index_of_key(key).expect(key);

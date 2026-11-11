@@ -11,7 +11,7 @@
 
 use crate::filter::{Filter, FilterType};
 use crate::lfo::LfoPoint;
-use crate::params::{self, defs, Curve, NUM_FX, NUM_LFO, NUM_PARAMS, NUM_SLOTS};
+use crate::params::{self, defs, Curve, NUM_LFO, NUM_PARAMS, NUM_SLOTS, NUM_UNITS};
 use crate::patch::{ModSlot, Patch, NO_DEST};
 use crate::synth::{tap, tele, Synth, MAX_VOICES};
 use crate::util::BLOCK;
@@ -217,20 +217,23 @@ pub extern "C" fn lfo_shape_get(l: usize) -> usize {
     shape.len()
 }
 
-// --- effect order -------------------------------------------------------------
+// --- effect chain -------------------------------------------------------------
 
-/// Reads `NUM_FX` bytes from the IO buffer. Returns 1 if it was a valid
-/// permutation.
+/// Reads the processing order of the effect units (`NUM_UNITS` bytes) and
+/// then the lane of each unit (`NUM_UNITS` bytes, indexed by unit) from the
+/// IO buffer. Returns 1 if they were valid.
 #[no_mangle]
-pub extern "C" fn fx_order_set() -> u32 {
-    let order: Vec<u8> = io()[..NUM_FX].to_vec();
-    synth().set_fx_order(&order) as u32
+pub extern "C" fn fx_chain_set() -> u32 {
+    let bytes: Vec<u8> = io()[..NUM_UNITS * 2].to_vec();
+    synth().set_fx_chain(&bytes[..NUM_UNITS], &bytes[NUM_UNITS..]) as u32
 }
 
+/// Writes the order and the lanes in the layout `fx_chain_set` reads.
 #[no_mangle]
-pub extern "C" fn fx_order_get() -> usize {
-    let order = synth().patch.fx_order;
-    write_bytes(&order)
+pub extern "C" fn fx_chain_get() -> usize {
+    let patch = &synth().patch;
+    let bytes: Vec<u8> = patch.fx_order.iter().chain(patch.fx_lane.iter()).copied().collect();
+    write_bytes(&bytes)
 }
 
 // --- whole patch --------------------------------------------------------------
@@ -434,7 +437,13 @@ pub fn describe_json() -> String {
     }
     o.push_str("],\"sources\":");
     json_list(&mut o, &params::SOURCE_KEYS);
+    // "fx" lists the effect units ("dist", "dist2", ...), "fxKinds" the
+    // kinds of effect they are copies of.
+    let units: Vec<String> = (0..NUM_UNITS).map(params::unit_key).collect();
+    let units: Vec<&str> = units.iter().map(|k| k.as_str()).collect();
     o.push_str(",\"fx\":");
+    json_list(&mut o, &units);
+    o.push_str(",\"fxKinds\":");
     json_list(&mut o, &params::FX_KEYS);
     o.push_str(",\"tables\":");
     json_list(&mut o, crate::tables::TABLE_NAMES);
@@ -453,11 +462,14 @@ pub fn describe_json() -> String {
         crate::lfo::MAX_POINTS
     ));
     o.push_str(&format!(
-        ",\"tap\":{{\"count\":{},\"len\":{},\"oscA\":0,\"oscB\":1,\"sub\":2,\"noise\":3,\"filterIn\":4,\"filterOut\":5,\"amp\":6,\"mix\":{},\"fx\":{},\"out\":{}}}",
+        ",\"tap\":{{\"count\":{},\"len\":{},\"oscA\":0,\"oscB\":1,\"sub\":2,\"noise\":3,\"filterIn\":4,\"filterOut\":5,\"amp\":6,\"mix\":{},\"fx\":{},\"splitA\":{},\"splitB\":{},\"splitOut\":{},\"out\":{}}}",
         tap::N,
         tap::LEN,
         tap::MIX,
         tap::FX,
+        tap::SPLIT_A,
+        tap::SPLIT_B,
+        tap::SPLIT_OUT,
         tap::OUT
     ));
     o.push_str(&format!(

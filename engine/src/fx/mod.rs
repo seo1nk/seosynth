@@ -1,4 +1,5 @@
-//! Master effects: building blocks and the reorderable chain.
+//! Master effects: building blocks, and the chain that runs them: units in
+//! any order, with one optional fork into two parallel lanes.
 
 mod delay;
 mod dist;
@@ -15,10 +16,11 @@ pub use modulation::{Chorus, Flanger, Hyper, Phaser};
 pub use reverb::Reverb;
 
 use crate::filter::{Filter, FilterParams, FilterType};
-use crate::params::{self, fxfilter, ParamDef, FXFILTER_BASE, FX_BASES, NUM_FX};
+use crate::params::{self, fxfilter, split, unit_on, unit_shift, ParamDef, FXFILTER_BASE, NUM_FX, NUM_UNITS, SPLIT_BASE};
+use crate::patch::lane;
 use crate::util::{BLOCK, PI, TAU};
 
-/// Effect ids, matching `params::FX_KEYS`.
+/// Kinds of effect, matching `params::FX_KEYS`.
 pub mod id {
     pub const HYPER: usize = 0;
     pub const DIST: usize = 1;
@@ -33,23 +35,27 @@ pub mod id {
 }
 
 /// Parameter access for one block of effect processing.
+#[derive(Clone, Copy)]
 pub struct Ctx<'a> {
     /// Modulated, normalised parameter values.
     pub m: &'a [f32],
     pub defs: &'static [ParamDef],
     pub sr: f32,
     pub bpm: f32,
+    /// Added to every index: effects address the parameters of the first
+    /// copy, and this moves them to the copy that is being processed.
+    pub shift: usize,
 }
 
 impl<'a> Ctx<'a> {
     /// Parameter value in real units.
     #[inline]
     pub fn v(&self, idx: usize) -> f32 {
-        self.defs[idx].to_plain(self.m[idx])
+        self.defs[idx + self.shift].to_plain(self.m[idx + self.shift])
     }
     #[inline]
     pub fn on(&self, idx: usize) -> bool {
-        self.m[idx] >= 0.5
+        self.m[idx + self.shift] >= 0.5
     }
     /// Length in seconds of a tempo division.
     pub fn division_seconds(&self, idx: usize) -> f32 {
@@ -236,95 +242,273 @@ pub fn allpass_coeff(freq: f32, sr: f32) -> f32 {
 // The chain
 // ---------------------------------------------------------------------------
 
+/// Signal taps written by the chain: one after each unit, then the two lane
+/// inputs and the output of the fork.
+pub mod tap {
+    use crate::params::NUM_UNITS;
+    pub const SPLIT_A: usize = NUM_UNITS;
+    pub const SPLIT_B: usize = NUM_UNITS + 1;
+    pub const SPLIT_OUT: usize = NUM_UNITS + 2;
+    pub const N: usize = NUM_UNITS + 3;
+}
+
+pub type Taps = [[f32; BLOCK]; tap::N];
+
+enum Unit {
+    Hyper(Hyper),
+    Dist(Distortion),
+    Flanger(Flanger),
+    Phaser(Phaser),
+    Chorus(Chorus),
+    Delay(Delay),
+    Comp(Compressor),
+    Reverb(Reverb),
+    Eq(Eq),
+    Filter(Filter),
+}
+
+impl Unit {
+    fn new(kind: usize, sr: f32) -> Unit {
+        match kind {
+            id::HYPER => Unit::Hyper(Hyper::new(sr)),
+            id::DIST => Unit::Dist(Distortion::new()),
+            id::FLANGER => Unit::Flanger(Flanger::new(sr)),
+            id::PHASER => Unit::Phaser(Phaser::new()),
+            id::CHORUS => Unit::Chorus(Chorus::new(sr)),
+            id::DELAY => Unit::Delay(Delay::new(sr)),
+            id::COMP => Unit::Comp(Compressor::new()),
+            id::REVERB => Unit::Reverb(Reverb::new(sr)),
+            id::EQ => Unit::Eq(Eq::new()),
+            _ => Unit::Filter(Filter::default()),
+        }
+    }
+
+    fn clear(&mut self) {
+        match self {
+            Unit::Hyper(u) => u.clear(),
+            Unit::Dist(u) => u.clear(),
+            Unit::Flanger(u) => u.clear(),
+            Unit::Phaser(u) => u.clear(),
+            Unit::Chorus(u) => u.clear(),
+            Unit::Delay(u) => u.clear(),
+            Unit::Comp(u) => u.clear(),
+            Unit::Reverb(u) => u.clear(),
+            Unit::Eq(u) => u.clear(),
+            Unit::Filter(u) => u.reset(),
+        }
+    }
+
+    fn process(&mut self, c: &Ctx, l: &mut [f32], r: &mut [f32]) {
+        match self {
+            Unit::Hyper(u) => u.process(c, l, r),
+            Unit::Dist(u) => u.process(c, l, r),
+            Unit::Flanger(u) => u.process(c, l, r),
+            Unit::Phaser(u) => u.process(c, l, r),
+            Unit::Chorus(u) => u.process(c, l, r),
+            Unit::Delay(u) => u.process(c, l, r),
+            Unit::Comp(u) => u.process(c, l, r),
+            Unit::Reverb(u) => u.process(c, l, r),
+            Unit::Eq(u) => u.process(c, l, r),
+            Unit::Filter(u) => {
+                let i = |p: usize| FXFILTER_BASE + p;
+                let p = FilterParams {
+                    ty: FilterType::from_index(c.v(i(fxfilter::TYPE)) as usize),
+                    cutoff: c.v(i(fxfilter::CUTOFF)),
+                    res: c.v(i(fxfilter::RES)),
+                    drive: c.v(i(fxfilter::DRIVE)),
+                    var: c.v(i(fxfilter::VAR)),
+                    mix: c.v(i(fxfilter::MIX)),
+                    stereo: 0.0,
+                    sr: c.sr,
+                };
+                u.process(&p, l, r);
+            }
+        }
+    }
+}
+
+/// How the fork divides the sound between its two lanes.
+#[derive(Clone, Copy, PartialEq)]
+enum SplitMode {
+    /// The same sound on both lanes.
+    Copy,
+    /// Lows on A, highs on B.
+    Bands,
+    /// The centre on A, the stereo difference on B.
+    MidSide,
+    /// The left channel on A, the right on B.
+    LeftRight,
+}
+
+/// Fourth-order Linkwitz-Riley crossover for one channel. Its two outputs
+/// add up to the input with a flat level (only the phase is shifted).
+#[derive(Clone, Copy, Default)]
+struct Crossover {
+    low: [Biquad; 2],
+    high: [Biquad; 2],
+}
+
+impl Crossover {
+    fn set(&mut self, freq: f32, sr: f32) {
+        const BUTTERWORTH: f32 = 0.707_106_77;
+        for b in self.low.iter_mut() {
+            b.lowpass(freq, BUTTERWORTH, sr);
+        }
+        for b in self.high.iter_mut() {
+            b.highpass(freq, BUTTERWORTH, sr);
+        }
+    }
+
+    #[inline]
+    fn tick(&mut self, x: f32) -> (f32, f32) {
+        let low = self.low[0].tick(x);
+        let high = self.high[0].tick(x);
+        (self.low[1].tick(low), self.high[1].tick(high))
+    }
+
+    fn clear(&mut self) {
+        self.low.iter_mut().chain(self.high.iter_mut()).for_each(|b| b.clear());
+    }
+
+    fn flush(&mut self) {
+        self.low.iter_mut().chain(self.high.iter_mut()).for_each(|b| b.flush());
+    }
+}
+
 pub struct FxChain {
-    hyper: Hyper,
-    dist: Distortion,
-    flanger: Flanger,
-    phaser: Phaser,
-    chorus: Chorus,
-    delay: Delay,
-    comp: Compressor,
-    reverb: Reverb,
-    eq: Eq,
-    filter: Filter,
-    was_on: [bool; NUM_FX],
+    units: Vec<Unit>,
+    was_on: [bool; NUM_UNITS],
+    crossover: [Crossover; 2],
+    was_split: bool,
 }
 
 impl FxChain {
     pub fn new(sr: f32) -> Self {
         FxChain {
-            hyper: Hyper::new(sr),
-            dist: Distortion::new(),
-            flanger: Flanger::new(sr),
-            phaser: Phaser::new(),
-            chorus: Chorus::new(sr),
-            delay: Delay::new(sr),
-            comp: Compressor::new(),
-            reverb: Reverb::new(sr),
-            eq: Eq::new(),
-            filter: Filter::default(),
-            was_on: [false; NUM_FX],
+            units: (0..NUM_UNITS).map(|u| Unit::new(u % NUM_FX, sr)).collect(),
+            was_on: [false; NUM_UNITS],
+            crossover: [Crossover::default(); 2],
+            was_split: false,
         }
     }
 
-    fn clear(&mut self, fx: usize) {
-        match fx {
-            id::HYPER => self.hyper.clear(),
-            id::DIST => self.dist.clear(),
-            id::FLANGER => self.flanger.clear(),
-            id::PHASER => self.phaser.clear(),
-            id::CHORUS => self.chorus.clear(),
-            id::DELAY => self.delay.clear(),
-            id::COMP => self.comp.clear(),
-            id::REVERB => self.reverb.clear(),
-            id::EQ => self.eq.clear(),
-            _ => self.filter.reset(),
-        }
+    /// Runs one unit and records what leaves it.
+    fn run(&mut self, unit: usize, c: &Ctx, l: &mut [f32], r: &mut [f32], taps: &mut Taps) {
+        let c = Ctx { shift: unit_shift(unit), ..*c };
+        self.units[unit].process(&c, l, r);
+        write_tap(&mut taps[unit], l, r);
     }
 
-    /// Runs the enabled effects in `order`. After each unit (enabled or
-    /// not) the mono signal is copied to `taps[unit]` for the UI meters.
-    pub fn process(&mut self, order: &[u8; NUM_FX], c: &Ctx, l: &mut [f32], r: &mut [f32], taps: &mut [[f32; BLOCK]; NUM_FX]) {
-        let n = l.len();
-        for &fx in order.iter() {
-            let fx = (fx as usize).min(NUM_FX - 1);
-            let on = c.on(FX_BASES[fx]);
-            if on && !self.was_on[fx] {
+    /// Runs the enabled units. Units on the main lane run one after the
+    /// other in `order`; where the first unit of lane A or B comes up, the
+    /// sound forks, each lane runs its own units, and the lanes are mixed
+    /// again (see `patch::FxGroups`). The taps of units that are off stay
+    /// silent.
+    pub fn process(&mut self, order: &[u8; NUM_UNITS], lanes: &[u8; NUM_UNITS], c: &Ctx, l: &mut [f32], r: &mut [f32], taps: &mut Taps) {
+        let on: [bool; NUM_UNITS] = core::array::from_fn(|u| c.on(unit_on(u)));
+        for u in 0..NUM_UNITS {
+            if on[u] && !self.was_on[u] {
                 // Switched on: start from silence, not from a stale tail.
-                self.clear(fx);
+                self.units[u].clear();
             }
-            self.was_on[fx] = on;
-            if on {
-                match fx {
-                    id::HYPER => self.hyper.process(c, l, r),
-                    id::DIST => self.dist.process(c, l, r),
-                    id::FLANGER => self.flanger.process(c, l, r),
-                    id::PHASER => self.phaser.process(c, l, r),
-                    id::CHORUS => self.chorus.process(c, l, r),
-                    id::DELAY => self.delay.process(c, l, r),
-                    id::COMP => self.comp.process(c, l, r),
-                    id::REVERB => self.reverb.process(c, l, r),
-                    id::EQ => self.eq.process(c, l, r),
-                    _ => {
-                        let i = |p: usize| FXFILTER_BASE + p;
-                        let p = FilterParams {
-                            ty: FilterType::from_index(c.v(i(fxfilter::TYPE)) as usize),
-                            cutoff: c.v(i(fxfilter::CUTOFF)),
-                            res: c.v(i(fxfilter::RES)),
-                            drive: c.v(i(fxfilter::DRIVE)),
-                            var: c.v(i(fxfilter::VAR)),
-                            mix: c.v(i(fxfilter::MIX)),
-                            stereo: 0.0,
-                            sr: c.sr,
-                        };
-                        self.filter.process(&p, l, r);
-                    }
+        }
+        self.was_on = on;
+
+        let mut forked = false;
+        for &u in order.iter() {
+            let u = (u as usize).min(NUM_UNITS - 1);
+            if !on[u] {
+                continue;
+            }
+            if lanes[u] == lane::MAIN {
+                self.run(u, c, l, r, taps);
+            } else if !forked {
+                forked = true;
+                self.fork(order, lanes, &on, c, l, r, taps);
+            }
+        }
+        if !forked {
+            self.was_split = false;
+        }
+    }
+
+    /// The fork: divides the sound, runs both lanes, mixes them again.
+    #[allow(clippy::too_many_arguments)]
+    fn fork(&mut self, order: &[u8; NUM_UNITS], lanes: &[u8; NUM_UNITS], on: &[bool; NUM_UNITS], c: &Ctx, l: &mut [f32], r: &mut [f32], taps: &mut Taps) {
+        let n = l.len();
+        let mode = match c.v(SPLIT_BASE + split::MODE) as usize {
+            1 => SplitMode::Bands,
+            2 => SplitMode::MidSide,
+            3 => SplitMode::LeftRight,
+            _ => SplitMode::Copy,
+        };
+        if !self.was_split {
+            self.crossover.iter_mut().for_each(|x| x.clear());
+            self.was_split = true;
+        }
+
+        // Divide. In every mode A + B is the sound that came in (for the
+        // copies: twice it, which the mix below takes back).
+        let (mut al, mut ar, mut bl, mut br) = ([0.0f32; BLOCK], [0.0f32; BLOCK], [0.0f32; BLOCK], [0.0f32; BLOCK]);
+        match mode {
+            SplitMode::Copy => {
+                al[..n].copy_from_slice(l);
+                ar[..n].copy_from_slice(r);
+                bl[..n].copy_from_slice(l);
+                br[..n].copy_from_slice(r);
+            }
+            SplitMode::Bands => {
+                let freq = c.v(SPLIT_BASE + split::FREQ);
+                self.crossover.iter_mut().for_each(|x| x.set(freq, c.sr));
+                for s in 0..n {
+                    (al[s], bl[s]) = self.crossover[0].tick(l[s]);
+                    (ar[s], br[s]) = self.crossover[1].tick(r[s]);
+                }
+                self.crossover.iter_mut().for_each(|x| x.flush());
+            }
+            SplitMode::MidSide => {
+                for s in 0..n {
+                    let (mid, side) = ((l[s] + r[s]) * 0.5, (l[s] - r[s]) * 0.5);
+                    (al[s], ar[s]) = (mid, mid);
+                    (bl[s], br[s]) = (side, -side);
                 }
             }
-            for s in 0..n {
-                taps[fx][s] = (l[s] + r[s]) * 0.5;
+            SplitMode::LeftRight => {
+                al[..n].copy_from_slice(l);
+                br[..n].copy_from_slice(r);
             }
         }
+        write_tap(&mut taps[tap::SPLIT_A], &al[..n], &ar[..n]);
+        write_tap(&mut taps[tap::SPLIT_B], &bl[..n], &br[..n]);
+
+        for &u in order.iter() {
+            let u = (u as usize).min(NUM_UNITS - 1);
+            if !on[u] {
+                continue;
+            }
+            match lanes[u] {
+                lane::MAIN => {}
+                lane::A => self.run(u, c, &mut al[..n], &mut ar[..n], taps),
+                _ => self.run(u, c, &mut bl[..n], &mut br[..n], taps),
+            }
+        }
+
+        // Mix. At the centre an empty fork leaves the sound as it was: two
+        // copies come back at half level each, complementary parts at full.
+        let bal = c.v(SPLIT_BASE + split::BALANCE);
+        let (ga, gb) = if mode == SplitMode::Copy { (1.0 - bal, bal) } else { balance(bal) };
+        for s in 0..n {
+            l[s] = al[s] * ga + bl[s] * gb;
+            r[s] = ar[s] * ga + br[s] * gb;
+        }
+        write_tap(&mut taps[tap::SPLIT_OUT], l, r);
+    }
+}
+
+#[inline]
+fn write_tap(tap: &mut [f32; BLOCK], l: &[f32], r: &[f32]) {
+    for s in 0..l.len() {
+        tap[s] = (l[s] + r[s]) * 0.5;
     }
 }
 
@@ -367,47 +551,250 @@ mod tests {
         assert!(peak < 1e-3);
     }
 
-    /// Every effect, alone and all together, in several orders, fed with
-    /// noise bursts: output must stay finite and reasonably bounded.
-    #[test]
-    fn effects_are_stable() {
-        let d = defs();
-        let sr = 48_000.0;
+    use crate::params::{dist, DIST_BASE};
+    use crate::patch::DEFAULT_FX_ORDER;
+
+    const SR: f32 = 48_000.0;
+
+    fn defaults() -> Vec<f32> {
+        let m: Vec<f32> = defs().iter().map(|p| p.default_norm()).collect();
+        assert_eq!(m.len(), NUM_PARAMS);
+        m
+    }
+
+    fn set(m: &mut [f32], idx: usize, plain: f32) {
+        m[idx] = defs()[idx].to_norm(plain);
+    }
+
+    fn order_starting(start: &[u8]) -> [u8; NUM_UNITS] {
+        let mut order = [0u8; NUM_UNITS];
+        let rest = (0..NUM_UNITS as u8).filter(|u| !start.contains(u));
+        for (slot, u) in order.iter_mut().zip(start.iter().copied().chain(rest)) {
+            *slot = u;
+        }
+        order
+    }
+
+    /// Runs noise bursts (different left and right) through a chain and
+    /// returns the interleaved output.
+    fn render(m: &[f32], order: &[u8; NUM_UNITS], lanes: &[u8; NUM_UNITS], blocks: usize) -> Vec<f32> {
+        let mut chain = FxChain::new(SR);
         let mut rng = Rng::new(11);
-        let orders: [[u8; NUM_FX]; 2] = [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9], [9, 7, 5, 6, 1, 0, 3, 2, 4, 8]];
-        for case in 0..=NUM_FX {
-            for order in orders.iter() {
-                let mut m: Vec<f32> = d.iter().map(|p| p.default_norm()).collect();
-                assert_eq!(m.len(), NUM_PARAMS);
-                for fx in 0..NUM_FX {
-                    if case == NUM_FX || case == fx {
-                        m[FX_BASES[fx]] = 1.0;
-                    }
+        let mut out = Vec::with_capacity(blocks * BLOCK * 2);
+        let mut taps = [[0.0f32; BLOCK]; tap::N];
+        for b in 0..blocks {
+            let mut l = [0.0f32; BLOCK];
+            let mut r = [0.0f32; BLOCK];
+            if b % 300 < 100 {
+                for s in 0..BLOCK {
+                    l[s] = rng.bipolar() * 0.5;
+                    r[s] = rng.bipolar() * 0.5;
                 }
-                let mut chain = FxChain::new(sr);
-                let mut taps = [[0.0f32; BLOCK]; NUM_FX];
-                let mut peak = 0.0f32;
-                let mut energy = 0.0f64;
-                for b in 0..1500 {
-                    let mut l = [0.0f32; BLOCK];
-                    let mut r = [0.0f32; BLOCK];
-                    if b % 300 < 100 {
-                        for s in 0..BLOCK {
-                            l[s] = rng.bipolar() * 0.5;
-                            r[s] = rng.bipolar() * 0.5;
-                        }
-                    }
-                    let c = Ctx { m: &m, defs: d, sr, bpm: 120.0 };
-                    chain.process(order, &c, &mut l, &mut r, &mut taps);
-                    for v in l.iter().chain(r.iter()) {
-                        assert!(v.is_finite(), "case {case}");
-                        peak = peak.max(v.abs());
-                        energy += (*v as f64).powi(2);
-                    }
-                }
-                assert!(peak < 8.0, "case {case} peak {peak}");
-                assert!(energy > 1.0, "case {case} went silent");
+            }
+            let c = Ctx { m, defs: defs(), sr: SR, bpm: 120.0, shift: 0 };
+            chain.process(order, lanes, &c, &mut l, &mut r, &mut taps);
+            for s in 0..BLOCK {
+                out.push(l[s]);
+                out.push(r[s]);
             }
         }
+        out
+    }
+
+    fn energy(x: &[f32]) -> f64 {
+        x.iter().map(|v| (*v as f64).powi(2)).sum()
+    }
+
+    fn max_diff(a: &[f32], b: &[f32]) -> f32 {
+        a.iter().zip(b).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()))
+    }
+
+    const MAIN: [u8; NUM_UNITS] = [lane::MAIN; NUM_UNITS];
+
+    /// Every kind of effect, alone and all together, in several orders and
+    /// across the fork: output must stay finite and reasonably bounded.
+    #[test]
+    fn effects_are_stable() {
+        let orders = [DEFAULT_FX_ORDER, order_starting(&[9, 7, 5, 6, 1, 0, 3, 2, 4, 8])];
+        let mut forked = MAIN;
+        for u in 0..NUM_FX {
+            forked[u] = [lane::MAIN, lane::A, lane::B][u % 3];
+        }
+        for case in 0..=NUM_FX {
+            for order in orders.iter() {
+                for lanes in [MAIN, forked] {
+                    let mut m = defaults();
+                    for fx in 0..NUM_FX {
+                        if case == NUM_FX || case == fx {
+                            m[unit_on(fx)] = 1.0;
+                        }
+                    }
+                    let out = render(&m, order, &lanes, 1500);
+                    assert!(out.iter().all(|v| v.is_finite()), "case {case}");
+                    let peak = out.iter().fold(0.0f32, |p, v| p.max(v.abs()));
+                    assert!(peak < 8.0, "case {case} peak {peak}");
+                    assert!(energy(&out) > 1.0, "case {case} went silent");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_copy_of_an_effect_sounds_the_same() {
+        // Long enough for the first echo of the delay to come back.
+        for kind in 0..NUM_FX {
+            let mut outs = Vec::new();
+            for copy in 0..crate::params::FX_COPIES {
+                let unit = kind + copy * NUM_FX;
+                let mut m = defaults();
+                m[unit_on(unit)] = 1.0;
+                // The EQ is flat until a band is moved.
+                set(&mut m, crate::params::EQ_BASE + unit_shift(unit) + crate::params::eq::LOW_GAIN, 6.0);
+                outs.push(render(&m, &DEFAULT_FX_ORDER, &MAIN, 600));
+            }
+            let dry = render(&defaults(), &DEFAULT_FX_ORDER, &MAIN, 600);
+            assert!(max_diff(&outs[0], &dry) > 1e-3, "kind {kind} does nothing");
+            assert!(max_diff(&outs[0], &outs[1]) < 1e-6, "kind {kind} copy 2");
+            assert!(max_diff(&outs[0], &outs[2]) < 1e-6, "kind {kind} copy 3");
+        }
+    }
+
+    #[test]
+    fn stacked_copies_run_one_after_the_other() {
+        // Two distortions in a row distort more than one.
+        let mut m = defaults();
+        m[unit_on(id::DIST)] = 1.0;
+        let once = render(&m, &DEFAULT_FX_ORDER, &MAIN, 200);
+        m[unit_on(id::DIST + NUM_FX)] = 1.0;
+        let twice = render(&m, &DEFAULT_FX_ORDER, &MAIN, 200);
+        assert!(max_diff(&once, &twice) > 0.05);
+        // And each copy has its own settings.
+        set(&mut m, DIST_BASE + unit_shift(id::DIST + NUM_FX) + dist::MIX, 0.0);
+        assert!(max_diff(&once, &render(&m, &DEFAULT_FX_ORDER, &MAIN, 200)) < 1e-6);
+    }
+
+    /// A fork whose lanes do nothing must not change the sound.
+    #[test]
+    fn an_empty_fork_is_transparent() {
+        let dry = render(&defaults(), &DEFAULT_FX_ORDER, &MAIN, 300);
+        for mode in 0..4 {
+            let mut m = defaults();
+            // A distortion at 0% mix passes its input: a lane with nothing in it.
+            m[unit_on(id::DIST)] = 1.0;
+            set(&mut m, DIST_BASE + dist::MIX, 0.0);
+            set(&mut m, SPLIT_BASE + split::MODE, mode as f32);
+            let mut lanes = MAIN;
+            lanes[id::DIST] = lane::A;
+            let out = render(&m, &DEFAULT_FX_ORDER, &lanes, 300);
+            if mode == 1 {
+                // The crossover shifts the phase but keeps the level.
+                let ratio = energy(&out) / energy(&dry);
+                assert!((ratio - 1.0).abs() < 0.02, "bands: energy ratio {ratio}");
+            } else {
+                assert!(max_diff(&out, &dry) < 1e-5, "mode {mode}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_lane_only_affects_its_part_of_the_sound() {
+        let mut m = defaults();
+        m[unit_on(id::DIST)] = 1.0;
+        set(&mut m, DIST_BASE + dist::MIX, 0.0);
+        let mut lanes = MAIN;
+        lanes[id::DIST] = lane::A;
+        let left = |x: &[f32]| x.iter().step_by(2).copied().collect::<Vec<f32>>();
+        let right = |x: &[f32]| x.iter().skip(1).step_by(2).copied().collect::<Vec<f32>>();
+        let dry = render(&defaults(), &DEFAULT_FX_ORDER, &MAIN, 300);
+
+        // Left / right, balance fully on A: only the left channel is left.
+        set(&mut m, SPLIT_BASE + split::MODE, 3.0);
+        set(&mut m, SPLIT_BASE + split::BALANCE, 0.0);
+        let out = render(&m, &DEFAULT_FX_ORDER, &lanes, 300);
+        assert!(max_diff(&left(&out), &left(&dry)) < 1e-5);
+        assert_eq!(energy(&right(&out)), 0.0);
+
+        // Mid / side, balance fully on A: both channels carry the centre.
+        set(&mut m, SPLIT_BASE + split::MODE, 2.0);
+        let out = render(&m, &DEFAULT_FX_ORDER, &lanes, 300);
+        assert!(max_diff(&left(&out), &right(&out)) < 1e-6);
+        assert!(energy(&out) > 1.0);
+
+        // Copies, balance fully on B: lane A (with the distortion now at
+        // full) is not heard at all.
+        set(&mut m, SPLIT_BASE + split::MODE, 0.0);
+        set(&mut m, SPLIT_BASE + split::BALANCE, 1.0);
+        set(&mut m, DIST_BASE + dist::MIX, 1.0);
+        assert!(max_diff(&render(&m, &DEFAULT_FX_ORDER, &lanes, 300), &dry) < 1e-5);
+    }
+
+    #[test]
+    fn the_crossover_separates_lows_from_highs() {
+        let mut bands = Crossover::default();
+        bands.set(1000.0, SR);
+        let mut measure = |freq: f32| {
+            bands.clear();
+            let (mut low, mut high, mut sum) = (0.0f64, 0.0f64, 0.0f64);
+            for i in 0..9600 {
+                let x = (TAU * freq * i as f32 / SR).sin();
+                let (lo, hi) = bands.tick(x);
+                if i >= 4800 {
+                    low += (lo as f64).powi(2);
+                    high += (hi as f64).powi(2);
+                    sum += ((lo + hi) as f64).powi(2);
+                }
+            }
+            // A full-scale sine has a mean square of one half.
+            (low / 2400.0, high / 2400.0, sum / 2400.0)
+        };
+        let (low, high, sum) = measure(100.0);
+        assert!(low > 0.95 && high < 1e-6, "100 Hz: low {low} high {high}");
+        assert!((sum - 1.0).abs() < 0.02);
+        let (low, high, sum) = measure(8000.0);
+        assert!(high > 0.95 && low < 1e-6, "8 kHz: low {low} high {high}");
+        assert!((sum - 1.0).abs() < 0.02);
+        // At the crossover both are 6 dB down and add up to the full level.
+        let (low, high, sum) = measure(1000.0);
+        assert!((low - 0.25).abs() < 0.02 && (high - 0.25).abs() < 0.02, "1 kHz: low {low} high {high}");
+        assert!((sum - 1.0).abs() < 0.02);
+    }
+
+    #[test]
+    fn lanes_run_side_by_side_not_in_series() {
+        // Reverb and delay on separate lanes: the delay's echoes are not
+        // reverberated, so the result differs from running them in a row.
+        let mut m = defaults();
+        m[unit_on(id::DELAY)] = 1.0;
+        m[unit_on(id::REVERB)] = 1.0;
+        let series = render(&m, &DEFAULT_FX_ORDER, &MAIN, 600);
+        let mut lanes = MAIN;
+        lanes[id::DELAY] = lane::A;
+        lanes[id::REVERB] = lane::B;
+        let parallel = render(&m, &DEFAULT_FX_ORDER, &lanes, 600);
+        assert!(max_diff(&series, &parallel) > 0.01);
+        // With everything on lane A and the balance on A, it is a plain series again.
+        lanes[id::REVERB] = lane::A;
+        set(&mut m, SPLIT_BASE + split::BALANCE, 0.0);
+        assert!(max_diff(&series, &render(&m, &DEFAULT_FX_ORDER, &lanes, 600)) < 1e-5);
+    }
+
+    #[test]
+    fn taps_follow_the_units_and_the_fork() {
+        let mut m = defaults();
+        m[unit_on(id::DIST)] = 1.0;
+        m[unit_on(id::EQ)] = 1.0;
+        let mut lanes = MAIN;
+        lanes[id::EQ] = lane::B;
+        let mut chain = FxChain::new(SR);
+        let mut taps = [[0.0f32; BLOCK]; tap::N];
+        let mut l = [0.25f32; BLOCK];
+        let mut r = [0.25f32; BLOCK];
+        let c = Ctx { m: &m, defs: defs(), sr: SR, bpm: 120.0, shift: 0 };
+        chain.process(&DEFAULT_FX_ORDER, &lanes, &c, &mut l, &mut r, &mut taps);
+        let level = |t: usize| taps[t].iter().fold(0.0f32, |p, v| p.max(v.abs()));
+        assert!(level(id::DIST) > 0.0 && level(id::EQ) > 0.0);
+        assert!(level(tap::SPLIT_A) > 0.0 && level(tap::SPLIT_B) > 0.0 && level(tap::SPLIT_OUT) > 0.0);
+        assert_eq!(level(id::REVERB), 0.0, "a unit that is off stays silent");
+        assert_eq!(level(id::DIST + NUM_FX), 0.0);
     }
 }

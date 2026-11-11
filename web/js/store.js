@@ -24,7 +24,7 @@ export class Store {
   // 'patch'  everything may have changed (preset load, undo)
   // 'slots'  modulation routings changed
   // 'lfo'    (index) an LFO shape changed
-  // 'fx'     effect order changed
+  // 'fx'     the effect chain changed (order or lanes)
   // 'name'   patch name changed
   // 'commit' an edit was completed (good moment to update the share URL)
 
@@ -137,12 +137,13 @@ export class Store {
     this.emit('lfo', l);
   }
 
-  getFxOrder() {
-    return this.core.getFxOrder();
+  /** { order, lanes }: see EngineCore.getFxChain. */
+  getFxChain() {
+    return this.core.getFxChain();
   }
 
-  setFxOrder(order) {
-    if (this.core.setFxOrder(order)) {
+  setFxChain(order, lanes) {
+    if (this.core.setFxChain(order, lanes)) {
       this.#sync();
       this.emit('fx');
     }
@@ -218,8 +219,17 @@ export class Store {
       if (!isDefault) shapes[l + 1] = pts.map((p) => [p.x, p.y, p.curve].map((v) => Number(v.toFixed(4))));
     }
     if (Object.keys(shapes).length) out.lfoShapes = shapes;
-    const order = c.getFxOrder();
-    if (!order.every((v, i) => v === i)) out.fxOrder = order.map((i) => this.info.fx[i]);
+    // The effect chain, up to the point from where the rest is in its
+    // default place: units in ascending order on the main lane.
+    const { order, lanes } = c.getFxChain();
+    let keep = order.length;
+    while (keep > 0 && lanes[order[keep - 1]] === 0 && (keep === order.length || order[keep - 1] < order[keep])) keep--;
+    if (keep > 0) {
+      const listed = order.slice(0, keep);
+      out.fxOrder = listed.map((u) => this.info.fx[u]);
+      const onLane = listed.filter((u) => lanes[u] > 0);
+      if (onLane.length) out.fxLanes = Object.fromEntries(onLane.map((u) => [this.info.fx[u], lanes[u] === 1 ? 'a' : 'b']));
+    }
     return out;
   }
 
@@ -271,10 +281,23 @@ export class Store {
         c.setLfoShape(index, pts.map(([x, y, curve]) => ({ x, y, curve: curve ?? 0 })));
       }
     }
-    if (Array.isArray(obj.fxOrder)) {
-      const order = obj.fxOrder.map((k) => this.info.fx.indexOf(k));
-      if (!c.setFxOrder(order)) warnings.push('invalid effect order');
+    // `fxOrder` lists the units that come first; the rest follow in their
+    // default order. `fxLanes` puts units on lane "a" or "b" of the fork.
+    const fx = this.info.fx;
+    const start = [];
+    for (const key of Array.isArray(obj.fxOrder) ? obj.fxOrder : []) {
+      const unit = fx.indexOf(key);
+      if (unit < 0 || start.includes(unit)) warnings.push(`skipped effect in the order: ${key}`);
+      else start.push(unit);
     }
+    const lanes = fx.map(() => 0);
+    for (const [key, name] of Object.entries(obj.fxLanes ?? {})) {
+      const unit = fx.indexOf(key);
+      const lane = ['a', 'b'].indexOf(name) + 1;
+      if (unit < 0 || !lane) warnings.push(`skipped lane: ${key} -> ${name}`);
+      else lanes[unit] = lane;
+    }
+    c.setFxChain([...start, ...fx.map((_, u) => u).filter((u) => !start.includes(u))], lanes);
     c.setName(typeof obj.name === 'string' ? obj.name : 'Untitled');
     this.#reloaded();
     if (commit) this.commit();

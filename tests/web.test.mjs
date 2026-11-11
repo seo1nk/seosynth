@@ -30,7 +30,7 @@ test('every parameter has a label and help text in both languages', async () => 
       assert.notEqual(i18n.sourceName(key), key, `no ${lang} name for source ${key}`);
       assert.ok(i18n.sourceHelp(key).length > 0, `no ${lang} description for source ${key}`);
     }
-    for (const key of ['oscA', 'oscB', 'sub', 'noise', 'filter', 'amp', 'out', ...store.info.fx]) {
+    for (const key of ['oscA', 'oscB', 'sub', 'noise', 'filter', 'amp', 'split', 'out', ...store.info.fx]) {
       assert.notEqual(i18n.nodeName(key), key, `no ${lang} name for node ${key}`);
       assert.ok(i18n.nodeRole(key).length > 0, `no ${lang} role for node ${key}`);
       assert.ok(i18n.nodeAbout(key).length > 0, `no ${lang} explanation for node ${key}`);
@@ -136,9 +136,12 @@ test('fromJSON rejects junk and tolerates unknown keys', async () => {
     name: 'x',
     params: { 'filter.cutoff': 500, 'no.such': 1, 'filter.type': 'Nope' },
     mods: [{ source: 'lfo9', target: 'filter.cutoff', amount: 1 }, { source: 'lfo1', target: 'oscA.wt', amount: 1 }],
-    fxOrder: ['reverb'],
+    fxOrder: ['reverb', 'nope', 'reverb'],
+    fxLanes: { delay2: 'a', dist: 'z' },
   });
-  assert.equal(warnings.length, 5);
+  assert.equal(warnings.length, 7);
+  assert.equal(store.info.fx[store.getFxChain().order[0]], 'reverb');
+  assert.equal(store.getFxChain().lanes[store.info.fx.indexOf('delay2')], 1);
   assert.ok(Math.abs(store.plain('filter.cutoff') - 500) < 1);
 });
 
@@ -343,4 +346,93 @@ test('zip writer', () => {
   assert.equal(view.getUint32(dirStart, true), 0x02014b50);
   // Stored data is readable in place.
   assert.equal(new TextDecoder().decode(archive.subarray(30 + 5, 30 + 5 + 5)), 'hello');
+});
+
+test('effect chain: stacking, lanes and the fork', async () => {
+  const nodes = await import('../web/js/ui/nodes.js');
+  const { fxGroups, fxChain, fxSpares, fxPeers, setOn, setLane, shiftFx, unsplit, duplicateFx, laneOf, taps, movableNodes, LANE, SPLIT } = nodes;
+  const { store } = await makeStore();
+  store.init();
+  const groups = () => {
+    const { pre, a, b, post } = fxGroups(store);
+    return { pre, a, b, post };
+  };
+  const tap = store.info.tap;
+  const unitTap = (id) => tap.fx + store.info.fx.indexOf(id);
+
+  // The tray offers one of each kind; switching one on brings out the next copy.
+  assert.deepEqual(fxSpares(store), store.info.fxKinds);
+  for (const id of ['dist', 'delay', 'reverb']) setOn(store, id, true);
+  assert.deepEqual(fxChain(store), ['dist', 'delay', 'reverb']);
+  assert.ok(fxSpares(store).includes('dist2') && !fxSpares(store).includes('dist'));
+  setOn(store, 'dist2', true);
+  assert.deepEqual(fxChain(store), ['dist', 'delay', 'reverb', 'dist2'], 'a new effect joins the end');
+  assert.equal(fxGroups(store).split, false);
+  assert.deepEqual(taps(store, 'delay'), { in: unitTap('dist'), out: unitTap('delay') });
+  assert.equal(taps(store, 'out').in, unitTap('dist2'));
+
+  // Stacking copies the settings and puts the copy right behind.
+  store.setPlain(store.idx('delay.feedback'), 0.8);
+  assert.equal(duplicateFx(store, 'delay'), 'delay2');
+  assert.deepEqual(fxChain(store), ['dist', 'delay', 'delay2', 'reverb', 'dist2']);
+  assert.ok(Math.abs(store.plain('delay2.feedback') - 0.8) < 1e-3);
+  assert.equal(duplicateFx(store, 'delay'), 'delay3');
+  assert.equal(duplicateFx(store, 'delay'), null, 'all three copies are in use');
+  setOn(store, 'delay3', false);
+  setOn(store, 'delay2', false);
+
+  // Putting the delay on lane A opens the fork where the delay was.
+  setLane(store, 'delay', LANE.a);
+  assert.deepEqual(groups(), { pre: ['dist'], a: ['delay'], b: [], post: ['reverb', 'dist2'] });
+  setLane(store, 'reverb', LANE.b);
+  assert.deepEqual(groups(), { pre: ['dist'], a: ['delay'], b: ['reverb'], post: ['dist2'] });
+  assert.equal(laneOf(store, 'reverb'), LANE.b);
+  assert.deepEqual(taps(store, SPLIT), { in: unitTap('dist'), out: tap.splitOut });
+  assert.deepEqual(taps(store, 'reverb'), { in: tap.splitB, out: unitTap('reverb') });
+  assert.equal(taps(store, 'dist2').in, tap.splitOut);
+  assert.ok(movableNodes(store).includes(SPLIT));
+
+  // The main line treats the fork as one step; lanes have their own order.
+  assert.deepEqual(fxPeers(store, 'dist'), ['dist', SPLIT, 'dist2']);
+  shiftFx(store, 'dist', 1);
+  assert.deepEqual(groups(), { pre: [], a: ['delay'], b: ['reverb'], post: ['dist', 'dist2'] });
+  shiftFx(store, SPLIT, 1);
+  assert.deepEqual(groups(), { pre: ['dist'], a: ['delay'], b: ['reverb'], post: ['dist2'] });
+  setLane(store, 'dist2', LANE.a);
+  assert.deepEqual(fxPeers(store, 'dist2'), ['delay', 'dist2']);
+  shiftFx(store, 'dist2', -1);
+  assert.deepEqual(groups().a, ['dist2', 'delay']);
+
+  // The whole layout survives the binary patch, JSON and a URL-sized budget.
+  const before = groups();
+  const json = JSON.parse(JSON.stringify(store.toJSON()));
+  assert.deepEqual(json.fxLanes, { dist2: 'a', delay: 'a', reverb: 'b' });
+  const bytes = store.toBytes();
+  store.init();
+  assert.ok(store.loadBytes(bytes));
+  assert.deepEqual(groups(), before);
+  store.init();
+  assert.deepEqual(store.fromJSON(json), []);
+  assert.deepEqual(groups(), before);
+
+  // Leaving a lane lands right behind the fork; switching off leaves the lane too.
+  setLane(store, 'delay', LANE.main);
+  assert.deepEqual(groups(), { pre: ['dist'], a: ['dist2'], b: ['reverb'], post: ['delay'] });
+  setOn(store, 'reverb', false);
+  assert.equal(store.getFxChain().lanes[store.info.fx.indexOf('reverb')], 0);
+  setOn(store, 'reverb', true);
+  assert.deepEqual(groups(), { pre: ['dist'], a: ['dist2'], b: [], post: ['delay', 'reverb'] });
+  unsplit(store);
+  assert.deepEqual(groups(), { pre: ['dist', 'dist2', 'delay', 'reverb'], a: [], b: [], post: [] });
+  assert.equal(fxGroups(store).split, false);
+});
+
+test('old share links with a 10-unit effect order still open', async () => {
+  const { store } = await makeStore();
+  // 'S', version 1, section 5 (fx order): reverb first.
+  const old = Uint8Array.from([0x53, 1, 5, 10, 7, 0, 1, 2, 3, 4, 5, 6, 8, 9]);
+  assert.ok(store.loadBytes(old));
+  const { order, lanes } = store.getFxChain();
+  assert.deepEqual(order.slice(0, 11), [7, 0, 1, 2, 3, 4, 5, 6, 8, 9, 10]);
+  assert.ok(lanes.every((l) => l === 0));
 });

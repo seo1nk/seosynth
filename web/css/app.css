@@ -1088,9 +1088,13 @@ input[type='range'] {
 }
 
 .order {
+  display: flex;
   flex-direction: row;
   align-items: center;
   gap: 8px;
+}
+.order[hidden] {
+  display: none;
 }
 .order .ctl-label {
   flex: 1;
@@ -1870,4 +1874,73 @@ input[type='range'] {
   .switch-track {
     transition: none;
   }
+}
+
+/* --- the fork in the effect chain --------------------------------------- */
+/* Where the sound divides into two lanes. Rounder than an effect: it is a
+   junction, not something that changes the sound. */
+.node.fork {
+  border-radius: 39px;
+  padding-inline: 18px;
+}
+.fork-icon {
+  width: 26px;
+  height: 17px;
+  flex: none;
+  fill: none;
+  stroke: var(--sound);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+/* The name of a lane, sitting on its line where it leaves the fork. */
+.lane-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  padding: 0 7px;
+  border: 1.5px solid var(--sound);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 16px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.lane-tag[hidden] {
+  display: none;
+}
+
+/* In the panel: where an effect sits in the flow. */
+.lane-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.stack {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+.stack[hidden],
+.lane-pick[hidden] {
+  display: none;
+}
+.stack-note {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.io.lanes .io-cell {
+  flex: 1;
+}
+.lane-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  color: var(--muted);
 }

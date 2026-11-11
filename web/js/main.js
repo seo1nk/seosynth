@@ -12,7 +12,7 @@ import { Mods } from './ui/mods.js';
 import { ScopeBank } from './ui/displays.js';
 import { Board } from './ui/board.js';
 import { buildPanel } from './ui/panel.js';
-import { isMover } from './ui/nodes.js';
+import { isMover, SPLIT, fxGroups } from './ui/nodes.js';
 import { Keyboard } from './ui/keyboard.js';
 import { Help, Header, Tour, createToaster, popover, dialog } from './ui/chrome.js';
 
@@ -229,8 +229,12 @@ async function boot() {
       app.movers.clear();
       if (app.selected && isMover(app.selected) && !app.board.visibleMovers().includes(app.selected)) app.select(null);
     });
+    // Undo or a loaded sound may take away the fork whose settings are open.
+    app.on('fx', () => {
+      if (app.selected === SPLIT && !fxGroups(store).split) app.select(null);
+    });
     app.on('commit', writeHash);
-    app.select(reopen);
+    app.select(reopen === SPLIT && !fxGroups(store).split ? null : reopen);
   }
 
   mount(detectLang());

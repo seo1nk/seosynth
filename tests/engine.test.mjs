@@ -25,7 +25,9 @@ test('describes itself', async () => {
   const e = await make();
   assert.ok(e.params.length > 200);
   assert.equal(e.params[e.idx('filter.cutoff')].unit, 'Hz');
-  assert.equal(e.info.fx.length, 10);
+  assert.equal(e.info.fxKinds.length, 10);
+  assert.equal(e.info.fx.length, 30, 'three copies of each kind');
+  assert.deepEqual(e.info.fx.slice(9, 12), ['fxfilter', 'hyper2', 'dist2']);
   assert.ok(e.info.tables.includes('Basic Shapes'));
 });
 
@@ -49,7 +51,12 @@ test('parameter conversion and patch roundtrip', async () => {
   e.setPlain(e.idx('oscA.unison'), 5);
   e.setSlot(0, { src: e.info.sources.indexOf('lfo1'), dst: cutoff, amount: 0.25, bipolar: true });
   e.setLfoShape(1, [{ x: 0, y: 1, curve: 0.5 }, { x: 1, y: 0, curve: 0 }]);
-  e.setFxOrder([7, 0, 1, 2, 3, 4, 5, 6, 8, 9]);
+  // Reverb first, and the second distortion on lane B of the fork.
+  const units = e.info.fx.map((_, u) => u);
+  const order = [7, ...units.filter((u) => u !== 7)];
+  const lanes = units.map((u) => (u === 11 ? 2 : 0));
+  assert.ok(e.setFxChain(order, lanes));
+  assert.equal(e.setFxChain([0, 0, ...units.slice(2)], lanes), false, 'a unit listed twice is rejected');
   e.setName('ねいろ 1');
   const saved = e.save();
   assert.ok(saved.length < 80, `patch is ${saved.length} bytes`);
@@ -63,7 +70,7 @@ test('parameter conversion and patch roundtrip', async () => {
   assert.ok(slot.bipolar);
   assert.ok(Math.abs(slot.amount - 0.25) < 1e-3);
   assert.equal(f.getLfoShape(1).length, 2);
-  assert.deepEqual(f.getFxOrder(), [7, 0, 1, 2, 3, 4, 5, 6, 8, 9]);
+  assert.deepEqual(f.getFxChain(), { order, lanes });
   assert.equal(f.getName(), 'ねいろ 1');
   assert.deepEqual(Array.from(f.save()), Array.from(saved));
 

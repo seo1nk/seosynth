@@ -3,7 +3,9 @@
 // Nodes on the signal path have an on/off switch. The sound line runs from
 // the sources through every node that is switched on and ends at the output;
 // sources run in parallel, and a source that skips the filter gets its own
-// line around it. Effects that are off wait in a tray below the path.
+// line around it. The effect chain can fork into two lanes that run side by
+// side and join again. Effects that are not in use wait in a tray below the
+// path: one of each kind, and switching it on brings out the next copy.
 //
 // Things that move sliders (LFOs, envelopes, macros, how you play) are not
 // part of the path. They float on their own plane and reach down to the
@@ -14,7 +16,7 @@
 
 import { h, s, clamp } from './dom.js';
 import { modColor } from '../theme.js';
-import { SOURCES, MOVERS, isOn, hasSwitch, fxChain, fxIdle, throughFilter, taps, nodeOfParam, nodeOfSource, moverKind, setOn } from './nodes.js';
+import { SOURCES, MOVERS, SPLIT, isOn, hasSwitch, fxGroups, fxSpares, throughFilter, taps, tapOf, nodeOfParam, nodeOfSource, moverKind, setOn } from './nodes.js';
 import { Switch } from './controls.js';
 
 const NW = 172; // path node
@@ -24,6 +26,8 @@ const MH = 44;
 const GAP_X = 46;
 const GAP_Y = 26;
 const ROW_GAP = 50; // between rows when a long chain wraps
+const LANE = (NH + GAP_Y) / 2; // how far each lane of the fork sits from the main line
+const LANE_GAP_V = 34; // phone: between the fork and its lanes
 const NARROW = 640; // below this the path runs top to bottom
 
 const ease = (t) => 1 - Math.pow(1 - t, 3);
@@ -53,6 +57,7 @@ export class Board {
     this.pos = new Map();
     this.nodes = new Map();
     this.moverScopes = new Map();
+    this.fxScopes = new Map();
     this.edges = [];
     this.tethers = [];
     this.vertical = false;
@@ -62,7 +67,9 @@ export class Board {
     this.plane = h('div', { class: 'mover-plane' }, h('span', {}, i18n.t('board.movers')));
     this.trayLabel = h('div', { class: 'tray-label' }, i18n.t('board.tray'));
     this.addBtn = h('button', { type: 'button', class: 'mover add', onclick: () => this.#addMenu() }, h('span', { 'aria-hidden': 'true' }, '＋'), i18n.t('board.addMover'));
-    this.content = h('div', { class: 'board-content' }, this.plane, this.trayLabel, this.svg, this.addBtn);
+    // Name tags on the two lanes of the fork.
+    this.laneTags = [h('span', { class: 'lane-tag' }), h('span', { class: 'lane-tag' })];
+    this.content = h('div', { class: 'board-content' }, this.plane, this.trayLabel, this.svg, this.addBtn, this.laneTags);
     this.hint = h('p', { class: 'board-hint' }, i18n.t('board.hint'));
     this.el = h(
       'section',
@@ -78,8 +85,10 @@ export class Board {
       ),
     );
 
-    this.pathIds = [...SOURCES, 'filter', 'amp', ...store.info.fx, 'out'];
-    for (const id of this.pathIds) {
+    // The fixed part of the path. Effects and the fork come and go: see layout().
+    this.fixedIds = [...SOURCES, 'filter', 'amp', 'out'];
+    this.pathIds = this.fixedIds;
+    for (const id of this.fixedIds) {
       const el = this.#pathNode(id);
       this.nodes.set(id, el);
       this.content.append(el);
@@ -87,7 +96,7 @@ export class Board {
 
     // Anything that changes which nodes are on the path redraws the graph.
     for (const p of store.params) {
-      if (/\.(on|toFilter)$/.test(p.key)) app.watch(p.i, () => this.schedule());
+      if (/\.(on|toFilter)$/.test(p.key) || p.key === 'split.mode') app.watch(p.i, () => this.schedule());
     }
     app.on('fx', () => this.schedule());
     app.on('patch', () => this.schedule());
@@ -96,7 +105,7 @@ export class Board {
     ro.observe(this.el);
     app.onDispose(() => {
       ro.disconnect();
-      for (const scope of this.moverScopes.values()) scope.dispose();
+      for (const scope of [...this.moverScopes.values(), ...this.fxScopes.values()]) scope.dispose();
       cancelAnimationFrame(this.tween);
     });
     app.onFrame((live) => this.#frame(live));
@@ -123,7 +132,7 @@ export class Board {
     const { store, i18n } = app;
     const el = h(
       'div',
-      { class: 'node', role: 'button', tabindex: 0, 'aria-pressed': 'false', dataset: { node: id } },
+      { class: `node ${id === SPLIT ? 'fork' : ''}`, role: 'button', tabindex: 0, 'aria-pressed': 'false', dataset: { node: id } },
       h('div', { class: 'buffs' }),
       h(
         'div',
@@ -137,6 +146,7 @@ export class Board {
               onToggle: (on) => setOn(store, id, on),
             })
           : null,
+        id === SPLIT ? s('svg', { class: 'fork-icon', viewBox: '0 0 24 16', 'aria-hidden': 'true' }, s('path', { d: 'M1 8h6c4 0 4-6 8-6h8M7 8c4 0 4 6 8 6h8' })) : null,
       ),
       app.scopes.add(taps(store, id).out, 'node-scope'),
     );
@@ -271,33 +281,95 @@ export class Board {
     this.vertical = this.el.clientWidth > 0 && this.el.clientWidth < NARROW;
     const V = this.vertical;
     const target = new Map();
-    const chain = fxChain(store);
-    const idle = fxIdle(store);
+    const g = fxGroups(store);
+    const idle = fxSpares(store);
     const stepX = NW + GAP_X;
     const stepY = NH + GAP_Y;
+    const laneLen = Math.max(g.a.length, g.b.length, 1);
+
+    // Effects and the fork exist as nodes only while they are on the board.
+    const shown = [...g.pre, ...(g.split ? [SPLIT] : []), ...g.a, ...g.b, ...g.post, ...idle];
+    for (const id of [...this.fxScopes.keys()]) {
+      if (shown.includes(id)) continue;
+      this.fxScopes.get(id).dispose();
+      this.fxScopes.delete(id);
+      this.nodes.get(id).remove();
+      this.nodes.delete(id);
+      this.pos.delete(id);
+    }
+    for (const id of shown) {
+      if (this.fxScopes.has(id)) continue;
+      const [el, scope] = app.inScope(() => this.#pathNode(id));
+      this.fxScopes.set(id, scope);
+      this.nodes.set(id, el);
+      this.content.append(el);
+    }
+    this.pathIds = [...this.fixedIds, ...shown];
 
     // --- the signal path ---
-    const path = ['filter', 'amp', ...chain, 'out'];
+    const before = ['filter', 'amp', ...g.pre];
+    const behind = [...g.post, 'out'];
     if (!V) {
       SOURCES.forEach((id, i) => target.set(id, { x: 0, y: i * stepY }));
-      const mainY = 1.5 * stepY;
       // A long chain wraps onto further rows so the nodes stay readable.
       const perRow = (this.perRow = this.#perRow());
-      path.forEach((id, n) => target.set(id, { x: ((n % perRow) + 1) * stepX, y: mainY + Math.floor(n / perRow) * (NH + ROW_GAP), row: Math.floor(n / perRow) }));
-      const rows = Math.ceil(path.length / perRow);
-      // Effects that are off wait below the path, five to a row.
-      const trayY = mainY + rows * (NH + ROW_GAP) + 30;
+      const cells = [];
+      let [col, row, forkRow] = [0, 0, -1];
+      const put = (id) => {
+        cells.push({ id, col, row, dy: 0 });
+        if (++col >= perRow) [col, row] = [0, row + 1];
+      };
+      before.forEach(put);
+      if (g.split) {
+        // The fork, its lanes and the node they join in stay on one row.
+        if (col > 0 && col + laneLen + 2 > perRow) [col, row] = [0, row + 1];
+        forkRow = row;
+        cells.push({ id: SPLIT, col, row, dy: 0 });
+        g.a.forEach((id, i) => cells.push({ id, col: col + 1 + i, row, dy: -LANE }));
+        g.b.forEach((id, i) => cells.push({ id, col: col + 1 + i, row, dy: LANE }));
+        col += laneLen + 1;
+      }
+      behind.forEach(put);
+      const rows = cells.at(-1).row + 1;
+      // A row with the fork needs room above and below for the lanes.
+      const rowY = [1.5 * stepY];
+      for (let r = 1; r <= rows; r++) rowY[r] = rowY[r - 1] + NH + ROW_GAP + (r - 1 === forkRow ? LANE : 0) + (r === forkRow ? LANE : 0);
+      for (const c of cells) target.set(c.id, { x: (c.col + 1) * stepX, y: rowY[c.row] + c.dy });
+      // The line into the first node of a further row comes down the gap above that row.
+      for (const c of cells) if (c.row > 0 && c.col === 0) target.get(c.id).wrapDy = -(NH / 2 + ROW_GAP / 2 + (c.row === forkRow ? LANE : 0));
+      // Effects that are not in use wait below the path, five to a row.
+      const trayY = rowY[rows] + 30;
       const perTray = Math.min(5, perRow);
       idle.forEach((id, j) => target.set(id, { x: stepX + (j % perTray) * (NW + 14), y: trayY + Math.floor(j / perTray) * (NH + 14) }));
       this.trayPos = { x: stepX, y: trayY - 26, show: idle.length > 0 };
     } else {
       SOURCES.forEach((id, i) => target.set(id, { x: (i % 2) * (NW + 12), y: Math.floor(i / 2) * stepY }));
       const chainX = (NW + 12) / 2;
-      path.forEach((id, r) => target.set(id, { x: chainX, y: 2 * stepY + 18 + r * (NH + 28) }));
-      const trayY = 2 * stepY + 18 + path.length * (NH + 28) + 40;
+      let y = 2 * stepY + 18;
+      const put = (id) => {
+        target.set(id, { x: chainX, y });
+        y += NH + 28;
+      };
+      before.forEach(put);
+      if (g.split) {
+        // The lanes run down side by side under the fork.
+        target.set(SPLIT, { x: chainX, y });
+        y += NH + LANE_GAP_V;
+        g.a.forEach((id, i) => target.set(id, { x: 0, y: y + i * (NH + 28) }));
+        g.b.forEach((id, i) => target.set(id, { x: NW + 12, y: y + i * (NH + 28) }));
+        y += laneLen * (NH + 28) + LANE_GAP_V - 28;
+      }
+      behind.forEach(put);
+      const trayY = y + 12;
       idle.forEach((id, j) => target.set(id, { x: (j % 2) * (NW + 12), y: trayY + Math.floor(j / 2) * (NH + 12) }));
       this.trayPos = { x: 0, y: trayY - 26, show: idle.length > 0 };
     }
+    this.fork = g.split;
+    const mode = store.def(store.idx('split.mode')).options[Math.round(store.plain('split.mode'))];
+    this.laneTags.forEach((el, k) => {
+      el.hidden = !g.split;
+      el.textContent = i18n.t(`lane.${mode}.${'ab'[k]}`);
+    });
     for (const id of target.keys()) Object.assign(target.get(id), { w: NW, h: NH });
 
     // --- tags on the nodes that are being moved ---
@@ -377,10 +449,25 @@ export class Board {
       else edgeDefs.push({ from: id, to: 'amp', tap: info.tap[id], around: 'filter' });
     }
     if (filterOn) edgeDefs.push({ from: 'filter', to: 'amp', tap: info.tap.filterOut });
-    const hops = ['amp', ...chain, 'out'];
-    for (let k = 0; k < hops.length - 1; k++) {
-      edgeDefs.push({ from: hops[k], to: hops[k + 1], tap: k === 0 ? info.tap.mix : info.tap.fx + info.fx.indexOf(hops[k]) });
-    }
+    // A run of nodes one after the other; `tap` carries what enters the first.
+    const run = (from, tap, ids, extra) => {
+      for (const id of ids) {
+        edgeDefs.push({ from, to: id, tap, ...extra });
+        [from, tap] = [id, tapOf(store, id)];
+      }
+      return [from, tap];
+    };
+    let [last, lastTap] = run('amp', info.tap.mix, g.pre);
+    if (g.split) {
+      run(last, lastTap, [SPLIT]);
+      const join = behind[0];
+      for (const [lane, ids, tap] of [[1, g.a, info.tap.splitA], [2, g.b, info.tap.splitB]]) {
+        const [end, endTap] = run(SPLIT, tap, ids);
+        // A lane with nothing on it still carries its part of the sound.
+        edgeDefs.push({ from: end, to: join, tap: endTap, lane: ids.length ? 0 : lane });
+      }
+      [last, lastTap] = run(join, tapOf(store, join), behind.slice(1));
+    } else run(last, lastTap, behind);
     this.edges = edgeDefs.map((e) => ({
       ...e,
       level: -1,
@@ -451,11 +538,32 @@ export class Board {
 
     const outOf = (p) => (V ? [p.x + p.w / 2, p.y + p.h] : [p.x + p.w, p.y + p.h / 2]);
     const into = (p) => (V ? [p.x + p.w / 2, p.y] : [p.x, p.y + p.h / 2]);
+    // The line each lane of the fork runs along, and its name tag on the way there.
+    const fork = this.fork && pos.get(SPLIT);
+    const laneLine = (lane) => (V ? fork.x + fork.w / 2 + (lane === 1 ? -1 : 1) * ((NW + 12) / 2) : fork.y + fork.h / 2 + (lane === 1 ? -LANE : LANE));
+    if (fork) {
+      const [fx, fy] = outOf(fork);
+      this.laneTags.forEach((el, k) => {
+        const line = laneLine(k + 1);
+        const at = V ? [(fx + line) / 2, fy + LANE_GAP_V / 2] : [fx + GAP_X / 2, (fy + line) / 2];
+        el.style.transform = `translate(${at[0]}px, ${at[1]}px) translate(-50%, -50%)`;
+      });
+    }
     for (const e of this.edges) {
       const a = outOf(pos.get(e.from));
       const b = into(pos.get(e.to));
       let d;
-      if (e.around) {
+      if (e.lane) {
+        // An empty lane: out to its line, along it, and back in.
+        const line = laneLine(e.lane);
+        if (V) {
+          const k = LANE_GAP_V / 2;
+          d = `M${a[0]} ${a[1]}C${a[0]} ${a[1] + k} ${line} ${a[1] + k} ${line} ${a[1] + 2 * k}L${line} ${b[1] - 2 * k}C${line} ${b[1] - k} ${b[0]} ${b[1] - k} ${b[0]} ${b[1]}`;
+        } else {
+          const k = GAP_X / 2;
+          d = `M${a[0]} ${a[1]}C${a[0] + k} ${a[1]} ${a[0] + k} ${line} ${a[0] + 2 * k} ${line}L${b[0] - 2 * k} ${line}C${b[0] - k} ${line} ${b[0] - k} ${b[1]} ${b[0]} ${b[1]}`;
+        }
+      } else if (e.around) {
         // Around the filter: pass beside it rather than through it.
         const f = pos.get(e.around);
         if (V) {
@@ -470,7 +578,7 @@ export class Board {
         d = `M${a[0]} ${a[1]}C${a[0]} ${a[1] + k} ${b[0]} ${b[1] - k} ${b[0]} ${b[1]}`;
       } else if (b[0] < a[0]) {
         // The chain wraps: out to the right, down between the rows, back in.
-        const mid = (a[1] + b[1]) / 2;
+        const mid = b[1] + (this.target.get(e.to).wrapDy ?? (a[1] - b[1]) / 2);
         d = rounded([a, [a[0] + 22, a[1]], [a[0] + 22, mid], [b[0] - 22, mid], [b[0] - 22, b[1]], b]);
       } else {
         const k = Math.max(22, (b[0] - a[0]) / 2);
@@ -529,7 +637,7 @@ export class Board {
     };
     // On a phone the effects that are off sit below the fold: fit what is in
     // use, and let the user scroll down to the rest.
-    const idle = this.vertical ? new Set(fxIdle(this.app.store)) : new Set();
+    const idle = this.vertical ? new Set(fxSpares(this.app.store)) : new Set();
     for (const [id, p] of this.target) if (!idle.has(id)) grow(p);
     grow(this.planePos);
     const pad = this.vertical ? 18 : 30;

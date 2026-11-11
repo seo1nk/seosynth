@@ -15,7 +15,10 @@ const UI = {
   ],
   'board.movers': ['うごき：スライダーを自動で動かす', 'Movement: moves sliders for you'],
   'board.addMover': ['うごきを足す', 'Add movement'],
-  'board.tray': ['使っていないエフェクト（スイッチを入れると流れに加わります）', 'Effects not in use (switch one on to add it to the flow)'],
+  'board.tray': [
+    '使っていないエフェクト（スイッチを入れると流れに加わります。同じものは 3 つまで）',
+    'Effects not in use (switch one on to add it to the flow; up to three of each)',
+  ],
   'board.fit': ['全体を表示', 'Fit'],
   'board.zoomIn': ['拡大', 'Zoom in'],
   'board.zoomOut': ['縮小', 'Zoom out'],
@@ -35,7 +38,8 @@ const UI = {
   'io.out': ['出る音', 'Sound out'],
   'io.outOnly': ['このノードから出る音', 'Sound leaving this node'],
   'out.level': ['音量メーター', 'Level meter'],
-  'order.title': ['エフェクトの順番', 'Place in the chain'],
+  'order.title': ['順番', 'Order'],
+  'order.title.split': ['分岐の場所', 'Where it splits'],
   'order.earlier': ['前へ', 'Earlier'],
   'order.later': ['後ろへ', 'Later'],
   'order.place': ['{n} / {total} 番目', '{n} of {total}'],
@@ -43,6 +47,42 @@ const UI = {
     'エフェクトは流れの順にかかります。歪み→リバーブと、リバーブ→歪みでは違う音になります。',
     'Effects are applied in order: distortion into reverb sounds different from reverb into distortion.',
   ],
+  'order.help.split': [
+    '分岐を、流れの中で前や後ろへ動かします。分岐より前のエフェクトは両方の道に、後ろのエフェクトはまとめた音にかかります。',
+    'Moves the split earlier or later. Effects before it reach both lanes; effects after it work on the mixed result.',
+  ],
+  'place.title': ['流れの中の場所', 'Place in the flow'],
+  'lane.title': ['通る道', 'Lane'],
+  'lane.main': ['本線', 'Main line'],
+  'lane.help': [
+    '音を 2 つの道に分けて、片方にだけこのエフェクトをかけられます。たとえば高音だけを歪ませたり、ディレイとリバーブを別々にかけたりできます。分け方は、ボードにできる「分岐」ノードで選びます。',
+    'Splits the sound into two lanes so this effect works on only one of them: distort just the highs, or keep delay and reverb apart. Choose how the sound is divided in the "Split" node that appears on the board.',
+  ],
+  'lane.carries': ['{name}：この道を通る音', '{name}: sound on this lane'],
+  'lane.empty': ['エフェクトなし（そのまま通る）', 'no effects (passes through)'],
+  'lane.Copy.a': ['A', 'A'],
+  'lane.Copy.b': ['B', 'B'],
+  'lane.Copy.a.only': ['分岐 A', 'Lane A'],
+  'lane.Copy.b.only': ['分岐 B', 'Lane B'],
+  'lane.Bands.a': ['低音', 'Lows'],
+  'lane.Bands.b': ['高音', 'Highs'],
+  'lane.Bands.a.only': ['低音だけ', 'Lows only'],
+  'lane.Bands.b.only': ['高音だけ', 'Highs only'],
+  'lane.MidSide.a': ['中央', 'Centre'],
+  'lane.MidSide.b': ['左右', 'Sides'],
+  'lane.MidSide.a.only': ['中央だけ', 'Centre only'],
+  'lane.MidSide.b.only': ['左右だけ', 'Sides only'],
+  'lane.LeftRight.a': ['左', 'Left'],
+  'lane.LeftRight.b': ['右', 'Right'],
+  'lane.LeftRight.a.only': ['左だけ', 'Left only'],
+  'lane.LeftRight.b.only': ['右だけ', 'Right only'],
+  'stack.add': ['同じものをもう 1 つ重ねる', 'Stack another one'],
+  'stack.count': ['{n} / {total} 個を使用中', '{n} of {total} in use'],
+  'stack.help': [
+    '同じエフェクトを 3 つまで重ねられます。いまの設定をコピーして、すぐ後ろに置きます。',
+    'The same effect can be stacked up to three times. The new one copies these settings and goes right behind this one.',
+  ],
+  'split.remove': ['分岐をやめて 1 本に戻す', 'Remove the split'],
   'filter.group.low': ['ローパス（高音を削る）', 'Low-pass (removes highs)'],
   'filter.group.high': ['ハイパス（低音を削る）', 'High-pass (removes lows)'],
   'filter.group.band': ['バンド系', 'Band'],
@@ -238,6 +278,10 @@ const UI = {
   'serum.note.masterPitch': ['全体のピッチは移し替えていません。', 'The overall pitch offset was not carried over.'],
   'serum.note.distApprox': ['ディストーションの {detail} は Downsample で代用しています。', 'Distortion {detail} is approximated by Downsample.'],
   'serum.note.delayLong': ['8 小節のディレイは Serum の最長（4 小節）にしています。', 'An 8-bar delay was shortened to Serum\'s longest (4 bars).'],
+  'serum.note.split': [
+    '分岐は Serum 側の配線の書き方が確認できていないため、道 A → 道 B の順に 1 本に並べています。',
+    'The split was laid out as one row (lane A, then lane B): how Serum stores parallel routing is not confirmed.',
+  ],
   'serum.note.reverbDecay': ['Plate リバーブの長さは Serum ではサイズで決まるため、「長さ」は移し替えていません。', 'Plate reverb: Serum sets its length by size, so the decay was not carried over.'],
   'serum.readme': [
     'seosynth から書き出した Serum 2 用プリセットです。\n\n1. .SerumPreset ファイルを Serum 2 のプリセットフォルダ（Serum 2 Presets/Presets/User など）に入れるか、Serum 2 のメニューから読み込みます。\n2. Tables/seosynth フォルダの中の WAV を、Serum 2 Presets/Tables/seosynth に入れます（フォルダがなければ作成）。\n\nseosynth と Serum は別のシンセなので、同じ音にはなりません。',
@@ -287,6 +331,14 @@ const NODE = {
     [
       '鍵盤を押してから離すまでの、音量の変化を決めます。アタックを長くするとふわっと立ち上がり、リリースを長くすると余韻が残ります。',
       'Sets how loudness changes from key press to release. A long attack fades in softly; a long release leaves a tail.',
+    ],
+  ],
+  split: [
+    ['分岐', 'Split'],
+    ['音を 2 つの道に分ける', 'Divides the sound into two lanes'],
+    [
+      'ここで音を 2 つの道に分け、それぞれ別のエフェクトを通してから、もう一度まとめます。分け方を変えると、低音だけ・高音だけ、中央だけ・左右だけにエフェクトをかけられます。道が空のあいだは、音は変わりません。',
+      'The sound divides into two lanes here, each with its own effects, and is mixed again afterwards. Change how it is divided to treat only the lows or highs, or only the centre or the sides. While the lanes are empty the sound is unchanged.',
     ],
   ],
   out: [
@@ -494,6 +546,13 @@ const PARAM = {
   'fxfilter.drive': [['ドライブ', 'Drive'], ['手前での歪み。', 'Overdrive into the filter.']],
   'fxfilter.var': [['バリエーション', 'Variation'], ['バリエーション。タイプによって働きが変わります。', 'Depends on the type.']],
   'fxfilter.mix': [['ミックス', 'Mix'], ['エフェクト音の割合。', 'Amount of the effect.']],
+
+  'split.mode': [['分け方', 'Divide by'], ['音を 2 つの道にどう分けるか。', 'How the sound is divided between the two lanes.']],
+  'split.freq': [['分ける高さ', 'Crossover'], ['この高さより下が低音の道、上が高音の道に進みます。', 'Sound below this goes to the lows lane, sound above it to the highs lane.']],
+  'split.balance': [
+    ['まぜ具合', 'Balance'],
+    ['2 つの道をまとめるときの割合。まん中で、分ける前と同じ音量になります。', 'How much of each lane goes into the mix. In the middle the level is the same as before the split.'],
+  ],
 };
 
 const FX = {
@@ -551,12 +610,24 @@ const OPTION = {
   Normal: ['ふつう', 'Normal'],
   PingPong: ['左右に往復', 'Ping-pong'],
   Tap: ['左に 1 回、右にくり返し', 'One left, repeats right'],
+  Copy: ['同じ音を 2 つに', 'Two copies'],
+  Bands: ['低音と高音', 'Lows and highs'],
+  MidSide: ['中央と左右', 'Centre and sides'],
+  LeftRight: ['左と右', 'Left and right'],
   Pre: ['歪みの前', 'Before'],
   Post: ['歪みの後', 'After'],
 };
 
+/** The kind of effect a unit is a copy of, and which copy: "dist2" -> ["dist", "2"]. */
+function fxCopy(id) {
+  const m = /^(.+?)([23])$/.exec(id);
+  return m && FX[m[1]] ? [m[1], m[2]] : [id, ''];
+}
+
 function generic(key) {
-  return key
+  const [node, ...rest] = key.split('.');
+  return [fxCopy(node)[0], ...rest]
+    .join('.')
     .replace(/^osc[AB]\./, 'osc.')
     .replace(/^env\d\./, 'env.')
     .replace(/^lfo\d\./, 'lfo.')
@@ -585,9 +656,19 @@ export function createI18n(lang) {
       return e ? fill(e[li], vars) : key;
     },
     /** Name of a node on the signal path (including effects). */
-    nodeName: (id) => (NODE[id] ? NODE[id][0][li] : FX[id] ? FX[id][0][li] : SOURCE[id] ? SOURCE[id][0][li] : id),
-    nodeRole: (id) => (NODE[id] ? NODE[id][1][li] : FX[id] ? FX[id][1][li] : ''),
-    nodeAbout: (id) => (NODE[id] ? NODE[id][2][li] : FX[id] ? `${FX[id][1][li]}${lang === 'ja' ? '。' : '.'}` : ''),
+    nodeName(id) {
+      const [kind, copy] = fxCopy(id);
+      if (FX[kind]) return copy ? `${FX[kind][0][li]} ${copy}` : FX[kind][0][li];
+      return NODE[id] ? NODE[id][0][li] : SOURCE[id] ? SOURCE[id][0][li] : id;
+    },
+    nodeRole(id) {
+      const [kind] = fxCopy(id);
+      return NODE[id] ? NODE[id][1][li] : FX[kind] ? FX[kind][1][li] : '';
+    },
+    nodeAbout(id) {
+      const [kind] = fxCopy(id);
+      return NODE[id] ? NODE[id][2][li] : FX[kind] ? `${FX[kind][1][li]}${lang === 'ja' ? '。' : '.'}` : '';
+    },
     moverAbout: (id) => MOVER_ABOUT[moverKind(id)][li],
     paramLabel(key) {
       const e = PARAM[generic(key)];
@@ -601,7 +682,7 @@ export function createI18n(lang) {
       const e = PARAM[generic(key)];
       if (e && e[1][li]) return e[1][li];
       // Effect switches share the effect's own description.
-      const fx = FX[key.split('.')[0]];
+      const fx = FX[fxCopy(key.split('.')[0])[0]];
       return fx && key.endsWith('.on') ? fx[1][li] : '';
     },
     /** A slider's name with its node, e.g. "フィルターのカットオフ". */

@@ -99,13 +99,24 @@ export class EngineCore {
     this.x.lfo_shape_set(l, pts.length);
   }
 
-  getFxOrder() {
-    const n = this.x.fx_order_get();
-    return Array.from(this.#bytes().subarray(0, n));
+  /**
+   * The effect chain: `order` lists every unit (as an index into `info.fx`)
+   * in processing order, `lanes` gives the lane of each unit, indexed by
+   * unit: 0 main, 1 lane A, 2 lane B.
+   */
+  getFxChain() {
+    const n = this.x.fx_chain_get() / 2;
+    const bytes = this.#bytes();
+    return { order: Array.from(bytes.subarray(0, n)), lanes: Array.from(bytes.subarray(n, n * 2)) };
   }
-  setFxOrder(order) {
-    this.#bytes().set(order);
-    return this.x.fx_order_set() === 1;
+  /** Returns false, changing nothing, if the chain is not valid. */
+  setFxChain(order, lanes) {
+    const n = this.info.fx.length;
+    if (order.length !== n || lanes.length !== n) return false;
+    const bytes = this.#bytes();
+    bytes.set(order);
+    bytes.set(lanes, n);
+    return this.x.fx_chain_set() === 1;
   }
 
   // --- whole patch ----------------------------------------------------------

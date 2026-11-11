@@ -10,7 +10,7 @@ import { h, s, setupCanvas } from './dom.js';
 import { Slider, Stepper, Switch, Select, Segmented } from './controls.js';
 import { WavetableDisplay, FilterDisplay, EnvDisplay, LfoDisplay, LFO_SHAPE_POINTS, SpectrumDisplay, Meter } from './displays.js';
 import { colors, modColor } from '../theme.js';
-import { isFx, isMover, isOn, hasSwitch, moverKind, fxChain, taps, nodeOfParam, setOn, shiftFx } from './nodes.js';
+import { SPLIT, LANE, isFx, isMover, isOn, hasSwitch, moverKind, fxKind, fxCopies, fxGroups, fxPeers, laneOf, taps, nodeOfParam, setOn, shiftFx, setLane, unsplit, duplicateFx } from './nodes.js';
 
 /** Shows `el` only while `predicate()` holds; re-checked when any of the
  * given parameters changes. */
@@ -27,13 +27,22 @@ function when(app, keys, predicate, el) {
 function Io(app, id) {
   const { i18n, store } = app;
   const t = taps(store, id);
-  const cell = (label, tap) => h('figure', { class: 'io-cell' }, app.scopes.add(tap, 'io-scope'), h('figcaption', {}, label));
+  const scopes = { in: t.in == null ? null : app.scopes.add(t.in, 'io-scope'), out: app.scopes.add(t.out, 'io-scope') };
+  const cell = (label, scope) => h('figure', { class: 'io-cell' }, scope, h('figcaption', {}, label));
+  // What enters a node of the effect chain depends on what is in front of it.
+  if (scopes.in && !['filter', 'amp'].includes(id)) {
+    onChain(app, () => {
+      const now = taps(store, id);
+      app.scopes.point(scopes.in, now.in);
+      app.scopes.point(scopes.out, now.out);
+    });
+  }
   return h(
     'div',
     { class: 'io' },
-    t.in == null ? null : cell(i18n.t('io.in'), t.in),
-    t.in == null ? null : h('span', { class: 'io-arrow', 'aria-hidden': 'true' }, s('svg', { viewBox: '0 0 24 12' }, s('path', { d: 'M1 6h20M16 1l5 5-5 5' }))),
-    cell(i18n.t(t.in == null ? 'io.outOnly' : 'io.out'), t.out),
+    scopes.in ? cell(i18n.t('io.in'), scopes.in) : null,
+    scopes.in ? h('span', { class: 'io-arrow', 'aria-hidden': 'true' }, s('svg', { viewBox: '0 0 24 12' }, s('path', { d: 'M1 6h20M16 1l5 5-5 5' }))) : null,
+    cell(i18n.t(scopes.in ? 'io.out' : 'io.outOnly'), scopes.out),
   );
 }
 
@@ -201,43 +210,166 @@ const FX_LAYOUT = {
   fxfilter: { main: [['select', 'type'], ['slider', 'cutoff'], ['slider', 'res']], more: [['slider', 'drive'], ['slider', 'var'], ['slider', 'mix']] },
 };
 
-function fxControls(app, key, entries) {
+/** The controls of effect unit `id`, laid out as for its kind of effect. */
+function fxControls(app, id, part) {
   const { store, i18n } = app;
-  const value = (p) => Math.round(store.plain(`${key}.${p}`));
-  const deps = [...FX_LAYOUT[key].main, ...FX_LAYOUT[key].more].filter(([kind]) => kind !== 'slider').map(([, p]) => `${key}.${p}`);
-  return entries.map(([kind, p, showIf]) => {
-    const full = `${key}.${p}`;
+  const kind = fxKind(store, id);
+  const layout = FX_LAYOUT[kind];
+  const value = (p) => Math.round(store.plain(`${id}.${p}`));
+  const deps = [...layout.main, ...layout.more].filter(([control]) => control !== 'slider').map(([, p]) => `${id}.${p}`);
+  return layout[part].map(([control, p, showIf]) => {
+    const full = `${id}.${p}`;
     let el;
-    if (kind === 'slider') el = Slider(app, full);
-    else if (kind === 'stepper') el = Stepper(app, full);
-    else if (kind === 'switch') el = Switch(app, full);
-    else if (kind === 'seg') el = Segmented(app, full);
-    else el = Select(app, full, key === 'fxfilter' && p === 'type' ? { groups: filterGroups(i18n), arrows: true } : { arrows: true });
+    if (control === 'slider') el = Slider(app, full);
+    else if (control === 'stepper') el = Stepper(app, full);
+    else if (control === 'switch') el = Switch(app, full);
+    else if (control === 'seg') el = Segmented(app, full);
+    else el = Select(app, full, kind === 'fxfilter' && p === 'type' ? { groups: filterGroups(i18n), arrows: true } : { arrows: true });
     return showIf ? when(app, deps, () => showIf(value), el) : el;
   });
 }
 
-/** Earlier / later buttons for an effect that is in the chain. */
-function Order(app, key) {
+/** Re-runs `render` whenever the effect chain may have changed. */
+function onChain(app, render) {
+  const { store } = app;
+  app.on('fx', render);
+  for (const id of store.info.fx) app.watch(store.idx(`${id}.on`), render);
+  app.watch(store.idx('split.mode'), render);
+  render();
+}
+
+/** The names of the fork's two lanes, which depend on how it divides the sound. */
+function laneNames(app, form = 'short') {
+  const { store, i18n } = app;
+  const mode = store.def(store.idx('split.mode')).options[Math.round(store.plain('split.mode'))];
+  return ['a', 'b'].map((l) => i18n.t(form === 'short' ? `lane.${mode}.${l}` : `lane.${mode}.${l}.only`));
+}
+
+/** Earlier / later buttons for an effect in the chain, or for the fork. */
+function Order(app, id) {
   const { store, i18n } = app;
   const place = h('output', {});
-  const earlier = h('button', { type: 'button', class: 'btn small', onclick: () => { shiftFx(store, key, -1); store.commit(); } }, i18n.t('order.earlier'));
-  const later = h('button', { type: 'button', class: 'btn small', onclick: () => { shiftFx(store, key, 1); store.commit(); } }, i18n.t('order.later'));
-  const el = h('div', { class: 'order' }, h('span', { class: 'ctl-label' }, i18n.t('order.title')), earlier, place, later);
-  const render = () => {
-    const chain = fxChain(store);
-    const at = chain.indexOf(key);
-    el.hidden = at < 0 || chain.length < 2;
-    place.textContent = i18n.t('order.place', { n: at + 1, total: chain.length });
-    earlier.disabled = at <= 0;
-    later.disabled = at >= chain.length - 1;
+  const move = (delta) => () => {
+    shiftFx(store, id, delta);
+    store.commit();
   };
-  app.on('fx', render);
-  app.watch(store.idx(`${key}.on`), render);
-  for (const other of store.info.fx) if (other !== key) app.watch(store.idx(`${other}.on`), render);
-  render();
-  app.help.attach(el, () => ({ title: i18n.t('order.title'), body: i18n.t('order.help') }));
+  const earlier = h('button', { type: 'button', class: 'btn small', onclick: move(-1) }, i18n.t('order.earlier'));
+  const later = h('button', { type: 'button', class: 'btn small', onclick: move(1) }, i18n.t('order.later'));
+  const title = i18n.t(id === SPLIT ? 'order.title.split' : 'order.title');
+  const el = h('div', { class: 'order' }, h('span', { class: 'ctl-label' }, title), earlier, place, later);
+  onChain(app, () => {
+    const row = fxPeers(store, id);
+    const at = row.indexOf(id);
+    el.hidden = at < 0 || row.length < 2;
+    place.textContent = i18n.t('order.place', { n: at + 1, total: row.length });
+    earlier.disabled = at <= 0;
+    later.disabled = at >= row.length - 1;
+  });
+  app.help.attach(el, () => ({ title, body: i18n.t(id === SPLIT ? 'order.help.split' : 'order.help') }));
   return el;
+}
+
+/** Which way an effect goes at the fork: the main line, or one of the two lanes. */
+function LanePicker(app, id) {
+  const { store, i18n } = app;
+  const buttons = [LANE.main, LANE.a, LANE.b].map((lane) =>
+    h('button', {
+      type: 'button',
+      onclick: () => {
+        setLane(store, id, lane);
+        store.commit();
+      },
+    }),
+  );
+  const el = h('div', { class: 'ctl lane-pick' }, h('span', { class: 'ctl-label' }, i18n.t('lane.title')), h('div', { class: 'segmented', role: 'group', 'aria-label': i18n.t('lane.title') }, buttons));
+  onChain(app, () => {
+    el.hidden = !isOn(store, id);
+    const current = laneOf(store, id);
+    const names = [i18n.t('lane.main'), ...laneNames(app, 'only')];
+    buttons.forEach((btn, lane) => {
+      btn.textContent = names[lane];
+      btn.setAttribute('aria-pressed', String(lane === current));
+    });
+  });
+  app.help.attach(el, () => ({ title: i18n.t('lane.title'), body: i18n.t('lane.help') }));
+  return el;
+}
+
+/** Button that stacks another copy of an effect right behind it. */
+function Stack(app, id) {
+  const { store, i18n } = app;
+  const btn = h(
+    'button',
+    {
+      type: 'button',
+      class: 'btn small',
+      onclick: () => {
+        const added = duplicateFx(store, id);
+        if (!added) return;
+        store.commit();
+        app.select(added);
+      },
+    },
+    i18n.t('stack.add'),
+  );
+  const note = h('span', { class: 'stack-note' });
+  const el = h('div', { class: 'stack' }, btn, note);
+  onChain(app, () => {
+    const copies = fxCopies(store, id);
+    const used = copies.filter((other) => isOn(store, other)).length;
+    el.hidden = !isOn(store, id);
+    btn.disabled = used >= copies.length;
+    note.textContent = i18n.t('stack.count', { n: used, total: copies.length });
+  });
+  app.help.attach(el, () => ({ title: i18n.t('stack.add'), body: i18n.t('stack.help') }));
+  return el;
+}
+
+/** The fork: how it divides the sound, what each lane carries, how they mix. */
+function split(app) {
+  const { store, i18n } = app;
+  const t = store.info.tap;
+  const captions = [h('figcaption', {}), h('figcaption', {})];
+  const lanes = h(
+    'div',
+    { class: 'io lanes' },
+    h('figure', { class: 'io-cell' }, app.scopes.add(t.splitA, 'io-scope'), captions[0]),
+    h('figure', { class: 'io-cell' }, app.scopes.add(t.splitB, 'io-scope'), captions[1]),
+  );
+  const list = h('p', { class: 'lane-list' });
+  onChain(app, () => {
+    const g = fxGroups(store);
+    const names = laneNames(app);
+    captions.forEach((el, k) => {
+      el.textContent = i18n.t('lane.carries', { name: names[k] });
+    });
+    const row = (ids) => (ids.length ? ids.map((id) => i18n.nodeName(id)).join(' → ') : i18n.t('lane.empty'));
+    list.replaceChildren(h('span', {}, `${names[0]}：${row(g.a)}`), h('span', {}, `${names[1]}：${row(g.b)}`));
+  });
+  const remove = h(
+    'button',
+    {
+      type: 'button',
+      class: 'btn quiet danger',
+      onclick: () => {
+        unsplit(store);
+        store.commit();
+        app.select(null);
+      },
+    },
+    i18n.t('split.remove'),
+  );
+  return {
+    visual: [Io(app, SPLIT), lanes, list],
+    main: [
+      Select(app, 'split.mode', { arrows: true }),
+      when(app, ['split.mode'], () => Math.round(store.plain('split.mode')) === 1, Slider(app, 'split.freq')),
+      Slider(app, 'split.balance'),
+      Order(app, SPLIT),
+    ],
+    more: [],
+    foot: [remove],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -316,10 +448,16 @@ function parts(app, id) {
   }
   if (isFx(store, id)) {
     const visual = [Io(app, id)];
-    if (id === 'fxfilter') visual.unshift(FilterDisplay(app, 'fxfilter', colors().sound));
-    return { visual, main: [...fxControls(app, id, FX_LAYOUT[id].main), Order(app, id)], more: fxControls(app, id, FX_LAYOUT[id].more) };
+    if (fxKind(store, id) === 'fxfilter') visual.unshift(FilterDisplay(app, id, colors().sound));
+    return {
+      visual,
+      main: [...fxControls(app, id, 'main'), section(i18n.t('place.title'), Order(app, id), LanePicker(app, id), Stack(app, id))],
+      more: fxControls(app, id, 'more'),
+    };
   }
   switch (id) {
+    case SPLIT:
+      return split(app);
     case 'oscA':
     case 'oscB':
       return oscillator(app, id);
@@ -387,6 +525,7 @@ export function buildPanel(app, id) {
     body.push(MovedBy(app, id));
     // The amp's envelope can also move other sliders.
     if (id === 'amp') body.push(Reach(app, 'env1', i18n.t('reach.env1')));
+    body.push(...(p.foot ?? []));
   }
 
   const el = h(

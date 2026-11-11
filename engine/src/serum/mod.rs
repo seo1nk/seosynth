@@ -15,7 +15,7 @@ pub mod codec;
 pub mod value;
 
 use crate::lfo::{LfoKind, LfoPoint};
-use crate::params::{self, defs, DIVISIONS, FX_KEYS, NUM_ENV, NUM_LFO, NUM_MACRO, NUM_OSC};
+use crate::params::{self, defs, unit_key, DIVISIONS, FX_KEYS, NUM_ENV, NUM_FX, NUM_LFO, NUM_MACRO, NUM_OSC};
 use crate::patch::Patch;
 use crate::tables::TABLE_NAMES;
 use crate::wavetable::{Bank, TABLE_SIZE};
@@ -614,8 +614,11 @@ fn comp_threshold_knob(db: f32) -> f32 {
     1.0
 }
 
-fn effect(c: &mut Ctx, key: &str) -> Option<Value> {
-    let k = |p: &str| format!("{key}.{p}");
+/// One module of the effect rack for effect unit `unit`.
+fn effect(c: &mut Ctx, unit: usize) -> Option<Value> {
+    let key = FX_KEYS[unit % NUM_FX];
+    let prefix = unit_key(unit);
+    let k = |p: &str| format!("{prefix}.{p}");
     let pct = |c: &Ctx, p: &str| num(c.v(&k(p)) * 100.0);
     let (ty, name, params): (i64, &str, Vec<(&str, Value)>) = match key {
         "hyper" => (
@@ -944,14 +947,18 @@ pub fn build(patch: &Patch) -> (Value, Vec<String>, Vec<usize>) {
 
     mod_slots(&mut c, &mut d);
 
-    // Effects: only the enabled units, in the patch's order.
+    // Effects: only the enabled units, in the order the sound meets them.
+    // Stacked copies become several modules of the same type. How Serum
+    // stores the routing between its racks is not known, so a fork is laid
+    // out as one row (lane A, then lane B) and reported.
+    let groups = patch.fx_groups();
+    if groups.has_split() {
+        c.note("split", "");
+    }
     let mut rack = Vec::new();
-    for &fx in patch.fx_order.iter() {
-        let key = FX_KEYS[(fx as usize).min(FX_KEYS.len() - 1)];
-        if c.on(&format!("{key}.on")) {
-            if let Some(entry) = effect(&mut c, key) {
-                rack.push(entry);
-            }
+    for &unit in groups.pre.iter().chain(&groups.a).chain(&groups.b).chain(&groups.post) {
+        if let Some(entry) = effect(&mut c, unit) {
+            rack.push(entry);
         }
     }
     d.set("FXRack0", map(vec![("FX", Value::List(rack)), ("displayName", Value::from("")), ("plainParams", Value::from("default"))]));
@@ -1154,7 +1161,9 @@ mod tests {
         set(&mut p, "dist.on", 1.0);
         set(&mut p, "delay.on", 1.0);
         set(&mut p, "delay.divL", 10.0); // 1/8.
-        p.fx_order = [7, 1, 0, 2, 3, 4, 5, 6, 8, 9];
+        let mut order = crate::patch::DEFAULT_FX_ORDER;
+        order[..8].copy_from_slice(&[7, 1, 0, 2, 3, 4, 5, 6]);
+        p.fx_order = order;
         let (d, _, _) = build(&p);
         let Some(Value::List(rack)) = d.get("FXRack0").and_then(|r| r.get("FX")) else { panic!() };
         let kinds: Vec<i64> = rack.iter().map(|e| number(e.get("type").unwrap()) as i64).collect();
@@ -1164,6 +1173,35 @@ mod tests {
         let delay = plain_of(&rack[2], &["FXDelay", "plainParams"]);
         assert_eq!(delay.get("kParamOffsetL"), Some(&Value::Num(1.5)));
         assert!((number(delay.get("kParamTimeL").unwrap()) - 0.0387).abs() < 1e-6);
+    }
+
+    #[test]
+    fn stacked_effects_and_a_fork_become_one_rack() {
+        let mut p = Patch::init();
+        set(&mut p, "dist.on", 1.0);
+        set(&mut p, "dist2.on", 1.0);
+        set(&mut p, "dist2.drive", 0.9);
+        set(&mut p, "reverb.on", 1.0);
+        set(&mut p, "delay.on", 1.0);
+        let (d, notes, _) = build(&p);
+        assert!(!notes.iter().any(|n| n.starts_with("split")));
+        let kinds = |d: &Value| -> Vec<i64> {
+            let Some(Value::List(rack)) = d.get("FXRack0").and_then(|r| r.get("FX")) else { panic!() };
+            rack.iter().map(|e| number(e.get("type").unwrap()) as i64).collect()
+        };
+        assert_eq!(kinds(&d), vec![0, 4, 6, 0], "distortion, delay, reverb, second distortion");
+        let Some(Value::List(rack)) = d.get("FXRack0").and_then(|r| r.get("FX")) else { panic!() };
+        assert_eq!(plain_of(&rack[3], &["FXDistortion", "plainParams"]).get("kParamDrive"), Some(&Value::Num(90.0)));
+
+        // Reverb on lane A, the second distortion on lane B: the fork sits
+        // where the reverb was, and the delay follows it.
+        p.fx_lane[7] = crate::patch::lane::A;
+        p.fx_lane[11] = crate::patch::lane::B;
+        let (d, notes, _) = build(&p);
+        assert!(notes.iter().any(|n| n.starts_with("split")));
+        assert_eq!(kinds(&d), vec![0, 4, 6, 0]);
+        p.fx_lane[1] = crate::patch::lane::B;
+        assert_eq!(kinds(&build(&p).0), vec![6, 0, 0, 4], "reverb | both distortions, then the delay");
     }
 
     #[test]

@@ -40,6 +40,12 @@ export function formatValue(p, plain, label = (k) => k) {
       const n = Math.round(v * 100);
       return n === 0 ? 'C' : n < 0 ? `L${-n}` : `R${n}`;
     }
+    case 'ab': {
+      // Balance between the two lanes of the fork: which way the slider
+      // leans, since the lanes have different names in each mode.
+      const n = Math.round((v - 0.5) * 200);
+      return n === 0 ? '0' : n < 0 ? `← ${-n}` : `${n} →`;
+    }
     case 'curve':
       return `${v > 0 ? '+' : ''}${Math.round(v * 100)}`;
     case 'x':

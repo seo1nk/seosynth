@@ -621,6 +621,12 @@ export class ScopeBank {
     return view.el;
   }
 
+  /** Makes the scope shown in `el` follow another tap. */
+  point(el, index) {
+    const scope = this.scopes.find((sc) => sc.view.el === el);
+    if (scope) scope.index = index;
+  }
+
   /** Signal level (0..1) at a tap, for cable brightness. */
   level(index) {
     return this.levels[index];

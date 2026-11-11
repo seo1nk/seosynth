@@ -1,11 +1,11 @@
 //! The complete instrument: voice allocation, global modulation, effects,
 //! and the signal taps / telemetry the UI draws from.
 
-use crate::fx::{Ctx, FxChain};
+use crate::fx::{self, Ctx, FxChain};
 use crate::lfo::{self, sanitize_points, LfoMode, LfoPoint, LFO_TABLE};
 use crate::osc::{warp_phase, Warp};
 use crate::params::{
-    self, defs, master, osc, osc_idx, src, F_GLOBAL, F_MOD, F_SMOOTH, NUM_ENV, NUM_FX, NUM_LFO,
+    self, defs, master, osc, osc_idx, src, F_GLOBAL, F_MOD, F_SMOOTH, NUM_ENV, NUM_LFO,
     NUM_OSC, NUM_PARAMS, NUM_SLOTS,
 };
 use crate::patch::{ModSlot, Patch};
@@ -20,13 +20,17 @@ pub const MAX_FRAMES: usize = 1024;
 
 /// Signal taps: ring buffers of the mono signal at each point of the chain.
 pub mod tap {
-    use crate::params::NUM_FX;
+    use crate::fx;
     use crate::voice;
     /// 0..voice::tap::N are the per-voice taps of the newest voice.
     pub const MIX: usize = voice::tap::N;
-    /// One tap after each effect unit, indexed by effect id.
+    /// The taps of the effect chain (`fx::tap`): one after each unit, then
+    /// the two lanes of the fork and what leaves it.
     pub const FX: usize = MIX + 1;
-    pub const OUT: usize = FX + NUM_FX;
+    pub const SPLIT_A: usize = FX + fx::tap::SPLIT_A;
+    pub const SPLIT_B: usize = FX + fx::tap::SPLIT_B;
+    pub const SPLIT_OUT: usize = FX + fx::tap::SPLIT_OUT;
+    pub const OUT: usize = FX + fx::tap::N;
     pub const N: usize = OUT + 1;
     pub const LEN: usize = 2048;
 }
@@ -204,8 +208,8 @@ impl Synth {
         }
     }
 
-    pub fn set_fx_order(&mut self, order: &[u8]) -> bool {
-        self.patch.set_fx_order(order)
+    pub fn set_fx_chain(&mut self, order: &[u8], lanes: &[u8]) -> bool {
+        self.patch.set_fx_chain(order, lanes)
     }
 
     /// Replaces the whole patch. Sounding notes keep playing with the new
@@ -457,10 +461,10 @@ impl Synth {
         for s in 0..n {
             mix_tap[s] = (bus_l[s] + bus_r[s]) * 0.5;
         }
-        let mut fx_taps = [[0.0f32; BLOCK]; NUM_FX];
+        let mut fx_taps = [[0.0f32; BLOCK]; fx::tap::N];
         {
-            let ctx = Ctx { m: &self.global_m, defs: d, sr: self.sr, bpm };
-            self.fx.process(&self.patch.fx_order, &ctx, &mut bus_l[..n], &mut bus_r[..n], &mut fx_taps);
+            let ctx = Ctx { m: &self.global_m, defs: d, sr: self.sr, bpm, shift: 0 };
+            self.fx.process(&self.patch.fx_order, &self.patch.fx_lane, &ctx, &mut bus_l[..n], &mut bus_r[..n], &mut fx_taps);
         }
 
         // Master.
@@ -494,7 +498,7 @@ impl Synth {
             write(t, &vtaps[t][..n], pos);
         }
         write(tap::MIX, &mix_tap[..n], pos);
-        for f in 0..NUM_FX {
+        for f in 0..fx::tap::N {
             write(tap::FX + f, &fx_taps[f][..n], pos);
         }
         write(tap::OUT, &out_tap[..n], pos);
@@ -618,7 +622,7 @@ impl Synth {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::{env, env_idx, filter, lfo_idx, FILTER_BASE, FX_BASES};
+    use crate::params::{env, env_idx, filter, lfo_idx, unit_on, FILTER_BASE, NUM_UNITS};
     use crate::patch::ModSlot;
 
     fn render(s: &mut Synth, seconds: f32) -> Vec<f32> {
@@ -747,8 +751,10 @@ mod tests {
         s.patch.set_plain(FILTER_BASE + filter::RES, 1.0);
         s.patch.set_plain(FILTER_BASE + filter::CUTOFF, 800.0);
         s.patch.set_plain(master::VOLUME, 1.0);
-        for fx in 0..NUM_FX {
-            s.patch.set_plain(FX_BASES[fx], 1.0);
+        // Every copy of every effect, a third of them on each lane.
+        for unit in 0..NUM_UNITS {
+            s.patch.set_plain(unit_on(unit), 1.0);
+            s.patch.fx_lane[unit] = (unit % 3) as u8;
         }
         s.snap();
         for n in 0..16 {
@@ -770,6 +776,8 @@ mod tests {
         assert!(tap_rms(voice::tap::FILTER_OUT) > 0.1);
         assert!(tap_rms(tap::MIX) > 0.01);
         assert!(tap_rms(tap::OUT) > 0.01);
+        assert_eq!(tap_rms(tap::FX), 0.0, "effects are off");
+        assert_eq!(tap_rms(tap::SPLIT_OUT), 0.0, "no fork");
         assert_eq!(s.telemetry[tele::NOTE], 57.0);
         assert_eq!(s.telemetry[tele::VOICES], 1.0);
         assert!(s.telemetry[tele::PEAK_L] > 0.0);

@@ -1,5 +1,5 @@
 //! A patch is the complete, shareable state of the synth: parameter values,
-//! modulation routings, custom LFO shapes and the effect order.
+//! modulation routings, custom LFO shapes and the layout of the effect chain.
 //!
 //! The binary format is what ends up (base64url-encoded) in share URLs, so it
 //! is compact and forward compatible:
@@ -13,7 +13,10 @@
 //!               continuous: u16 LE of the normalised value
 //!   3 mods      repeated: src u8, varint dst sid, i16 LE amount, flags u8
 //!   4 lfo shape lfo index u8, count u8, points (x u16, y u16, curve i8)
-//!   5 fx order  NUM_FX bytes
+//!   5 fx order  10 bytes: order of the first copy of each effect (old patches)
+//!   6 fx chain  one byte per unit, in processing order: unit | lane << 6.
+//!               Only a prefix is written; units that are left out follow in
+//!               ascending order on the main lane.
 //! ```
 //!
 //! Only values that differ from the defaults are written. Unknown sections
@@ -21,7 +24,7 @@
 //! patches and vice versa.
 
 use crate::lfo::{default_points, sanitize_points, LfoPoint};
-use crate::params::{self, defs, NUM_FX, NUM_LFO, NUM_PARAMS, NUM_SLOTS};
+use crate::params::{self, defs, unit_on, NUM_FX, NUM_LFO, NUM_PARAMS, NUM_SLOTS, NUM_UNITS};
 
 pub const NO_DEST: u16 = 0xFFFF;
 pub const FORMAT_VERSION: u8 = 1;
@@ -54,11 +57,49 @@ pub struct Patch {
     pub values: Vec<f32>,
     pub slots: [ModSlot; NUM_SLOTS],
     pub lfo_shapes: [Vec<LfoPoint>; NUM_LFO],
-    /// Processing order of the effect units (a permutation of 0..NUM_FX).
-    pub fx_order: [u8; NUM_FX],
+    /// Processing order of the effect units (a permutation of 0..NUM_UNITS).
+    /// Units that are switched off keep their place but do nothing.
+    pub fx_order: [u8; NUM_UNITS],
+    /// Lane of each unit, indexed by unit: `lane::MAIN`, `lane::A` or `lane::B`.
+    pub fx_lane: [u8; NUM_UNITS],
 }
 
-pub const DEFAULT_FX_ORDER: [u8; NUM_FX] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+/// Where a unit sits relative to the fork in the effect chain.
+pub mod lane {
+    pub const MAIN: u8 = 0;
+    pub const A: u8 = 1;
+    pub const B: u8 = 2;
+}
+
+pub const DEFAULT_FX_ORDER: [u8; NUM_UNITS] = {
+    let mut order = [0u8; NUM_UNITS];
+    let mut i = 0;
+    while i < NUM_UNITS {
+        order[i] = i as u8;
+        i += 1;
+    }
+    order
+};
+
+/// The enabled effect units in the order the sound meets them.
+///
+/// The chain has one fork at most: `pre -> [a | b] -> post`. The fork sits
+/// where the first enabled unit of lane A or B is found in the order; every
+/// other unit of those lanes joins it there. So any order and any choice of
+/// lanes gives exactly one well-defined chain.
+#[derive(Debug, Default, PartialEq)]
+pub struct FxGroups {
+    pub pre: Vec<usize>,
+    pub a: Vec<usize>,
+    pub b: Vec<usize>,
+    pub post: Vec<usize>,
+}
+
+impl FxGroups {
+    pub fn has_split(&self) -> bool {
+        !self.a.is_empty() || !self.b.is_empty()
+    }
+}
 
 impl Default for Patch {
     fn default() -> Self {
@@ -66,16 +107,39 @@ impl Default for Patch {
     }
 }
 
-fn valid_order(order: &[u8]) -> bool {
-    let mut seen = [false; NUM_FX];
-    order.len() == NUM_FX
+/// True if `order` contains each of 0..count exactly once.
+fn is_permutation(order: &[u8], count: usize) -> bool {
+    let mut seen = [false; NUM_UNITS];
+    order.len() == count
         && order.iter().all(|&o| {
-            let ok = (o as usize) < NUM_FX && !seen[o as usize];
+            let ok = (o as usize) < count && !seen[o as usize];
             if ok {
                 seen[o as usize] = true;
             }
             ok
         })
+}
+
+/// `start` followed by every unit it does not contain, in ascending order.
+/// Entries that are out of range or repeated are dropped.
+fn complete_order(start: &[u8]) -> [u8; NUM_UNITS] {
+    let mut seen = [false; NUM_UNITS];
+    let mut order = [0u8; NUM_UNITS];
+    let mut n = 0;
+    for &u in start {
+        if (u as usize) < NUM_UNITS && !seen[u as usize] {
+            seen[u as usize] = true;
+            order[n] = u;
+            n += 1;
+        }
+    }
+    for u in 0..NUM_UNITS {
+        if !seen[u] {
+            order[n] = u as u8;
+            n += 1;
+        }
+    }
+    order
 }
 
 impl Patch {
@@ -87,6 +151,7 @@ impl Patch {
             slots: [ModSlot::EMPTY; NUM_SLOTS],
             lfo_shapes: core::array::from_fn(|_| default_points()),
             fx_order: DEFAULT_FX_ORDER,
+            fx_lane: [lane::MAIN; NUM_UNITS],
         }
     }
 
@@ -98,13 +163,45 @@ impl Patch {
         self.values[idx] = defs()[idx].to_norm(plain);
     }
 
-    pub fn set_fx_order(&mut self, order: &[u8]) -> bool {
-        if valid_order(order) {
+    /// Sets the order of all units and the lane of each (indexed by unit).
+    /// Returns false, changing nothing, unless `order` is a permutation of
+    /// all units and every lane is valid.
+    pub fn set_fx_chain(&mut self, order: &[u8], lanes: &[u8]) -> bool {
+        if is_permutation(order, NUM_UNITS) && lanes.len() == NUM_UNITS && lanes.iter().all(|&l| l <= lane::B) {
             self.fx_order.copy_from_slice(order);
+            self.fx_lane.copy_from_slice(lanes);
             true
         } else {
             false
         }
+    }
+
+    pub fn fx_on(&self, unit: usize) -> bool {
+        self.values[unit_on(unit)] >= 0.5
+    }
+
+    pub fn fx_groups(&self) -> FxGroups {
+        let mut g = FxGroups::default();
+        let mut forked = false;
+        for &u in self.fx_order.iter() {
+            let u = u as usize;
+            if !self.fx_on(u) {
+                continue;
+            }
+            match self.fx_lane[u] {
+                lane::A => {
+                    forked = true;
+                    g.a.push(u);
+                }
+                lane::B => {
+                    forked = true;
+                    g.b.push(u);
+                }
+                _ if forked => g.post.push(u),
+                _ => g.pre.push(u),
+            }
+        }
+        g
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -164,8 +261,16 @@ impl Patch {
             section(&mut out, 4, &buf);
         }
 
-        if self.fx_order != DEFAULT_FX_ORDER {
-            section(&mut out, 5, &self.fx_order);
+        // The chain: everything up to the point from where the rest is in
+        // its default place.
+        let default_from = |k: usize| {
+            self.fx_order[k..].windows(2).all(|w| w[0] < w[1]) && self.fx_order[k..].iter().all(|&u| self.fx_lane[u as usize] == lane::MAIN)
+        };
+        let keep = (0..=NUM_UNITS).find(|&k| default_from(k)).unwrap_or(NUM_UNITS);
+        if keep > 0 {
+            buf.clear();
+            buf.extend(self.fx_order[..keep].iter().map(|&u| u | self.fx_lane[u as usize] << 6));
+            section(&mut out, 6, &buf);
         }
         out
     }
@@ -236,7 +341,21 @@ impl Patch {
                     }
                 }
                 5 => {
-                    patch.set_fx_order(s.b);
+                    // An old patch: the order of the ten original units.
+                    if is_permutation(s.b, NUM_FX) {
+                        patch.fx_order = complete_order(s.b);
+                    }
+                }
+                6 => {
+                    let units: Vec<u8> = s.b.iter().map(|b| b & 0x3F).collect();
+                    patch.fx_order = complete_order(&units);
+                    patch.fx_lane = [lane::MAIN; NUM_UNITS];
+                    for b in s.b {
+                        let (unit, l) = ((b & 0x3F) as usize, b >> 6);
+                        if unit < NUM_UNITS && l <= lane::B {
+                            patch.fx_lane[unit] = l;
+                        }
+                    }
                 }
                 _ => {} // unknown section from a newer version: skip
             }
@@ -333,7 +452,8 @@ mod tests {
             LfoPoint { x: 0.3, y: 0.25, curve: -0.25 },
             LfoPoint { x: 1.0, y: 0.0, curve: 0.0 },
         ];
-        p.fx_order = [7, 1, 2, 3, 4, 5, 6, 0, 8, 9];
+        p.fx_order = complete_order(&[7, 1, 2, 3, 4, 5, 6, 0, 8, 9]);
+        p.fx_lane[11] = lane::B;
         p
     }
 
@@ -351,6 +471,7 @@ mod tests {
         let q = Patch::from_bytes(&bytes).unwrap();
         assert_eq!(q.name, p.name);
         assert_eq!(q.fx_order, p.fx_order);
+        assert_eq!(q.fx_lane, p.fx_lane);
         for i in 0..NUM_PARAMS {
             let d = &defs()[i];
             if d.is_discrete() {
@@ -407,11 +528,68 @@ mod tests {
     }
 
     #[test]
-    fn invalid_fx_order_is_ignored() {
+    fn invalid_fx_chain_is_ignored() {
         let mut p = Patch::init();
-        assert!(!p.set_fx_order(&[0, 0, 1, 2, 3, 4, 5, 6, 7, 8]));
-        assert!(!p.set_fx_order(&[0, 1, 2]));
+        let lanes = [lane::MAIN; NUM_UNITS];
+        let mut twice = DEFAULT_FX_ORDER;
+        twice[1] = 0;
+        assert!(!p.set_fx_chain(&twice, &lanes));
+        assert!(!p.set_fx_chain(&[0, 1, 2], &lanes));
+        assert!(!p.set_fx_chain(&DEFAULT_FX_ORDER, &[3; NUM_UNITS]));
         assert_eq!(p.fx_order, DEFAULT_FX_ORDER);
+        let mut reversed = DEFAULT_FX_ORDER;
+        reversed.reverse();
+        assert!(p.set_fx_chain(&reversed, &[lane::A; NUM_UNITS]));
+        assert_eq!(p.fx_order[0] as usize, NUM_UNITS - 1);
+    }
+
+    #[test]
+    fn fx_chain_is_written_as_a_short_prefix() {
+        let size = |p: &Patch| p.to_bytes().len();
+        let base = size(&Patch::init());
+        // Reverb first: one byte for the chain plus the section header.
+        let mut p = Patch::init();
+        p.fx_order = complete_order(&[7]);
+        assert_eq!(size(&p), base + 3);
+        assert_eq!(Patch::from_bytes(&p.to_bytes()).unwrap().fx_order, p.fx_order);
+        // A lane on an early unit, order untouched.
+        let mut p = Patch::init();
+        p.fx_lane[1] = lane::A;
+        assert_eq!(size(&p), base + 4);
+        let q = Patch::from_bytes(&p.to_bytes()).unwrap();
+        assert_eq!(q.fx_lane, p.fx_lane);
+        assert_eq!(q.fx_order, DEFAULT_FX_ORDER);
+    }
+
+    #[test]
+    fn old_fx_order_section_still_loads() {
+        let mut bytes = vec![MAGIC, FORMAT_VERSION];
+        section(&mut bytes, 5, &[7, 1, 2, 3, 4, 5, 6, 0, 8, 9]);
+        let p = Patch::from_bytes(&bytes).unwrap();
+        assert_eq!(&p.fx_order[..10], &[7, 1, 2, 3, 4, 5, 6, 0, 8, 9]);
+        assert_eq!(&p.fx_order[10..13], &[10, 11, 12]);
+        assert_eq!(p.fx_lane, [lane::MAIN; NUM_UNITS]);
+        // A broken one is ignored.
+        let mut bytes = vec![MAGIC, FORMAT_VERSION];
+        section(&mut bytes, 5, &[0, 0, 1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(Patch::from_bytes(&bytes).unwrap().fx_order, DEFAULT_FX_ORDER);
+    }
+
+    #[test]
+    fn groups_gather_the_lanes_at_the_first_fork() {
+        let mut p = Patch::init();
+        for u in [0, 1, 4, 5, 7, 11] {
+            p.values[unit_on(u)] = 1.0;
+        }
+        assert_eq!(p.fx_groups(), FxGroups { pre: vec![0, 1, 4, 5, 7, 11], ..Default::default() });
+        assert!(!p.fx_groups().has_split());
+        p.fx_lane[4] = lane::A;
+        p.fx_lane[11] = lane::B;
+        p.fx_lane[7] = lane::A;
+        p.fx_lane[2] = lane::A; // switched off: not part of anything
+        let g = p.fx_groups();
+        assert_eq!(g, FxGroups { pre: vec![0, 1], a: vec![4, 7], b: vec![11], post: vec![5] });
+        assert!(g.has_split());
     }
 
     #[test]
