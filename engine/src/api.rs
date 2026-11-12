@@ -528,7 +528,7 @@ pub fn describe_json() -> String {
         crate::lfo::MAX_POINTS
     ));
     o.push_str(&format!(
-        ",\"tap\":{{\"count\":{},\"len\":{},\"oscA\":0,\"oscB\":1,\"sub\":2,\"noise\":3,\"filterIn\":4,\"filterOut\":5,\"amp\":6,\"mix\":{},\"fx\":{},\"splitA\":{},\"splitB\":{},\"splitOut\":{},\"out\":{}}}",
+        ",\"tap\":{{\"count\":{},\"len\":{},\"oscA\":0,\"oscB\":1,\"oscC\":2,\"sub\":3,\"noise\":4,\"filterIn\":5,\"filterOut\":6,\"filter2In\":7,\"filter2Out\":8,\"preAmp\":9,\"amp\":10,\"mix\":{},\"fx\":{},\"splitA\":{},\"splitB\":{},\"splitOut\":{},\"out\":{}}}",
         tap::N,
         tap::LEN,
         tap::MIX,

@@ -283,8 +283,8 @@ const UI: Record<string, Pair> = {
   ],
   'tour.6.title': ['スライダーを自動で動かす', 'Make a slider move by itself'],
   'tour.6.body': [
-    '「うごきを足す」から LFO を選び、開いた画面で「フィルター」の「カットオフ」につなぎます。ボードでは、動かされているノードに色のタグが付きます。',
-    'Choose LFO from "Add movement", then connect it to the Filter\'s Cutoff. On the board, a coloured tag appears on the node being moved.',
+    '「うごきを足す」から LFO を選び、開いた画面で「フィルター 1」の「カットオフ」につなぎます。ボードでは、動かされているノードに色のタグが付きます。',
+    'Choose LFO from "Add movement", then connect it to Filter 1\'s Cutoff. On the board, a coloured tag appears on the node being moved.',
   ],
   'tour.7.title': ['エフェクトを足す', 'Add an effect'],
   'tour.7.body': [
@@ -339,6 +339,10 @@ const UI: Record<string, Pair> = {
     '分岐は Serum 側の配線の書き方が確認できていないため、道 A → 道 B の順に 1 本に並べています。',
     'The split was laid out as one row (lane A, then lane B): how Serum stores parallel routing is not confirmed.',
   ],
+  'serum.note.filter2Routing': [
+    'フィルター 2 の設定は書き出しますが、つなぎ方（直列・並列、音源ごとのフィルター）は Serum 側の書き方が分からないため移し替えていません。',
+    'Filter 2 settings are exported, but how it is connected (series or parallel, which source into which filter) is not: how Serum stores it is not known.',
+  ],
   'serum.note.reverbDecay': ['Plate リバーブの長さは Serum ではサイズで決まるため、「長さ」は移し替えていません。', 'Plate reverb: Serum sets its length by size, so the decay was not carried over.'],
   'serum.readme': [
     'seosynth から書き出した Serum 2 用プリセットです。\n\n1. .SerumPreset ファイルを Serum 2 のプリセットフォルダ（Serum 2 Presets/Presets/User など）に入れるか、Serum 2 のメニューから読み込みます。\n2. Tables/seosynth フォルダの中の WAV を、Serum 2 Presets/Tables/seosynth に入れます（フォルダがなければ作成）。\n\nseosynth と Serum は別のシンセなので、同じ音にはなりません。',
@@ -365,6 +369,14 @@ const NODE: Record<string, [Pair, Pair, Pair]> = {
       'A second oscillator. Layer a different waveform or octave on top of A for thickness and motion.',
     ],
   ],
+  oscC: [
+    ['オシレーター C', 'Oscillator C'],
+    ['3 つ目の音を重ねる', 'Layers a third tone'],
+    [
+      '3 つ目のオシレーターです。A・B と別の波形を重ねて、さらに厚みを出せます。FM・AM・RM のワープでは A の音で変調されます。',
+      'A third oscillator to layer yet another waveform. Its FM, AM and RM warps are driven by oscillator A.',
+    ],
+  ],
   sub: [
     ['サブ', 'Sub'],
     ['低い音で支える', 'Adds weight underneath'],
@@ -376,11 +388,19 @@ const NODE: Record<string, [Pair, Pair, Pair]> = {
     ['音程のない「ザー」という音です。アタックの息づかいや、風のような質感を足せます。', 'Noise has no pitch. Use it for breathy attacks or wind-like texture.'],
   ],
   filter: [
-    ['フィルター', 'Filter'],
+    ['フィルター 1', 'Filter 1'],
     ['音を削って明るさを変える', 'Carves the tone: bright or dark'],
     [
       '入ってきた音の一部の高さを削ります。ローパスはカットオフより上を削るので、下げるほどこもり、上げるほど明るくなります。',
       'Removes part of the spectrum. A low-pass removes everything above the cutoff: lower is darker, higher is brighter.',
+    ],
+  ],
+  filter2: [
+    ['フィルター 2', 'Filter 2'],
+    ['もう 1 段、音を削る', 'A second filter'],
+    [
+      '2 つ目のフィルターです。「直列」ではフィルター 1 を通った音をさらに削り、2 つを組み合わせた形を作れます。「並列」ではフィルター 1 と横に並び、音源ごとにどちらを通すかを選べます（音源の設定で選びます）。',
+      'A second filter. In series it shapes what leaves filter 1 again, combining the two. In parallel it sits beside filter 1 and each source picks which one it goes through (in that source\'s settings).',
     ],
   ],
   amp: [
@@ -469,7 +489,8 @@ const PARAM: Record<string, [Pair, Pair]> = {
   'osc.rand': [['スタートのばらつき', 'Random start'], ['鳴らすたびに開始位置をばらつかせる量。0%にすると毎回同じアタックになります。', 'Randomises the start position per note. At 0% every attack is identical.']],
   'osc.warp': [['ワープ', 'Warp'], ['波形を変形させる方法。Sync は鋭く、Bend は偏らせ、FM/AM/RM はもう一方のオシレーターで変調します。', 'How the waveform is bent. Sync is sharp, Bend skews it, FM/AM/RM use the other oscillator.']],
   'osc.warpAmt': [['ワープの量', 'Warp amount'], ['ワープのかかり具合。', 'How strongly the warp is applied.']],
-  'osc.toFilter': [['フィルターを通す', 'Through the filter'], ['オンでフィルターを通ります。オフだとフィルターを迂回します。', 'On: goes through the filter. Off: bypasses it.']],
+  'osc.toFilter': [['フィルターを通す', 'Through the filters'], ['オンでフィルターを通ります。オフだとフィルターを迂回します。', 'On: goes through the filters. Off: bypasses them.']],
+  'osc.filterSel': [['通すフィルター', 'Into filter'], ['フィルターが並列のとき、どちらに通すか。「両方」は半分ずつ両方に通して足します。', 'With the filters in parallel, which one this goes through. Both sends half into each and adds them.']],
   'osc.userTable': [['テーブルの種類', 'Table source'], ['内蔵のウェーブテーブルを鳴らすか、自分で作ったテーブルを鳴らすかを選びます。', 'Plays a built-in wavetable, or one you made yourself.']],
 
   'sub.on': [['電源', 'On'], ['サブオシレーターを鳴らすかどうか。', 'Switch the sub oscillator on or off.']],
@@ -477,14 +498,16 @@ const PARAM: Record<string, [Pair, Pair]> = {
   'sub.oct': [['オクターブ', 'Octave'], ['メインの音から何オクターブ下（上）で鳴らすか。', 'Octaves below (or above) the played note.']],
   'sub.level': [['音量', 'Level'], ['サブの音量。', 'Volume of the sub.']],
   'sub.pan': [['左右の位置', 'Pan'], ['左右の位置。', 'Left / right position.']],
-  'sub.toFilter': [['フィルターを通す', 'Through the filter'], ['オンでフィルターを通ります。', 'On: goes through the filter.']],
+  'sub.toFilter': [['フィルターを通す', 'Through the filters'], ['オンでフィルターを通ります。', 'On: goes through the filters.']],
+  'sub.filterSel': [['通すフィルター', 'Into filter'], ['フィルターが並列のとき、どちらに通すか。', 'With the filters in parallel, which one this goes through.']],
 
   'noise.on': [['電源', 'On'], ['ノイズを鳴らすかどうか。', 'Switch the noise on or off.']],
   'noise.type': [['種類', 'Type'], ['ノイズの種類。White は明るく、Pink・Brown は低め、Digital は粗く、Crackle はパチパチ。', 'Kind of noise: white is bright, pink and brown darker, digital is gritty, crackle pops.']],
   'noise.level': [['音量', 'Level'], ['ノイズの音量。', 'Volume of the noise.']],
   'noise.pan': [['左右の位置', 'Pan'], ['左右の位置。', 'Left / right position.']],
   'noise.tone': [['トーン', 'Tone'], ['ノイズの明るさ（Digital は粗さ、Crackle は密度）。', 'Brightness of the noise (grit for Digital, density for Crackle).']],
-  'noise.toFilter': [['フィルターを通す', 'Through the filter'], ['オンでフィルターを通ります。', 'On: goes through the filter.']],
+  'noise.toFilter': [['フィルターを通す', 'Through the filters'], ['オンでフィルターを通ります。', 'On: goes through the filters.']],
+  'noise.filterSel': [['通すフィルター', 'Into filter'], ['フィルターが並列のとき、どちらに通すか。', 'With the filters in parallel, which one this goes through.']],
 
   'filter.on': [['電源', 'On'], ['フィルターを使うかどうか。オフにすると音はそのまま通ります。', 'Switch the filter on or off. When off the sound passes untouched.']],
   'filter.type': [['タイプ', 'Type'], ['フィルターの種類。LP は高音を削る、HP は低音を削る、BP は真ん中だけ通す。数字は削り方の急さ。', 'Kind of filter. LP removes highs, HP removes lows, BP keeps the middle. The number is how steep it is.']],
@@ -495,6 +518,10 @@ const PARAM: Record<string, [Pair, Pair]> = {
   'filter.mix': [['ミックス', 'Mix'], ['フィルターを通した音と、通す前の音の割合。', 'Balance between filtered and unfiltered sound.']],
   'filter.keytrack': [['キー追従', 'Key tracking'], ['高い音を弾くほどカットオフも上がるようにします。100%で音程と同じだけ動きます。', 'Raises the cutoff for higher notes. At 100% it follows the pitch exactly.']],
   'filter.stereo': [['左右のずれ', 'Stereo offset'], ['左右でカットオフをずらして広がりを出します。', 'Offsets the cutoff between left and right for width.']],
+  'filter.mode': [
+    ['つなぎ方', 'Connection'],
+    ['直列：フィルター 1 の後ろにつなぎます。並列：フィルター 1 の横に並べ、音源ごとにどちらを通すか選べます。', 'Series: after filter 1. Parallel: beside filter 1, and each source picks which one it goes through.'],
+  ],
 
   'env.attack': [['アタック', 'Attack'], ['鍵盤を押してから最大になるまでの時間。長くするとふわっと立ち上がります。', 'Time from key press to full level. Longer fades in softly.']],
   'env.hold': [['ホールド', 'Hold'], ['最大のまま保つ時間。', 'Time it stays at full level.']],
@@ -678,6 +705,11 @@ const OPTION: Record<string, Pair> = {
   Bands: ['低音と高音', 'Lows and highs'],
   MidSide: ['中央と左右', 'Centre and sides'],
   LeftRight: ['左と右', 'Left and right'],
+  Series: ['直列', 'Series'],
+  Parallel: ['並列', 'Parallel'],
+  Filter1: ['フィルター 1', 'Filter 1'],
+  Filter2: ['フィルター 2', 'Filter 2'],
+  Both: ['両方', 'Both'],
   Pre: ['歪みの前', 'Before'],
   Post: ['歪みの後', 'After'],
 };
@@ -692,7 +724,8 @@ function generic(key: string): string {
   const [node, ...rest] = key.split('.');
   return [fxCopy(node)[0], ...rest]
     .join('.')
-    .replace(/^osc[AB]\./, 'osc.')
+    .replace(/^osc[ABC]\./, 'osc.')
+    .replace(/^filter2\./, 'filter.')
     .replace(/^env\d\./, 'env.')
     .replace(/^lfo\d\./, 'lfo.')
     .replace(/^macro\d$/, 'macro');

@@ -34,8 +34,8 @@ Rust で書いたシンセエンジンを WebAssembly にして、ブラウザ�
 
 | | |
 |---|---|
-| オシレーター | ウェーブテーブル ×2（22 種類のテーブル＋自分で描く・音声から作るテーブル 2 つ、波形の位置のモーフィング、ユニゾン最大 16 声、ワープ 13 種：Sync / Bend / PWM / Asym / Flip / Mirror / Quantize / FM / AM / RM）、サブ、ノイズ |
-| フィルター | 19 種類（LP / HP / BP / ノッチ / ピーク / ラダー / モーフ / コム / フェイザー / フォルマント ほか）、ドライブ、キー追従、ステレオ |
+| オシレーター | ウェーブテーブル ×3（22 種類のテーブル＋自分で描く・音声から作るテーブル 2 つ、波形の位置のモーフィング、ユニゾン最大 16 声、ワープ 13 種：Sync / Bend / PWM / Asym / Flip / Mirror / Quantize / FM / AM / RM）、サブ、ノイズ |
+| フィルター | ×2（直列、または並列で音源ごとに行き先を選ぶ）。19 種類（LP / HP / BP / ノッチ / ピーク / ラダー / モーフ / コム / フェイザー / フォルマント ほか）、ドライブ、キー追従、ステレオ |
 | うごき | エンベロープ ×3（AHDSR＋カーブ）、LFO ×4（プリセット波形または自分で描く、テンポ同期）、マクロ ×4、弾く強さ／音の高さ／MOD ホイールなど。最大 32 のつながり |
 | エフェクト | ハイパー、ディストーション、フランジャー、フェイザー、コーラス、ディレイ、コンプレッサー、リバーブ、EQ、全体フィルター。順番を入れ替え可能、同じものを 3 つまで重ねがけ、途中で 2 本に分岐（同じ音を 2 つに／低音と高音／中央と左右／左と右） |
 | 演奏 | 画面の鍵盤、PC キーボード、MIDI キーボード（Web MIDI）、「聴く」ボタンでのフレーズ再生、ポリ 16 声／モノ／レガート／グライド |
@@ -91,7 +91,7 @@ flowchart LR
 
 **音の流れ**
 
-1. 1 ボイスごとに、オシレーター A・B（ウェーブテーブル）、サブ、ノイズ → フィルター → アンプ（エンベロープ 1）。音源ごとにフィルターを通すか迂回するかを選べます
+1. 1 ボイスごとに、オシレーター A・B・C（ウェーブテーブル）、サブ、ノイズ → フィルター → アンプ（エンベロープ 1）。音源ごとにフィルターを通すか迂回するかを選べます。フィルター 2 はフィルター 1 の後ろ（直列）か横（並列）につなぎ、並列では音源ごとにフィルター 1・2・両方を選びます（両方は半分ずつ足すので、素通しなら音量は変わりません）。FM・AM・RM の変調元は、A は B、B は A、C は A です
 2. 最大 16 ボイスを足し合わせ、エフェクトチェーンへ
 3. エフェクトは 10 種類 × 3 つ = 30 個のユニットで、並び順と「通る道」（本線・A・B）をユニットごとに持ちます。分岐は 1 か所までで、最初に道 A か B を持つユニットの位置で 2 本に分かれ、まとめ直されます。分け方は、同じ音を 2 つに／低音と高音（4 次の Linkwitz-Riley クロスオーバー）／中央と左右／左と右です
 4. マスター音量とソフトクリップ
@@ -104,13 +104,13 @@ flowchart LR
 
 **パラメーターとモジュレーション**
 
-- 全 382 パラメーターを 1 つの表（`params.rs`）で管理します。値は 0〜1 に正規化して持ち、表示や計算のときに実際の単位へ変換します
+- 全 416 パラメーターを 1 つの表（`params.rs`）で管理します。値は 0〜1 に正規化して持ち、表示や計算のときに実際の単位へ変換します
 - 各パラメーターには変わらない「安定 ID」があり、保存形式はこの ID で記録します。パラメーターを足しても、古い URL やファイルはそのまま開けます
-- 17 のモジュレーション元（エンベロープ、LFO、弾く強さ、マクロなど）を最大 32 本、205 のパラメーターにつなげます。モジュレーションは正規化した値の上で足し合わせます。ボイスごとのもの（フィルターなど）と全体で 1 つのもの（エフェクトなど）を分けて計算します
+- 17 のモジュレーション元（エンベロープ、LFO、弾く強さ、マクロなど）を最大 32 本、220 のパラメーターにつなげます。モジュレーションは正規化した値の上で足し合わせます。ボイスごとのもの（フィルターなど）と全体で 1 つのもの（エフェクトなど）を分けて計算します
 
 **画面へ渡す情報**
 
-- 音の通り道の 42 か所（各音源、フィルターの前後、アンプ、ミックス、エフェクトのユニットごと、分岐の各道、出力）を「タップ」としてリングバッファに記録します。ボードの線の明るさと、パネルの「入る音・出る音」の波形はここから描きます
+- 音の通り道の 46 か所（各音源、2 つのフィルターの前後、アンプの前後、ミックス、エフェクトのユニットごと、分岐の各道、出力）を「タップ」としてリングバッファに記録します。ボードの線の明るさと、パネルの「入る音・出る音」の波形はここから描きます
 - 変調後のパラメーター値、エンベロープや LFO の位置、ピーク値などを「テレメトリ」として送ります。スライダー上の動く点や、エンベロープ図の再生位置はこれを使います
 
 ### パッチ形式と共有 URL
@@ -187,10 +187,10 @@ seosynth is a wavetable synthesizer for the browser. The DSP engine is dependenc
 - **The whole sound as a graph.** The centre of the screen is a whiteboard you can drag and pinch-zoom. Nodes on the signal path have on/off switches, and the sound line runs through every node that is switched on to the output, brightening where sound flows. Sources run in parallel; effects that are off wait in a tray below. Effects can be stacked (up to three of each) and the chain can split into two lanes that run side by side (two copies, lows and highs, centre and sides, or left and right) and join again. Pressing a node opens its settings (a side panel on desktop, a bottom sheet on phones) with sliders, a picture of the sound going in and coming out, and an explanation.
 - **Movement on its own layer.** LFOs, envelopes, macros and playing gestures float on a separate plane. You add one, pick the node and slider it should move, and a coloured tag and dashed line show where it acts.
 - **Wavetables of your own.** Draw one cycle of the wave with the pointer and hear it change as you draw; add frames to make it morph. Or choose an audio file: its pitch is detected and its waveforms become the frames, all inside the browser. These tables travel in the share link too.
-- **Synth features** modelled on Serum's layout: two wavetable oscillators (22 generated tables plus two of your own, unison, 13 warp modes), sub, noise, a 19-type filter, 3 envelopes, 4 LFOs with drawable shapes, 4 macros, up to 32 connections and ten kinds of effect that can be reordered, stacked and run in parallel. Japanese and English, light and dark.
+- **Synth features** modelled on Serum's layout: three wavetable oscillators (22 generated tables plus two of your own, unison, 13 warp modes), sub, noise, two 19-type filters in series or parallel, 3 envelopes, 4 LFOs with drawable shapes, 4 macros, up to 32 connections and ten kinds of effect that can be reordered, stacked and run in parallel. Japanese and English, light and dark.
 - **Sharing.** The whole patch is encoded into the URL fragment, so a link is the preset. Presets can also be saved as JSON.
 - **Serum 2 export (beta).** Writes a `.SerumPreset` plus the wavetables as WAV. The format is unpublished and the export follows community reverse-engineering; files round-trip through independent decoders and match the structure of a real init preset, but loading in Serum 2 itself has not been verified yet. It is a translation of settings, not a clone of the sound.
 
-**Architecture.** Everything runs in the browser; there is no server-side code. The Rust engine exposes plain `extern "C"` functions and describes itself as JSON (parameters, options, buffer layouts), so the UI holds no parameter tables of its own. Two instances run: one in the AudioWorklet makes the sound, one on the main thread holds the authoritative patch and draws previews. Each voice runs oscillators A and B, sub and noise into the filter and amp; up to 16 voices feed a chain of 30 effect units (ten kinds, three copies each) with one optional fork into two lanes. All 382 parameters carry stable ids, so share links and files keep working as the synth grows. The engine records 42 signal taps and telemetry that drive the board's glowing lines, the scopes and the moving dots on sliders. The UI is plain DOM in TypeScript, compiled file by file to ES modules; a `Store` is the single entry point for edits and keeps undo history as patch snapshots.
+**Architecture.** Everything runs in the browser; there is no server-side code. The Rust engine exposes plain `extern "C"` functions and describes itself as JSON (parameters, options, buffer layouts), so the UI holds no parameter tables of its own. Two instances run: one in the AudioWorklet makes the sound, one on the main thread holds the authoritative patch and draws previews. Each voice runs oscillators A, B and C, sub and noise into two filters (in series, or in parallel with each source choosing) and the amp; up to 16 voices feed a chain of 30 effect units (ten kinds, three copies each) with one optional fork into two lanes. All 416 parameters carry stable ids, so share links and files keep working as the synth grows. The engine records 46 signal taps and telemetry that drive the board's glowing lines, the scopes and the moving dots on sliders. The UI is plain DOM in TypeScript, compiled file by file to ES modules; a `Store` is the single entry point for edits and keeps undo history as patch snapshots.
 
 License: [MIT](LICENSE).

@@ -16,7 +16,7 @@
 
 import { h, s, clamp } from './dom.ts';
 import { modColor } from '../theme.ts';
-import { SOURCES, MOVERS, SPLIT, isOn, hasSwitch, fxGroups, fxSpares, throughFilter, taps, tapOf, nodeOfParam, nodeOfSource, moverKind, setOn } from './nodes.ts';
+import { SOURCES, MOVERS, SPLIT, isOn, hasSwitch, fxGroups, fxSpares, filtersSeries, sourceDest, taps, tapOf, nodeOfParam, nodeOfSource, moverKind, setOn } from './nodes.ts';
 import { Switch } from './controls.ts';
 import type { App, Live, Scope } from '../app.ts';
 
@@ -167,7 +167,7 @@ export class Board {
     );
 
     // The fixed part of the path. Effects and the fork come and go: see layout().
-    this.fixedIds = [...SOURCES, 'filter', 'amp', 'out'];
+    this.fixedIds = [...SOURCES, 'filter', 'filter2', 'amp', 'out'];
     this.pathIds = this.fixedIds;
     for (const id of this.fixedIds) {
       const el = this.#pathNode(id);
@@ -177,7 +177,7 @@ export class Board {
 
     // Anything that changes which nodes are on the path redraws the graph.
     for (const p of store.params) {
-      if (/\.(on|toFilter)$/.test(p.key) || p.key === 'split.mode') app.watch(p.i, () => this.schedule());
+      if (/\.(on|toFilter|filterSel)$/.test(p.key) || p.key === 'split.mode' || p.key === 'filter2.mode') app.watch(p.i, () => this.schedule());
     }
     app.on('fx', () => this.schedule());
     app.on('patch', () => this.schedule());
@@ -389,7 +389,10 @@ export class Board {
     this.pathIds = [...this.fixedIds, ...shown];
 
     // --- the signal path ---
-    const before = ['filter', 'amp', ...g.pre];
+    // Filter 2 in series follows filter 1 on the path; in parallel (or
+    // switched off) it sits beside filter 1.
+    const series = filtersSeries(store);
+    const before = series ? ['filter', 'filter2', 'amp', ...g.pre] : ['filter', 'amp', ...g.pre];
     const behind = [...g.post, 'out'];
     if (!V) {
       SOURCES.forEach((id, i) => at(id, 0, i * stepY));
@@ -414,9 +417,13 @@ export class Board {
       behind.forEach(put);
       const rows = cells[cells.length - 1].row + 1;
       // A row with the fork needs room above and below for the lanes.
-      const rowY = [1.5 * stepY];
-      for (let r = 1; r <= rows; r++) rowY[r] = rowY[r - 1] + NH + ROW_GAP + (r - 1 === forkRow ? LANE : 0) + (r === forkRow ? LANE : 0);
+      // The first row faces the middle of the sources; below filter 1 there
+      // is room for filter 2 when it is beside it.
+      const rowY = [((SOURCES.length - 1) / 2) * stepY];
+      const below = series ? 0 : stepY;
+      for (let r = 1; r <= rows; r++) rowY[r] = rowY[r - 1] + NH + ROW_GAP + (r - 1 === forkRow ? LANE : 0) + (r === forkRow ? LANE : 0) + (r === 1 ? below : 0);
       for (const c of cells) at(c.id, (c.col + 1) * stepX, rowY[c.row] + c.dy);
+      if (!series) at('filter2', stepX, rowY[0] + stepY);
       // The line into the first node of a further row comes down the gap above that row.
       for (const c of cells) if (c.row > 0 && c.col === 0) target.get(c.id)!.wrapDy = -(NH / 2 + ROW_GAP / 2 + (c.row === forkRow ? LANE : 0));
       // Effects that are not in use wait below the path, five to a row.
@@ -427,12 +434,19 @@ export class Board {
     } else {
       SOURCES.forEach((id, i) => at(id, (i % 2) * (NW + 12), Math.floor(i / 2) * stepY));
       const chainX = (NW + 12) / 2;
-      let y = 2 * stepY + 18;
+      let y = Math.ceil(SOURCES.length / 2) * stepY + 18;
       const put = (id: string) => {
         at(id, chainX, y);
         y += NH + 28;
       };
-      before.forEach(put);
+      if (series) before.forEach(put);
+      else {
+        // The two filters side by side, then the rest of the path.
+        at('filter', 0, y);
+        at('filter2', NW + 12, y);
+        y += NH + 28;
+        before.slice(1).forEach(put);
+      }
       if (g.split) {
         // The lanes run down side by side under the fork.
         at(SPLIT, chainX, y);
@@ -523,14 +537,19 @@ export class Board {
       : { x: Math.min(firstMover.x, stepX) - 16, y: cross - 34, w: Math.max(340, lastAdd.x + MW + 16 - (Math.min(firstMover.x, stepX) - 16)), h: MH + 48 };
 
     // --- lines ---
-    const filterOn = isOn(store, 'filter');
+    const [f1, f2] = [isOn(store, 'filter'), isOn(store, 'filter2')];
     const edgeDefs: EdgeDef[] = [];
     for (const id of SOURCES) {
       if (!isOn(store, id)) continue;
-      if (throughFilter(store, id)) edgeDefs.push({ from: id, to: 'filter', tap: info.tap[id] });
-      else edgeDefs.push({ from: id, to: 'amp', tap: info.tap[id], around: 'filter' });
+      const dest = sourceDest(store, id);
+      const tap = info.tap[id];
+      if (dest === 'filter' || dest === 'both') edgeDefs.push({ from: id, to: 'filter', tap });
+      // Into filter 2 past a filter 1 that is off (in series): around it.
+      if (dest === 'filter2' || dest === 'both') edgeDefs.push({ from: id, to: 'filter2', tap, ...(series ? { around: 'filter' } : {}) });
+      if (dest === 'direct') edgeDefs.push({ from: id, to: 'amp', tap, around: 'filter' });
     }
-    if (filterOn) edgeDefs.push({ from: 'filter', to: 'amp', tap: info.tap.filterOut });
+    if (f1) edgeDefs.push({ from: 'filter', to: series ? 'filter2' : 'amp', tap: info.tap.filterOut });
+    if (f2) edgeDefs.push({ from: 'filter2', to: 'amp', tap: info.tap.filter2Out });
     // A run of nodes one after the other; `tap` carries what enters the first.
     const run = (from: string, tap: number, ids: string[]): [string, number] => {
       for (const id of ids) {

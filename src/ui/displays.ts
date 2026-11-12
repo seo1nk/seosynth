@@ -69,7 +69,7 @@ function tableFrames(core: EngineCore, table: number): Float32Array[] {
 /** The wavetable as a stack of frames with the playing waveform on top. */
 export function WavetableDisplay(app: App, name: string, color: string): HTMLElement {
   const { store, core, i18n } = app;
-  const osc = name === 'oscB' ? 1 : 0;
+  const osc = Math.max(0, ['oscA', 'oscB', 'oscC'].indexOf(name));
   const iPos = store.idx(`${name}.pos`);
   const iAmt = store.idx(`${name}.warpAmt`);
   let dirty = true;
@@ -730,7 +730,8 @@ export class ScopeBank {
 
     // Find a stable trigger: low-pass the reference down to roughly its
     // fundamental so there is one upward zero crossing per cycle.
-    const refIndex = info.filterIn;
+    // Everything the sources make, whichever way it goes.
+    const refIndex = info.preAmp;
     const ref = taps.subarray(refIndex * TAP_WINDOW, (refIndex + 1) * TAP_WINDOW);
     const a = Math.min(1, (2 * Math.PI) / period);
     let z1 = 0;

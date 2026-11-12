@@ -15,7 +15,7 @@ import type { App } from '../app.ts';
 import type { EngineCore } from '../engine/core.ts';
 import type { I18n } from '../i18n.ts';
 import type { Lane } from './nodes.ts';
-import { SPLIT, LANE, isFx, isMover, isOn, hasSwitch, moverKind, fxKind, fxCopies, fxGroups, fxPeers, laneOf, taps, nodeOfParam, setOn, shiftFx, setLane, unsplit, duplicateFx } from './nodes.ts';
+import { SPLIT, LANE, filtersParallel, isFx, isMover, isOn, hasSwitch, moverKind, fxKind, fxCopies, fxGroups, fxPeers, laneOf, taps, nodeOfParam, setOn, shiftFx, setLane, unsplit, duplicateFx } from './nodes.ts';
 
 /** What a kind of node puts in its panel. */
 interface Parts {
@@ -48,7 +48,7 @@ function Io(app: App, id: string): HTMLElement {
   const cell = (label: string, scope: HTMLElement) => h('figure', { class: 'io-cell' }, scope, h('figcaption', {}, label));
   // What enters a node of the effect chain depends on what is in front of it.
   const scopeIn = scopes.in;
-  if (scopeIn && !['filter', 'amp'].includes(id)) {
+  if (scopeIn && !['filter', 'filter2', 'amp'].includes(id)) {
     onChain(app, () => {
       const now = taps(store, id);
       if (now.in !== null) app.scopes.point(scopeIn, now.in);
@@ -435,11 +435,26 @@ function split(app: App): Parts {
 // One builder per kind of node. Each returns { visual, main, more, extra }.
 // ---------------------------------------------------------------------------
 
+/**
+ * Which filter a source goes into. Only shown while the two filters run in
+ * parallel (in series everything goes through both) and the source goes
+ * through the filters at all.
+ */
+function FilterChoice(app: App, id: string): HTMLElement {
+  const { store } = app;
+  return when(
+    app,
+    ['filter2.on', 'filter2.mode', `${id}.toFilter`],
+    () => filtersParallel(store) && store.plain(`${id}.toFilter`) >= 0.5,
+    Segmented(app, `${id}.filterSel`),
+  );
+}
+
 function oscillator(app: App, id: string): Parts {
   const k = (p: string) => `${id}.${p}`;
   return {
     visual: [WavetableDisplay(app, id, colors().sound), TablePicker(app, id), Io(app, id)],
-    main: [Slider(app, k('pos')), Slider(app, k('level')), Stepper(app, k('oct')), Slider(app, k('unison')), Slider(app, k('detune'))],
+    main: [Slider(app, k('pos')), Slider(app, k('level')), Stepper(app, k('oct')), Slider(app, k('unison')), Slider(app, k('detune')), FilterChoice(app, id)],
     more: [
       Select(app, k('warp'), { arrows: true }),
       when(app, [k('warp')], () => app.store.plain(k('warp')) > 0, Slider(app, k('warpAmt'))),
@@ -519,17 +534,35 @@ function parts(app: App, id: string): Parts {
       return split(app);
     case 'oscA':
     case 'oscB':
+    case 'oscC':
       return oscillator(app, id);
     case 'sub':
-      return { visual: [Io(app, id)], main: [Select(app, 'sub.shape', { arrows: true }), Stepper(app, 'sub.oct'), Slider(app, 'sub.level')], more: [Slider(app, 'sub.pan'), Switch(app, 'sub.toFilter')] };
-    case 'noise':
-      return { visual: [Io(app, id)], main: [Select(app, 'noise.type', { arrows: true }), Slider(app, 'noise.level'), Slider(app, 'noise.tone')], more: [Slider(app, 'noise.pan'), Switch(app, 'noise.toFilter')] };
-    case 'filter':
       return {
-        visual: [FilterDisplay(app, 'filter', colors().sound), Io(app, id)],
-        main: [Select(app, 'filter.type', { groups: filterGroups(i18n), arrows: true }), Slider(app, 'filter.cutoff'), Slider(app, 'filter.res')],
-        more: [Slider(app, 'filter.drive'), Slider(app, 'filter.var'), Slider(app, 'filter.mix'), Slider(app, 'filter.keytrack'), Slider(app, 'filter.stereo')],
+        visual: [Io(app, id)],
+        main: [Select(app, 'sub.shape', { arrows: true }), Stepper(app, 'sub.oct'), Slider(app, 'sub.level'), FilterChoice(app, id)],
+        more: [Slider(app, 'sub.pan'), Switch(app, 'sub.toFilter')],
       };
+    case 'noise':
+      return {
+        visual: [Io(app, id)],
+        main: [Select(app, 'noise.type', { arrows: true }), Slider(app, 'noise.level'), Slider(app, 'noise.tone'), FilterChoice(app, id)],
+        more: [Slider(app, 'noise.pan'), Switch(app, 'noise.toFilter')],
+      };
+    case 'filter':
+    case 'filter2': {
+      const k = (p: string) => `${id}.${p}`;
+      return {
+        visual: [FilterDisplay(app, id, colors().sound), Io(app, id)],
+        main: [
+          // How the second filter is connected comes first: it changes what it does.
+          ...(id === 'filter2' ? [Segmented(app, 'filter2.mode')] : []),
+          Select(app, k('type'), { groups: filterGroups(i18n), arrows: true }),
+          Slider(app, k('cutoff')),
+          Slider(app, k('res')),
+        ],
+        more: [Slider(app, k('drive')), Slider(app, k('var')), Slider(app, k('mix')), Slider(app, k('keytrack')), Slider(app, k('stereo'))],
+      };
+    }
     case 'amp': {
       const env = envelope(app, 1);
       return { visual: [...env.visual, Io(app, id)], main: env.main, more: [...env.more, Slider(app, 'master.velSens')] };

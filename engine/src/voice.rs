@@ -1,13 +1,17 @@
-//! One synth voice: sources -> filter -> amplifier, plus its own envelopes
+//! One synth voice: sources -> filters -> amplifier, plus its own envelopes
 //! and LFOs.
+//!
+//! Each source either bypasses the filters or goes through them. Filter 2
+//! runs after filter 1 (series) or beside it (parallel); in parallel every
+//! source picks filter 1, filter 2 or both.
 
 use crate::env::{Env, EnvParams};
 use crate::filter::{Filter, FilterParams, FilterType};
 use crate::lfo::{LfoKind, LfoMode, LfoParams, LfoState, LFO_TABLE};
 use crate::osc::{OscParams, OscState, Warp};
 use crate::params::{
-    self, env, env_idx, filter, lfo, lfo_idx, master, noise, osc, osc_idx, src, sub, ParamDef,
-    FILTER_BASE, NOISE_BASE, NUM_ENV, NUM_LFO, NUM_OSC, NUM_PARAMS, SUB_BASE,
+    self, env, env_idx, filter, filter2, lfo, lfo_idx, master, noise, osc, osc_idx, src, sub, ParamDef,
+    FILTER2_BASE, FILTER_BASE, NOISE_BASE, NUM_ENV, NUM_LFO, NUM_OSC, NUM_PARAMS, OSC_MODULATOR, SUB_BASE,
 };
 use crate::sources::{NoiseState, NoiseType, SubShape, SubState};
 use crate::util::{midi_to_hz, Rng, BLOCK};
@@ -18,14 +22,94 @@ pub const VOICE_GAIN: f32 = 0.3;
 
 /// Signal taps of the most recent voice, shown as little scopes in the UI.
 pub mod tap {
+    /// Oscillator `o` is tap `OSC_A + o`.
     pub const OSC_A: usize = 0;
     pub const OSC_B: usize = 1;
-    pub const SUB: usize = 2;
-    pub const NOISE: usize = 3;
-    pub const FILTER_IN: usize = 4;
-    pub const FILTER_OUT: usize = 5;
-    pub const AMP: usize = 6;
-    pub const N: usize = 7;
+    pub const OSC_C: usize = 2;
+    pub const SUB: usize = 3;
+    pub const NOISE: usize = 4;
+    /// What goes into and comes out of each filter.
+    pub const FILTER_IN: usize = 5;
+    pub const FILTER_OUT: usize = 6;
+    pub const FILTER2_IN: usize = 7;
+    pub const FILTER2_OUT: usize = 8;
+    /// Everything that reaches the amplifier (filtered and bypassing).
+    pub const PRE_AMP: usize = 9;
+    pub const AMP: usize = 10;
+    pub const N: usize = 11;
+}
+
+/// Where a source's sound goes.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Dest {
+    Direct,
+    Filter1,
+    Filter2,
+    /// Half into each filter (parallel only), so flat filters keep the level.
+    Both,
+}
+
+/// How the filters are connected for one block.
+#[derive(Clone, Copy)]
+pub struct FilterRouting {
+    pub f1: bool,
+    pub f2: bool,
+    pub parallel: bool,
+}
+
+impl FilterRouting {
+    pub fn from_params(m: &[f32]) -> Self {
+        let f1 = m[FILTER_BASE + filter::ON] >= 0.5;
+        let f2 = m[FILTER2_BASE + filter::ON] >= 0.5;
+        let mode = params::defs()[FILTER2_BASE + filter2::MODE].to_plain(m[FILTER2_BASE + filter2::MODE]);
+        FilterRouting { f1, f2, parallel: f2 && mode >= 0.5 }
+    }
+
+    /// Where a source goes, from its "through the filters" switch and its
+    /// choice of filter (`select`: 0 filter 1, 1 filter 2, 2 both). A
+    /// source sent to a filter that is off goes on as if it were not there.
+    pub fn dest(&self, through: bool, select: usize) -> Dest {
+        if !through {
+            return Dest::Direct;
+        }
+        if !self.parallel {
+            return if self.f1 { Dest::Filter1 } else if self.f2 { Dest::Filter2 } else { Dest::Direct };
+        }
+        match (select, self.f1) {
+            (0, true) => Dest::Filter1,
+            (0, false) => Dest::Direct,
+            (1, _) => Dest::Filter2,
+            (_, true) => Dest::Both,
+            (_, false) => Dest::Filter2,
+        }
+    }
+}
+
+/// The three buses sources are mixed into before the filters.
+struct Buses {
+    f1: [[f32; BLOCK]; 2],
+    f2: [[f32; BLOCK]; 2],
+    direct: [[f32; BLOCK]; 2],
+}
+
+impl Buses {
+    fn add(&mut self, dest: Dest, l: &[f32], r: &[f32]) {
+        let put = |bus: &mut [[f32; BLOCK]; 2], g: f32| {
+            for s in 0..l.len() {
+                bus[0][s] += l[s] * g;
+                bus[1][s] += r[s] * g;
+            }
+        };
+        match dest {
+            Dest::Direct => put(&mut self.direct, 1.0),
+            Dest::Filter1 => put(&mut self.f1, 1.0),
+            Dest::Filter2 => put(&mut self.f2, 1.0),
+            Dest::Both => {
+                put(&mut self.f1, 0.5);
+                put(&mut self.f2, 0.5);
+            }
+        }
+    }
 }
 
 pub type VoiceTaps = [[f32; BLOCK]; tap::N];
@@ -66,6 +150,7 @@ pub struct Voice {
     sub: SubState,
     noise: NoiseState,
     filter: Filter,
+    filter2: Filter,
     pub envs: [Env; NUM_ENV],
     pub lfos: [LfoState; NUM_LFO],
     rng: Rng,
@@ -99,10 +184,11 @@ impl Voice {
             age: 0,
             pitch: 60.0,
             target: 60.0,
-            osc: [OscState::default(), OscState::default()],
+            osc: [OscState::default(), OscState::default(), OscState::default()],
             sub: SubState::default(),
             noise: NoiseState::new(seed ^ 0xA5A5_5A5A),
             filter: Filter::default(),
+            filter2: Filter::default(),
             envs: [Env::default(); NUM_ENV],
             lfos: [LfoState::default(); NUM_LFO],
             rng: Rng::new(seed),
@@ -143,6 +229,7 @@ impl Voice {
             self.sub.reset();
             self.noise.reset();
             self.filter.reset();
+            self.filter2.reset();
             for e in self.envs.iter_mut() {
                 e.kill();
             }
@@ -250,27 +337,38 @@ impl Voice {
         let pitch = self.pitch + bend + plain(defs, m, master::PITCH);
 
         // --- sources ---------------------------------------------------------
-        let mut bus_f = [[0.0f32; BLOCK]; 2]; // through the filter
-        let mut bus_d = [[0.0f32; BLOCK]; 2]; // around the filter
+        let routing = FilterRouting::from_params(m);
+        let select = |idx: usize| plain(defs, m, idx) as usize;
+        let mut buses = Buses { f1: [[0.0; BLOCK]; 2], f2: [[0.0; BLOCK]; 2], direct: [[0.0; BLOCK]; 2] };
         let mut tl = [0.0f32; BLOCK];
         let mut tr = [0.0f32; BLOCK];
         let mut raw = [[0.0f32; BLOCK]; NUM_OSC];
-        let filter_on = is_on(m, FILTER_BASE + filter::ON);
 
-        let osc_on = [is_on(m, osc_idx(0, osc::ON)), is_on(m, osc_idx(1, osc::ON))];
-        let warps = [
-            Warp::from_index(plain(defs, m, osc_idx(0, osc::WARP)) as usize),
-            Warp::from_index(plain(defs, m, osc_idx(1, osc::WARP)) as usize),
-        ];
-        // When only A listens to B, render B first so A hears it without delay.
-        let order: [usize; 2] = if warps[0].needs_modulator() && !warps[1].needs_modulator() { [1, 0] } else { [0, 1] };
+        let osc_on: [bool; NUM_OSC] = core::array::from_fn(|o| is_on(m, osc_idx(o, osc::ON)));
+        let warps: [Warp; NUM_OSC] = core::array::from_fn(|o| Warp::from_index(plain(defs, m, osc_idx(o, osc::WARP)) as usize));
+        // Render an oscillator after the one it listens to (FM, AM, RM), so
+        // it hears it without delay. A and B listening to each other is a
+        // loop: one of them hears the other's previous block.
+        let mut done = [false; NUM_OSC];
+        let mut order = [0usize; NUM_OSC];
+        let mut count = 0;
+        while count < NUM_OSC {
+            let ready = (0..NUM_OSC).find(|&o| {
+                let src = OSC_MODULATOR[o];
+                !done[o] && (!warps[o].needs_modulator() || !osc_on[src] || done[src])
+            });
+            let o = ready.unwrap_or_else(|| (0..NUM_OSC).find(|&o| !done[o]).unwrap());
+            done[o] = true;
+            order[count] = o;
+            count += 1;
+        }
         let mut done = [false; NUM_OSC];
         for &o in order.iter() {
             if !osc_on[o] {
                 done[o] = true;
                 continue;
             }
-            let other = 1 - o;
+            let other = OSC_MODULATOR[o];
             let i = |p: usize| osc_idx(o, p);
             let note = pitch
                 + plain(defs, m, i(osc::OCT)) * 12.0
@@ -302,11 +400,7 @@ impl Voice {
             self.osc[o].process(&p, modulator, &mut tl[..n], &mut tr[..n], &mut raw_o[..n]);
             raw[o] = raw_o;
             done[o] = true;
-            let bus = if filter_on && is_on(m, i(osc::TO_FILTER)) { &mut bus_f } else { &mut bus_d };
-            for s in 0..n {
-                bus[0][s] += tl[s];
-                bus[1][s] += tr[s];
-            }
+            buses.add(routing.dest(is_on(m, i(osc::TO_FILTER)), select(i(osc::FILTER_SEL))), &tl[..n], &tr[..n]);
             if let Some(t) = taps.as_deref_mut() {
                 for s in 0..n {
                     t[tap::OSC_A + o][s] = (tl[s] + tr[s]) * 0.5;
@@ -321,11 +415,7 @@ impl Voice {
             let freq = midi_to_hz(pitch + plain(defs, m, i(sub::OCT)) * 12.0);
             let shape = SubShape::from_index(plain(defs, m, i(sub::SHAPE)) as usize);
             self.sub.process(shape, freq, level * level, plain(defs, m, i(sub::PAN)), sh.sr, &mut tl[..n], &mut tr[..n]);
-            let bus = if filter_on && is_on(m, i(sub::TO_FILTER)) { &mut bus_f } else { &mut bus_d };
-            for s in 0..n {
-                bus[0][s] += tl[s];
-                bus[1][s] += tr[s];
-            }
+            buses.add(routing.dest(is_on(m, i(sub::TO_FILTER)), select(i(sub::FILTER_SEL))), &tl[..n], &tr[..n]);
             if let Some(t) = taps.as_deref_mut() {
                 for s in 0..n {
                     t[tap::SUB][s] = (tl[s] + tr[s]) * 0.5;
@@ -338,11 +428,7 @@ impl Voice {
             let level = plain(defs, m, i(noise::LEVEL));
             let ty = NoiseType::from_index(plain(defs, m, i(noise::TYPE)) as usize);
             self.noise.process(ty, level * level, plain(defs, m, i(noise::PAN)), plain(defs, m, i(noise::TONE)), sh.sr, &mut tl[..n], &mut tr[..n]);
-            let bus = if filter_on && is_on(m, i(noise::TO_FILTER)) { &mut bus_f } else { &mut bus_d };
-            for s in 0..n {
-                bus[0][s] += tl[s];
-                bus[1][s] += tr[s];
-            }
+            buses.add(routing.dest(is_on(m, i(noise::TO_FILTER)), select(i(noise::FILTER_SEL))), &tl[..n], &tr[..n]);
             if let Some(t) = taps.as_deref_mut() {
                 for s in 0..n {
                     t[tap::NOISE][s] = (tl[s] + tr[s]) * 0.5;
@@ -350,29 +436,54 @@ impl Voice {
             }
         }
 
-        if let Some(t) = taps.as_deref_mut() {
-            for s in 0..n {
-                t[tap::FILTER_IN][s] = (bus_f[0][s] + bus_f[1][s] + bus_d[0][s] + bus_d[1][s]) * 0.5;
-            }
-        }
-
-        // --- filter ----------------------------------------------------------
-        if filter_on {
-            let i = |p: usize| FILTER_BASE + p;
+        // --- filters ---------------------------------------------------------
+        let filter_params = |base: usize| {
+            let i = |p: usize| base + p;
             let track = plain(defs, m, i(filter::KEYTRACK));
-            let cutoff = plain(defs, m, i(filter::CUTOFF)) * (2.0f32).powf(track * (pitch - 60.0) / 12.0);
-            let p = FilterParams {
+            FilterParams {
                 ty: FilterType::from_index(plain(defs, m, i(filter::TYPE)) as usize),
-                cutoff,
+                cutoff: plain(defs, m, i(filter::CUTOFF)) * (2.0f32).powf(track * (pitch - 60.0) / 12.0),
                 res: plain(defs, m, i(filter::RES)),
                 drive: plain(defs, m, i(filter::DRIVE)),
                 var: plain(defs, m, i(filter::VAR)),
                 mix: plain(defs, m, i(filter::MIX)),
                 stereo: plain(defs, m, i(filter::STEREO)),
                 sr: sh.sr,
-            };
-            let (l, r) = bus_f.split_at_mut(1);
-            self.filter.process(&p, &mut l[0][..n], &mut r[0][..n]);
+            }
+        };
+        let tap_of = |t: &mut [f32; BLOCK], bus: &[[f32; BLOCK]; 2]| {
+            for s in 0..n {
+                t[s] = (bus[0][s] + bus[1][s]) * 0.5;
+            }
+        };
+        if let Some(t) = taps.as_deref_mut() {
+            tap_of(&mut t[tap::FILTER_IN], &buses.f1);
+        }
+        if routing.f1 {
+            let (l, r) = buses.f1.split_at_mut(1);
+            self.filter.process(&filter_params(FILTER_BASE), &mut l[0][..n], &mut r[0][..n]);
+        }
+        if let Some(t) = taps.as_deref_mut() {
+            tap_of(&mut t[tap::FILTER_OUT], &buses.f1);
+        }
+        if routing.f2 && !routing.parallel {
+            // In series, what leaves filter 1 goes on into filter 2.
+            for c in 0..2 {
+                for s in 0..n {
+                    buses.f2[c][s] += buses.f1[c][s];
+                    buses.f1[c][s] = 0.0;
+                }
+            }
+        }
+        if let Some(t) = taps.as_deref_mut() {
+            tap_of(&mut t[tap::FILTER2_IN], &buses.f2);
+        }
+        if routing.f2 {
+            let (l, r) = buses.f2.split_at_mut(1);
+            self.filter2.process(&filter_params(FILTER2_BASE), &mut l[0][..n], &mut r[0][..n]);
+        }
+        if let Some(t) = taps.as_deref_mut() {
+            tap_of(&mut t[tap::FILTER2_OUT], &buses.f2);
         }
 
         // --- amplifier -------------------------------------------------------
@@ -381,10 +492,10 @@ impl Voice {
         let mut amp = self.amp_prev;
         let damp = (amp_end - amp) / n as f32;
         for s in 0..n {
-            let l = bus_f[0][s] + bus_d[0][s];
-            let r = bus_f[1][s] + bus_d[1][s];
+            let l = buses.f1[0][s] + buses.f2[0][s] + buses.direct[0][s];
+            let r = buses.f1[1][s] + buses.f2[1][s] + buses.direct[1][s];
             if let Some(t) = taps.as_deref_mut() {
-                t[tap::FILTER_OUT][s] = (l + r) * 0.5;
+                t[tap::PRE_AMP][s] = (l + r) * 0.5;
                 t[tap::AMP][s] = (l + r) * 0.5 * amp / VOICE_GAIN;
             }
             out_l[s] += l * amp;
@@ -416,5 +527,29 @@ pub fn lfo_params(defs: &[ParamDef], m: &[f32], l: usize, bpm: f32) -> LfoParams
         delay: plain(defs, m, i(lfo::DELAY)),
         smooth: plain(defs, m, i(lfo::SMOOTH)),
         phase: plain(defs, m, i(lfo::PHASE)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn routing_follows_the_switches_and_the_choice_of_filter() {
+        let r = |f1, f2, parallel| FilterRouting { f1, f2, parallel };
+        // Bypassing the filters always goes straight on.
+        for routing in [r(true, true, true), r(true, false, false), r(false, false, false)] {
+            assert_eq!(routing.dest(false, 0), Dest::Direct);
+        }
+        // One filter, or two in series: everything into the first that is on.
+        assert_eq!(r(true, false, false).dest(true, 1), Dest::Filter1, "the choice only matters in parallel");
+        assert_eq!(r(true, true, false).dest(true, 2), Dest::Filter1);
+        assert_eq!(r(false, true, false).dest(true, 0), Dest::Filter2);
+        assert_eq!(r(false, false, false).dest(true, 0), Dest::Direct);
+        // In parallel each source picks; a filter that is off is passed by.
+        let par = r(true, true, true);
+        assert_eq!((par.dest(true, 0), par.dest(true, 1), par.dest(true, 2)), (Dest::Filter1, Dest::Filter2, Dest::Both));
+        let only2 = r(false, true, true);
+        assert_eq!((only2.dest(true, 0), only2.dest(true, 1), only2.dest(true, 2)), (Dest::Direct, Dest::Filter2, Dest::Filter2));
     }
 }

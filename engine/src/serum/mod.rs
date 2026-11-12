@@ -176,8 +176,8 @@ fn filter_type(c: &mut Ctx, name: &str, context: &str) -> &'static str {
 // ---------------------------------------------------------------------------
 
 fn oscillator(c: &mut Ctx, o: usize, tables: &mut Vec<usize>) -> Value {
-    let name = if o == 0 { "oscA" } else { "oscB" };
-    let label = if o == 0 { "OSC A" } else { "OSC B" };
+    let name = params::OSC_NAMES[o];
+    let label = ["OSC A", "OSC B", "OSC C"][o];
     let k = |p: &str| format!("{name}.{p}");
     let table = c.patch.table_index(o);
     if c.on(&k("on")) && !tables.contains(&table) {
@@ -248,26 +248,6 @@ fn oscillator(c: &mut Ctx, o: usize, tables: &mut Vec<usize>) -> Value {
     m
 }
 
-/// Serum's third oscillator, which this synth does not have: left at init.
-fn unused_oscillator(o: usize) -> Value {
-    let mut m = empty();
-    for engine in ["GranularOsc", "MultiSampleOsc", "SampleOsc", "SpectralOsc"] {
-        m.set(&format!("{engine}{o}"), default_module());
-    }
-    m.set(
-        &format!("WTOsc{o}"),
-        map(vec![
-            ("flex", empty()),
-            ("numChannels", Value::Int(1)),
-            ("numFrames", Value::Int(18_432)),
-            ("plainParams", Value::from("default")),
-            ("relativePathToWT", Value::from("S2 Tables/Default Shapes.wav")),
-            ("sampleRate", Value::Int(44_100)),
-        ]),
-    );
-    m.set("plainParams", Value::from("default"));
-    m
-}
 
 fn noise(c: &mut Ctx) -> Value {
     let on = c.on("noise.on");
@@ -323,19 +303,21 @@ fn sub(c: &mut Ctx) -> Value {
     ])
 }
 
-fn voice_filter(c: &mut Ctx) -> Value {
-    let ty = c.option("filter.type");
-    let serum = filter_type(c, ty, "FILTER");
+/// A voice filter: `prefix` is "filter" or "filter2".
+fn voice_filter(c: &mut Ctx, prefix: &str, label: &str) -> Value {
+    let k = |p: &str| format!("{prefix}.{p}");
+    let ty = c.option(&k("type"));
+    let serum = filter_type(c, ty, label);
     module(vec![
-        ("kParamEnable", flag(c.on("filter.on"))),
+        ("kParamEnable", flag(c.on(&k("on")))),
         ("kParamType", Value::from(serum)),
-        ("kParamFreq", num(cutoff_knob(c.v("filter.cutoff")))),
-        ("kParamReso", num(c.v("filter.res") * 100.0)),
-        ("kParamDrive", num(c.v("filter.drive") * 100.0)),
-        ("kParamVar", num(c.v("filter.var") * 100.0)),
-        ("kParamWet", num(c.v("filter.mix") * 100.0)),
-        ("kParamStereo", num(50.0 + c.v("filter.stereo") * 50.0)),
-        ("kParamKeyTrack", num(c.v("filter.keytrack") * 100.0)),
+        ("kParamFreq", num(cutoff_knob(c.v(&k("cutoff"))))),
+        ("kParamReso", num(c.v(&k("res")) * 100.0)),
+        ("kParamDrive", num(c.v(&k("drive")) * 100.0)),
+        ("kParamVar", num(c.v(&k("var")) * 100.0)),
+        ("kParamWet", num(c.v(&k("mix")) * 100.0)),
+        ("kParamStereo", num(50.0 + c.v(&k("stereo")) * 50.0)),
+        ("kParamKeyTrack", num(c.v(&k("keytrack")) * 100.0)),
     ])
 }
 
@@ -518,8 +500,8 @@ fn destination(key: &str) -> Option<Dest> {
     let (module_key, param) = key.split_once('.')?;
     let d = |module, id, name, param, scale| Some(Dest { module, id, name, param, scale });
     match module_key {
-        "oscA" | "oscB" => {
-            let id = if module_key == "oscA" { 0 } else { 1 };
+        "oscA" | "oscB" | "oscC" => {
+            let id = params::OSC_NAMES.iter().position(|n| *n == module_key).unwrap_or(0) as i64;
             match param {
                 "level" => d("Oscillator", id, "kParamVolume", 1, 1.0),
                 "pan" => d("Oscillator", id, "kParamPan", 2, 1.0),
@@ -540,16 +522,19 @@ fn destination(key: &str) -> Option<Dest> {
                 _ => None,
             }
         }
-        "filter" => match param {
-            // Our cutoff spans 20 Hz..20 kHz, Serum's 8 Hz..22.05 kHz.
-            "cutoff" => d("VoiceFilter", 0, "kParamFreq", 3, (1000.0f32).ln() / (22_050.0f32 / 8.0).ln()),
-            "res" => d("VoiceFilter", 0, "kParamReso", 4, 1.0),
-            "drive" => d("VoiceFilter", 0, "kParamDrive", 5, 1.0),
-            "var" => d("VoiceFilter", 0, "kParamVar", 6, 1.0),
-            "mix" => d("VoiceFilter", 0, "kParamWet", 1, 1.0),
-            "stereo" => d("VoiceFilter", 0, "kParamStereo", 7, 1.0),
-            _ => None,
-        },
+        "filter" | "filter2" => {
+            let id = if module_key == "filter" { 0 } else { 1 };
+            match param {
+                // Our cutoff spans 20 Hz..20 kHz, Serum's 8 Hz..22.05 kHz.
+                "cutoff" => d("VoiceFilter", id, "kParamFreq", 3, (1000.0f32).ln() / (22_050.0f32 / 8.0).ln()),
+                "res" => d("VoiceFilter", id, "kParamReso", 4, 1.0),
+                "drive" => d("VoiceFilter", id, "kParamDrive", 5, 1.0),
+                "var" => d("VoiceFilter", id, "kParamVar", 6, 1.0),
+                "mix" => d("VoiceFilter", id, "kParamWet", 1, 1.0),
+                "stereo" => d("VoiceFilter", id, "kParamStereo", 7, 1.0),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
@@ -879,7 +864,6 @@ pub fn build(patch: &Patch) -> (Value, Vec<String>, Vec<usize>) {
         ]),
     );
     d.set("RetriggerState0", default_module());
-    d.set("VoiceFilter1", default_module());
     d.set("VoicePanel0", map(vec![("displayName", Value::from("")), ("plainParams", Value::from("default"))]));
     for i in 1..3 {
         d.set(&format!("FXRack{i}"), map(vec![("FX", Value::List(vec![])), ("displayName", Value::from("")), ("plainParams", Value::from("default"))]));
@@ -890,28 +874,35 @@ pub fn build(patch: &Patch) -> (Value, Vec<String>, Vec<usize>) {
         let osc = oscillator(&mut c, o, &mut tables);
         d.set(&format!("Oscillator{o}"), osc);
     }
-    d.set("Oscillator2", unused_oscillator(2));
     let noise_module = noise(&mut c);
     d.set("Oscillator3", noise_module);
     let sub_module = sub(&mut c);
     d.set("Oscillator4", sub_module);
 
-    // Routing: slots 0-2 are the oscillators, 3 noise, 4 sub.
-    let filter_on = c.on("filter.on");
+    // Routing: slots 0-2 are the oscillators, 3 noise, 4 sub. Only "into
+    // the filter or not" is known of Serum's routing: how filter 2 is
+    // connected (in series, beside filter 1, which source into which) is
+    // not carried over.
+    let filter_on = c.on("filter.on") || c.on("filter2.on");
+    if c.on("filter2.on") {
+        c.note("filter2Routing", "");
+    }
     let route = |c: &Ctx, key: &str| {
         let through = filter_on && c.on(key);
         module(vec![("kParamRoutingDest", Value::from(if through { "kRoutingDestFilter" } else { "kRoutingDestDirect" }))])
     };
     d.set("RoutingSlot0", route(&c, "oscA.toFilter"));
     d.set("RoutingSlot1", route(&c, "oscB.toFilter"));
-    d.set("RoutingSlot2", default_module());
+    d.set("RoutingSlot2", route(&c, "oscC.toFilter"));
     d.set("RoutingSlot3", route(&c, "noise.toFilter"));
     d.set("RoutingSlot4", route(&c, "sub.toFilter"));
     d.set("RoutingSlot5", default_module());
     d.set("RoutingSlot6", default_module());
 
-    let filter = voice_filter(&mut c);
+    let filter = voice_filter(&mut c, "filter", "FILTER");
     d.set("VoiceFilter0", filter);
+    let filter2 = voice_filter(&mut c, "filter2", "FILTER 2");
+    d.set("VoiceFilter1", filter2);
 
     for e in 0..NUM_ENV {
         d.set(&format!("Env{e}"), envelope(&c, e));
@@ -1233,6 +1224,24 @@ mod tests {
         let data = wav.windows(4).position(|w| w == b"data").unwrap() + 8;
         let sample = |i: usize| f32::from_le_bytes(wav[data + i * 4..data + i * 4 + 4].try_into().unwrap());
         assert!(sample(TABLE_SIZE / 4) < -0.3 && sample(3 * TABLE_SIZE / 4) > 0.3);
+    }
+
+    #[test]
+    fn oscillator_c_and_filter_2_are_exported() {
+        let near = |v: &Value, want: f64| assert!((number(v) - want).abs() < 1e-3 * want.abs().max(1.0), "{v:?} vs {want}");
+        let mut p = Patch::init();
+        let (d, notes, _) = build(&p);
+        assert_eq!(plain_of(&d, &["Oscillator2", "plainParams", "kParamEnable"]), &flag(false), "oscillator C is off by default");
+        assert!(!notes.iter().any(|n| n.starts_with("filter2")));
+        set(&mut p, "oscC.on", 1.0);
+        set(&mut p, "oscC.oct", -1.0);
+        set(&mut p, "filter2.on", 1.0);
+        set(&mut p, "filter2.cutoff", 1000.0);
+        let (d, notes, _) = build(&p);
+        near(plain_of(&d, &["Oscillator2", "plainParams", "kParamOctave"]), -1.0);
+        assert_eq!(plain_of(&d, &["VoiceFilter1", "plainParams", "kParamEnable"]), &flag(true));
+        near(plain_of(&d, &["VoiceFilter1", "plainParams", "kParamFreq"]), (1000.0f64 / 8.0).ln() / (22050.0f64 / 8.0).ln());
+        assert!(notes.iter().any(|n| n == "filter2Routing"), "the routing between the filters is reported");
     }
 
     #[test]

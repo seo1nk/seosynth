@@ -12,7 +12,9 @@
 
 import type { Store } from '../store.ts';
 
-export const SOURCES = ['oscA', 'oscB', 'sub', 'noise'];
+export const SOURCES = ['oscA', 'oscB', 'oscC', 'sub', 'noise'];
+export const OSCS = ['oscA', 'oscB', 'oscC'];
+export const FILTERS = ['filter', 'filter2'];
 
 /** Things that move sliders. Each is one modulation source of the engine
  * (envelope 1 is also one, but it lives inside the amp node). */
@@ -54,7 +56,7 @@ export function fxCopies(store: Store, id: string): string[] {
 }
 
 /** Nodes that have an on/off switch. */
-export const hasSwitch = (store: Store, id: string): boolean => SOURCES.includes(id) || id === 'filter' || isFx(store, id);
+export const hasSwitch = (store: Store, id: string): boolean => SOURCES.includes(id) || FILTERS.includes(id) || isFx(store, id);
 
 export function isOn(store: Store, id: string): boolean {
   return hasSwitch(store, id) ? store.plain(`${id}.on`) >= 0.5 : true;
@@ -97,8 +99,29 @@ export function fxSpares(store: Store): string[] {
   return store.info.fxKinds.map((kind) => fxCopies(store, kind).find((id) => !isOn(store, id))).filter((id) => id !== undefined);
 }
 
-/** True when a source goes through the filter rather than around it. */
-export const throughFilter = (store: Store, id: string): boolean => isOn(store, 'filter') && store.plain(`${id}.toFilter`) >= 0.5;
+/** Filter 2 is on and beside filter 1 rather than after it. */
+export const filtersParallel = (store: Store): boolean => isOn(store, 'filter2') && Math.round(store.plain('filter2.mode')) === 1;
+
+/** Filter 2 is on and after filter 1. */
+export const filtersSeries = (store: Store): boolean => isOn(store, 'filter2') && !filtersParallel(store);
+
+export type SourceDest = 'direct' | 'filter' | 'filter2' | 'both';
+
+/**
+ * Where a source's sound goes (the same rule as the engine's): around the
+ * filters, into the first one that is on, or, with the filters in
+ * parallel, into the filter it picked. A filter that is off is passed by.
+ */
+export function sourceDest(store: Store, id: string): SourceDest {
+  const f1 = isOn(store, 'filter');
+  const f2 = isOn(store, 'filter2');
+  if (store.plain(`${id}.toFilter`) < 0.5) return 'direct';
+  if (!filtersParallel(store)) return f1 ? 'filter' : f2 ? 'filter2' : 'direct';
+  const pick = Math.round(store.plain(`${id}.filterSel`));
+  if (pick === 0) return f1 ? 'filter' : 'direct';
+  if (pick === 1) return 'filter2';
+  return f1 ? 'both' : 'filter2';
+}
 
 /** The tap that carries what leaves an effect unit or the fork. */
 export const tapOf = (store: Store, id: string): number => (id === SPLIT ? store.info.tap.splitOut : store.info.tap.fx + store.info.fx.indexOf(id));
@@ -108,7 +131,8 @@ export function taps(store: Store, id: string): { in: number | null; out: number
   const t = store.info.tap;
   if (SOURCES.includes(id)) return { in: null, out: t[id] };
   if (id === 'filter') return { in: t.filterIn, out: t.filterOut };
-  if (id === 'amp') return { in: t.filterOut, out: t.amp };
+  if (id === 'filter2') return { in: t.filter2In, out: t.filter2Out };
+  if (id === 'amp') return { in: t.preAmp, out: t.amp };
   const g = fxGroups(store);
   const out = (ids: string[], before: number) => (ids.length ? tapOf(store, ids[ids.length - 1]) : before);
   const beforeSplit = out(g.pre, t.mix);
@@ -141,7 +165,7 @@ export function movableParams(store: Store, id: string) {
 /** Nodes on the board that have at least one movable slider, in signal order. */
 export function movableNodes(store: Store): string[] {
   const g = fxGroups(store);
-  return [...SOURCES, 'filter', 'amp', ...g.pre, ...(g.split ? [SPLIT] : []), ...g.a, ...g.b, ...g.post, ...fxSpares(store), 'out'];
+  return [...SOURCES, ...FILTERS, 'amp', ...g.pre, ...(g.split ? [SPLIT] : []), ...g.a, ...g.b, ...g.post, ...fxSpares(store), 'out'];
 }
 
 // --- changing the chain ---------------------------------------------------------

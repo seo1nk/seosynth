@@ -41,7 +41,7 @@ test('every parameter has a label and help text in both languages', async () => 
       assert.notEqual(i18n.sourceName(key), key, `no ${lang} name for source ${key}`);
       assert.ok(i18n.sourceHelp(key).length > 0, `no ${lang} description for source ${key}`);
     }
-    for (const key of ['oscA', 'oscB', 'sub', 'noise', 'filter', 'amp', 'split', 'out', ...store.info.fx]) {
+    for (const key of ['oscA', 'oscB', 'oscC', 'sub', 'noise', 'filter', 'filter2', 'amp', 'split', 'out', ...store.info.fx]) {
       assert.notEqual(i18n.nodeName(key), key, `no ${lang} name for node ${key}`);
       assert.ok(i18n.nodeRole(key).length > 0, `no ${lang} role for node ${key}`);
       assert.ok(i18n.nodeAbout(key).length > 0, `no ${lang} explanation for node ${key}`);
@@ -676,4 +676,48 @@ test('envelope playhead stays on the drawn line and does not jump', async () => 
   const early = must(read(1));
   const k = (early[0] - xS) / (xR - xS);
   near(early, [early[0], g.y(env.sustain * (1 - curve(k, env.relCurve)))], 'on the drawn release line');
+});
+
+test('where the board draws a source going matches where the engine sends it', async () => {
+  const { sourceDest } = await import('../src/ui/nodes.ts');
+  const { store } = await makeStore();
+  const core = store.core;
+  const t = store.info.tap;
+  const level = (tap: number) => {
+    const x = core.tap(tap);
+    return Math.sqrt(x.reduce((s, v) => s + v * v, 0) / x.length);
+  };
+  let checked = 0;
+  for (const f1 of [0, 1]) {
+    for (const f2 of [0, 1]) {
+      for (const mode of [0, 1]) {
+        for (const through of [0, 1]) {
+          for (const sel of [0, 1, 2]) {
+            store.init();
+            const set = (k: string, v: number) => store.setPlain(store.idx(k), v);
+            set('filter.on', f1);
+            set('filter2.on', f2);
+            set('filter2.mode', mode);
+            set('oscA.toFilter', through);
+            set('oscA.filterSel', sel);
+            core.noteOn(57, 0.9);
+            for (let k = 0; k < 20; k++) core.render(128);
+            core.noteOff(57);
+            const dest = sourceDest(store, 'oscA');
+            const into1 = level(t.filterIn) > 1e-3;
+            const into2 = level(t.filter2In) > 1e-3;
+            const what = JSON.stringify({ f1, f2, mode, through, sel, dest });
+            const series = f2 === 1 && mode === 0;
+            if (dest === 'direct') assert.ok(!into1 && !into2, what);
+            if (dest === 'filter') assert.ok(into1 && into2 === series, what);
+            if (dest === 'filter2') assert.ok(!into1 && into2, what);
+            if (dest === 'both') assert.ok(into1 && into2, what);
+            for (let k = 0; k < 200; k++) core.render(128); // let the release die away
+            checked++;
+          }
+        }
+      }
+    }
+  }
+  assert.equal(checked, 48);
 });

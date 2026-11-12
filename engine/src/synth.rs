@@ -120,7 +120,7 @@ impl Synth {
             global_m: patch.values.clone(),
             patch,
             voices: (0..MAX_VOICES).map(|i| Voice::new(0x1234_5678 ^ (i as u32 + 1).wrapping_mul(0x9E37_79B9))).collect(),
-            tables: [t0.clone(), t0],
+            tables: [t0.clone(), t0.clone(), t0],
             bank,
             table_idx: [0; NUM_OSC],
             realtime: false,
@@ -490,7 +490,7 @@ impl Synth {
                 sr: self.sr,
                 base: &self.smoothed,
                 slots: &self.voice_slots,
-                tables: [&*self.tables[0], &*self.tables[1]],
+                tables: core::array::from_fn(|o| &*self.tables[o]),
                 lfo_tables: &self.lfo_tables,
                 lfo_free: self.lfo_free,
                 mod_wheel: self.mod_wheel,
@@ -651,7 +651,7 @@ impl Synth {
     /// them with the live modulated values.
     pub fn preview_osc(&mut self, o: usize, pos: f32, warp_amt: f32, out: &mut [f32]) {
         let o = o.min(NUM_OSC - 1);
-        let other = 1 - o;
+        let other = params::OSC_MODULATOR[o];
         let p = &self.patch;
         let table = self.bank.get(p.table_index(o));
         let other_table = self.bank.get(p.table_index(other));
@@ -995,6 +995,99 @@ mod tests {
         rt.set_user_table(0, UserTable::new(&edited).unwrap());
         callbacks(&mut rt, 1);
         assert_eq!(rt.bank.user(0).points(), &edited[..], "installed after one callback");
+    }
+
+    /// One note through a patch set up by `setup`, as samples.
+    fn note_through(setup: impl Fn(&mut Patch)) -> Vec<f32> {
+        let mut s = Synth::new(48_000.0);
+        for o in 0..NUM_OSC {
+            s.patch.set_plain(osc_idx(o, osc::RAND), 0.0);
+        }
+        setup(&mut s.patch);
+        s.snap();
+        s.note_on(45, 0.9);
+        render(&mut s, 0.15)
+    }
+
+    #[test]
+    fn oscillator_c_sounds_and_can_listen_to_a() {
+        let only_a = note_through(|_| {});
+        let with_c = note_through(|p| p.set_plain(osc_idx(2, osc::ON), 1.0));
+        assert!(rms(&with_c) > rms(&only_a) * 1.2, "C adds to the sound");
+        let c_alone = note_through(|p| {
+            p.set_plain(osc_idx(0, osc::ON), 0.0);
+            p.set_plain(osc_idx(2, osc::ON), 1.0);
+        });
+        assert!(rms(&c_alone) > 0.02);
+        // C's FM listens to A: with A on it changes the sound, with A off it cannot.
+        let fm = |a_on: bool| {
+            note_through(move |p| {
+                p.set_plain(osc_idx(0, osc::ON), if a_on { 1.0 } else { 0.0 });
+                p.set_plain(osc_idx(0, osc::LEVEL), 0.0);
+                p.set_plain(osc_idx(2, osc::ON), 1.0);
+                p.set_plain(osc_idx(2, osc::WARP), 11.0); // FM
+                p.set_plain(osc_idx(2, osc::WARP_AMT), 0.8);
+            })
+        };
+        let diff = |a: &[f32], b: &[f32]| a.iter().zip(b).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
+        assert!(diff(&fm(true), &c_alone) > 0.05, "FM from A");
+        assert!(diff(&fm(false), &c_alone) < 1e-4, "no A, no FM");
+    }
+
+    #[test]
+    fn filter_2_in_series_and_in_parallel() {
+        use crate::params::{filter2, FILTER2_BASE};
+        let lp = |p: &mut Patch, base: usize, hz: f32| {
+            p.set_plain(base + filter::ON, 1.0);
+            p.set_plain(base + filter::TYPE, 2.0); // LP24
+            p.set_plain(base + filter::CUTOFF, hz);
+            p.set_plain(base + filter::RES, 0.0);
+        };
+        let open = note_through(|p| p.set_plain(FILTER_BASE + filter::ON, 0.0));
+        let one = note_through(|p| lp(p, FILTER_BASE, 400.0));
+        // Off, filter 2 changes nothing.
+        let off = note_through(|p| {
+            lp(p, FILTER_BASE, 400.0);
+            p.set_plain(FILTER2_BASE + filter::CUTOFF, 100.0);
+        });
+        assert_eq!(off, one);
+        // In series a second low-pass darkens further: compare the highs
+        // (the sample-to-sample differences), not the overall level.
+        let series = note_through(|p| {
+            lp(p, FILTER_BASE, 400.0);
+            lp(p, FILTER2_BASE, 150.0);
+        });
+        let highs = |x: &[f32]| rms(&x.windows(2).map(|w| w[1] - w[0]).collect::<Vec<f32>>());
+        assert!(highs(&series) < highs(&one) * 0.7, "series: {} vs {}", highs(&series), highs(&one));
+        // Swapping which filter does what gives the same sound in series.
+        let swapped = note_through(|p| {
+            lp(p, FILTER_BASE, 150.0);
+            lp(p, FILTER2_BASE, 400.0);
+        });
+        assert!(rms(&swapped.iter().zip(&series).map(|(a, b)| a - b).collect::<Vec<f32>>()) < rms(&series) * 0.05);
+        // In parallel the source picks: filter 1 only is like a single filter.
+        let parallel = |sel: f32| {
+            note_through(move |p| {
+                lp(p, FILTER_BASE, 400.0);
+                lp(p, FILTER2_BASE, 400.0);
+                p.set_plain(FILTER2_BASE + filter2::MODE, 1.0);
+                p.set_plain(osc_idx(0, osc::FILTER_SEL), sel);
+            })
+        };
+        let diff = |a: &[f32], b: &[f32]| a.iter().zip(b).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
+        assert!(diff(&parallel(0.0), &one) < 1e-5, "filter 1 only");
+        assert!(diff(&parallel(1.0), &one) < 1e-5, "filter 2 only, set the same");
+        // Both: half into each, so two identical filters sound like one.
+        assert!(diff(&parallel(2.0), &one) < 1e-4, "both");
+        // And two open filters in parallel leave the sound as it is.
+        let both_open = note_through(|p| {
+            p.set_plain(FILTER2_BASE + filter::ON, 1.0);
+            p.set_plain(FILTER2_BASE + filter2::MODE, 1.0);
+            p.set_plain(osc_idx(0, osc::FILTER_SEL), 2.0);
+        });
+        let one_open = note_through(|_| {});
+        assert!(diff(&both_open, &one_open) < 1e-3, "level kept: {}", diff(&both_open, &one_open));
+        assert!(rms(&open) > rms(&one));
     }
 
     #[test]

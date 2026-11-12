@@ -10,7 +10,7 @@
 
 use std::sync::OnceLock;
 
-pub const NUM_OSC: usize = 2;
+pub const NUM_OSC: usize = 3;
 pub const NUM_ENV: usize = 3;
 pub const NUM_LFO: usize = 4;
 pub const NUM_MACRO: usize = 4;
@@ -155,8 +155,20 @@ pub mod osc {
     pub const TO_FILTER: usize = 17;
     /// 0: play the factory table `WT`; 1..: play that user table instead.
     pub const USER: usize = 18;
-    pub const N: usize = 19;
+    /// Which filter the oscillator goes into when the filters run in
+    /// parallel (see `FILTER_SELECT`).
+    pub const FILTER_SEL: usize = 19;
+    pub const N: usize = 20;
 }
+
+/// Names and stable-id bases of the oscillators. The third came later, so
+/// its ids live in a range of their own.
+pub const OSC_NAMES: [&str; NUM_OSC] = ["oscA", "oscB", "oscC"];
+pub const OSC_SIDS: [u16; NUM_OSC] = [100, 150, 800];
+
+/// The oscillator each one listens to for FM, AM and RM: A and B to each
+/// other, C to A.
+pub const OSC_MODULATOR: [usize; NUM_OSC] = [1, 0, 0];
 
 pub mod sub {
     pub const ON: usize = 0;
@@ -165,7 +177,8 @@ pub mod sub {
     pub const LEVEL: usize = 3;
     pub const PAN: usize = 4;
     pub const TO_FILTER: usize = 5;
-    pub const N: usize = 6;
+    pub const FILTER_SEL: usize = 6;
+    pub const N: usize = 7;
 }
 
 pub mod noise {
@@ -175,7 +188,8 @@ pub mod noise {
     pub const PAN: usize = 3;
     pub const TONE: usize = 4;
     pub const TO_FILTER: usize = 5;
-    pub const N: usize = 6;
+    pub const FILTER_SEL: usize = 6;
+    pub const N: usize = 7;
 }
 
 pub mod filter {
@@ -189,6 +203,13 @@ pub mod filter {
     pub const KEYTRACK: usize = 7;
     pub const STEREO: usize = 8;
     pub const N: usize = 9;
+}
+
+/// The second voice filter has the same parameters as the first, followed
+/// by how it is connected.
+pub mod filter2 {
+    pub const MODE: usize = super::filter::N;
+    pub const N: usize = super::filter::N + 1;
 }
 
 pub mod env {
@@ -351,7 +372,8 @@ pub const OSC_BASE: usize = master::N;
 pub const SUB_BASE: usize = OSC_BASE + NUM_OSC * osc::N;
 pub const NOISE_BASE: usize = SUB_BASE + sub::N;
 pub const FILTER_BASE: usize = NOISE_BASE + noise::N;
-pub const ENV_BASE: usize = FILTER_BASE + filter::N;
+pub const FILTER2_BASE: usize = FILTER_BASE + filter::N;
+pub const ENV_BASE: usize = FILTER2_BASE + filter2::N;
 pub const LFO_BASE: usize = ENV_BASE + NUM_ENV * env::N;
 pub const HYPER_BASE: usize = LFO_BASE + NUM_LFO * lfo::N;
 pub const DIST_BASE: usize = HYPER_BASE + hyper::N;
@@ -431,6 +453,10 @@ pub const WARP_MODES: &[&str] = &[
 ];
 /// Which table an oscillator plays: a factory table, or one of the patch's own.
 pub const USER_TABLE_OPTIONS: &[&str] = &["Off", "User 1", "User 2"];
+/// How filter 2 is connected: after filter 1, or beside it.
+pub const FILTER_MODES: &[&str] = &["Series", "Parallel"];
+/// Where a source goes when the filters run in parallel.
+pub const FILTER_SELECT: &[&str] = &["Filter1", "Filter2", "Both"];
 pub const SUB_SHAPES: &[&str] = &["Sine", "Round", "Triangle", "Saw", "Square", "Pulse"];
 pub const NOISE_TYPES: &[&str] = &["White", "Pink", "Brown", "Digital", "Crackle"];
 pub const FILTER_TYPES: &[&str] = &[
@@ -565,8 +591,8 @@ fn build() -> Vec<ParamDef> {
 
     // --- oscillators ------------------------------------------------------
     for o in 0..NUM_OSC {
-        let name = if o == 0 { "oscA" } else { "oscB" };
-        let s = 100 + 50 * o as u16;
+        let name = OSC_NAMES[o];
+        let s = OSC_SIDS[o];
         let k = |p: &str| format!("{name}.{p}");
         let i = |p: usize| osc_idx(o, p);
         b.flag(i(osc::ON), s, k("on"), o == 0, 0);
@@ -589,6 +615,7 @@ fn build() -> Vec<ParamDef> {
         b.num(i(osc::WARP_AMT), s + 16, k("warpAmt"), 0.0, 1.0, 0.0, Lin, "%", MS);
         b.flag(i(osc::TO_FILTER), s + 17, k("toFilter"), true, 0);
         b.choice(i(osc::USER), s + 18, k("userTable"), USER_TABLE_OPTIONS, 0, 0);
+        b.choice(i(osc::FILTER_SEL), s + 19, k("filterSel"), FILTER_SELECT, 0, 0);
     }
 
     // --- sub / noise ------------------------------------------------------
@@ -599,6 +626,7 @@ fn build() -> Vec<ParamDef> {
     b.num(i(sub::LEVEL), 203, "sub.level", 0.0, 1.0, 0.75, Lin, "%", MS);
     b.num(i(sub::PAN), 204, "sub.pan", -1.0, 1.0, 0.0, Lin, "pan", MS);
     b.flag(i(sub::TO_FILTER), 205, "sub.toFilter", true, 0);
+    b.choice(i(sub::FILTER_SEL), 206, "sub.filterSel", FILTER_SELECT, 0, 0);
 
     let i = |p: usize| NOISE_BASE + p;
     b.flag(i(noise::ON), 220, "noise.on", false, 0);
@@ -607,6 +635,7 @@ fn build() -> Vec<ParamDef> {
     b.num(i(noise::PAN), 223, "noise.pan", -1.0, 1.0, 0.0, Lin, "pan", MS);
     b.num(i(noise::TONE), 224, "noise.tone", 0.0, 1.0, 1.0, Lin, "%", MS);
     b.flag(i(noise::TO_FILTER), 225, "noise.toFilter", true, 0);
+    b.choice(i(noise::FILTER_SEL), 226, "noise.filterSel", FILTER_SELECT, 0, 0);
 
     // --- filter -----------------------------------------------------------
     let i = |p: usize| FILTER_BASE + p;
@@ -619,6 +648,19 @@ fn build() -> Vec<ParamDef> {
     b.num(i(filter::MIX), 246, "filter.mix", 0.0, 1.0, 1.0, Lin, "%", MS);
     b.num(i(filter::KEYTRACK), 247, "filter.keytrack", 0.0, 1.0, 0.0, Lin, "%", 0);
     b.num(i(filter::STEREO), 248, "filter.stereo", -1.0, 1.0, 0.0, Lin, "pan", MS);
+
+    // The second filter: the same parameters, off and wide open by default.
+    let i = |p: usize| FILTER2_BASE + p;
+    b.flag(i(filter::ON), 840, "filter2.on", false, 0);
+    b.choice(i(filter::TYPE), 841, "filter2.type", FILTER_TYPES, 2, 0);
+    b.num(i(filter::CUTOFF), 842, "filter2.cutoff", 20.0, 20000.0, 20000.0, Log, "Hz", MS);
+    b.num(i(filter::RES), 843, "filter2.res", 0.0, 1.0, 0.1, Lin, "%", MS);
+    b.num(i(filter::DRIVE), 844, "filter2.drive", 0.0, 1.0, 0.0, Lin, "%", MS);
+    b.num(i(filter::VAR), 845, "filter2.var", 0.0, 1.0, 0.0, Lin, "%", MS);
+    b.num(i(filter::MIX), 846, "filter2.mix", 0.0, 1.0, 1.0, Lin, "%", MS);
+    b.num(i(filter::KEYTRACK), 847, "filter2.keytrack", 0.0, 1.0, 0.0, Lin, "%", 0);
+    b.num(i(filter::STEREO), 848, "filter2.stereo", -1.0, 1.0, 0.0, Lin, "pan", MS);
+    b.choice(i(filter2::MODE), 849, "filter2.mode", FILTER_MODES, 0, 0);
 
     // --- envelopes --------------------------------------------------------
     for e in 0..NUM_ENV {
@@ -881,6 +923,10 @@ mod tests {
             ("oscB.pos", 152),
             ("oscA.userTable", 118),
             ("oscB.userTable", 168),
+            ("oscC.pos", 802),
+            ("oscC.filterSel", 819),
+            ("filter2.cutoff", 842),
+            ("filter2.mode", 849),
             ("filter.cutoff", 242),
             ("env1.attack", 300),
             ("env3.release", 344),
