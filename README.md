@@ -48,22 +48,32 @@ Rust で書いたシンセエンジンを WebAssembly にして、ブラウザ�
 
 ## 動かす
 
-必要なもの：Rust（`wasm32-unknown-unknown` ターゲット）と Node.js 20 以上。npm パッケージのインストールは不要です。
+必要なもの：Rust（`wasm32-unknown-unknown` ターゲット）、Node.js 22.18 以上、pnpm。
 
 ```sh
 rustup target add wasm32-unknown-unknown   # 初回のみ
-npm run build                              # Rust → web/wasm/seosynth.wasm
-npm run dev                                # http://localhost:8080
+pnpm install
+pnpm build    # Rust → dist/wasm/、TypeScript → dist/js/、web/ → dist/
+pnpm dev      # http://localhost:8080/service/seosynth/（TypeScript は保存のたびに再コンパイル）
 ```
 
-`web/` フォルダは、ビルドした `seosynth.wasm` を含めれば、そのまま静的サイトとして配信できます。
+`dist/` がそのまま静的サイトになります。サーバー側の処理はありません。
+
+| コマンド | 内容 |
+|---|---|
+| `pnpm build` | すべてをビルドして `dist/` に出力 |
+| `pnpm build:wasm` / `pnpm build:web` | エンジンだけ／画面だけをビルド |
+| `pnpm dev` | 開発サーバー（本番と同じ `/service/seosynth/` の下で配信） |
+| `pnpm typecheck` | アプリ・テスト・スクリプトの型チェック |
+| `pnpm test` | Rust と TypeScript のテスト |
+| `pnpm run deploy` | ビルドして Cloudflare にデプロイ（下記） |
 
 書体は Google Fonts の Zen Maru Gothic を読み込んでいます（`web/index.html`）。外部への読み込みを避けたい場合はその `<link>` を消してください。Mac ではヒラギノ丸ゴ、ほかでは各 OS のゴシック体で表示されます。
 
 ### テスト
 
 ```sh
-npm test
+pnpm test
 ```
 
 Rust のユニットテスト（DSP・パッチ形式・Serum 書き出し）と、ビルドした wasm を Node から動かすテスト（プリセット全件の読み込みと発音、共有 URL の往復、書き出したファイルの読み戻し）を実行します。
@@ -84,21 +94,27 @@ engine/            Rust のシンセエンジン（依存クレートなし）
   src/patch.rs       パッチと共有用バイナリ形式
   src/serum/         Serum 2 プリセットの書き出し
   src/api.rs         WebAssembly の公開関数
-web/               Web アプリ（ビルド不要の ES モジュール）
-  js/engine/         wasm のラッパー、AudioWorklet
-  js/store.js        パッチの状態管理（undo、JSON、URL）
-  js/ui/nodes.js     ノードのつながり方と、エフェクトチェーンの編集
-  js/ui/board.js     ホワイトボード（ノード、線、パン／ズーム）
-  js/ui/panel.js     ノードごとの設定パネル
-  js/ui/table-editor.js  波形を描く画面
-  js/wavetable-import.js 音声ファイルから波形を取り出す解析
-  js/ui/controls.js  スライダーなどの部品
-  js/ui/displays.js  波形・フィルター特性・エンベロープ・LFO の表示
-  js/ui/mods.js      「うごき」とスライダーのつながり
-  js/i18n.js         文言（日本語／英語）
-  js/presets.js      内蔵プリセット
-tests/             Node から wasm と Web 側モジュールを検証
+src/               Web アプリ（TypeScript。1 ファイルずつ ES モジュールにコンパイル、バンドルなし）
+  engine/            wasm のラッパー、AudioWorklet、エンジンの型
+  app.ts             画面全体で共有するアプリオブジェクトの型
+  store.ts           パッチの状態管理（undo、JSON、URL）
+  ui/nodes.ts        ノードのつながり方と、エフェクトチェーンの編集
+  ui/board.ts        ホワイトボード（ノード、線、パン／ズーム）
+  ui/panel.ts        ノードごとの設定パネル
+  ui/table-editor.ts 波形を描く画面
+  wavetable-import.ts 音声ファイルから波形を取り出す解析
+  ui/controls.ts     スライダーなどの部品
+  ui/displays.ts     波形・フィルター特性・エンベロープ・LFO の表示
+  ui/mods.ts         「うごき」とスライダーのつながり
+  i18n.ts            文言（日本語／英語）
+  presets.ts         内蔵プリセット
+web/               そのままコピーする静的ファイル（index.html、css）
+scripts/           ビルド・開発サーバー（TypeScript を Node で直接実行）
+tests/             Node から wasm と Web 側モジュールを検証（TypeScript を Node で直接実行）
+cloudflare.config.ts  デプロイ先の設定
 ```
+
+TypeScript は `tsc` で `dist/js/` に 1 ファイルずつ出力します。ソースどうしは `.ts` 付きで import し、出力時に `.js` に書き換えます。型を消すだけで動く書き方に限っている（`erasableSyntaxOnly`）ので、テストとスクリプトは Node がそのまま実行します。
 
 エンジンの wasm はブラウザ内で 2 つインスタンス化されます。1 つは AudioWorklet（音声スレッド）で音を出し、もう 1 つはメインスレッドでパッチの正本を持ち、波形やフィルター特性のプレビューを描くのに使います。エンジンは `extern "C"` の素の関数だけを公開しているので、JS のグルーコードなしで AudioWorklet の中から読み込めます。
 
@@ -122,16 +138,21 @@ tests/             Node から wasm と Web 側モジュールを検証
 
 Serum は Xfer Records の製品です。このプロジェクトは Xfer Records とは関係ありません。
 
-## GitHub に上げる／公開する
+## 公開（Cloudflare）
+
+https://kseo.ink/service/seosynth/ で公開します。静的ファイルだけの Worker（`seosynth`）を、Cloudflare CLI（`cf`）でデプロイします。
 
 ```sh
-gh repo create seosynth --source . --public --push   # または git remote add … && git push
+pnpm exec cf auth login   # 初回のみ（ブラウザで承認）
+pnpm run deploy           # ビルドして dist/ を Cloudflare にアップロード
 ```
 
-`.github/workflows/` に 2 つのワークフローが入っています。
+- 設定は `cloudflare.config.ts` にあります。`kseo.ink/service/seosynth` と `kseo.ink/service/seosynth/*` のルートにだけ付きます
+- kseo.ink のほかの部分は別の Worker（asobi）です。ルートは、ホスト名を持つ Worker より先に動くので、このパスだけが seosynth になります
+- ファイルは `dist/` の直下に置いたまま、`assets.basePath` でパスの前に `/service/seosynth` を付けて配信します
+- 配信パスを変えるときは `scripts/site.ts` の `BASE_PATH` を書き換えます（開発サーバーもこれに合わせます）
 
-- `test.yml`：push と Pull Request でテストを実行
-- `pages.yml`：`main` への push で wasm をビルドし、`web/` を GitHub Pages に公開。リポジトリの Settings → Pages → Source を「GitHub Actions」にすると有効になります
+`.github/workflows/test.yml` は、push と Pull Request でテストを実行します。
 
 ## これから
 
@@ -150,7 +171,7 @@ Serum 2 と比べて足りない機能と、作っていく順番を [docs/roadm
 
 ## English
 
-seosynth is a wavetable synthesizer for the browser. The DSP engine is dependency-free Rust compiled to WebAssembly and runs in an AudioWorklet; the UI is plain ES modules with no build step.
+seosynth is a wavetable synthesizer for the browser, live at https://kseo.ink/service/seosynth/. The DSP engine is dependency-free Rust compiled to WebAssembly and runs in an AudioWorklet; the UI is TypeScript compiled file by file to ES modules, without a framework or bundler.
 
 - **The whole sound as a graph.** The centre of the screen is a whiteboard you can drag and pinch-zoom. Nodes on the signal path have on/off switches, and the sound line runs through every node that is switched on to the output, brightening where sound flows. Sources run in parallel; effects that are off wait in a tray below. Effects can be stacked (up to three of each) and the chain can split into two lanes that run side by side (two copies, lows and highs, centre and sides, or left and right) and join again. Pressing a node opens its settings (a side panel on desktop, a bottom sheet on phones) with sliders, a picture of the sound going in and coming out, and an explanation.
 - **Movement on its own layer.** LFOs, envelopes, macros and playing gestures float on a separate plane. You add one, pick the node and slider it should move, and a coloured tag and dashed line show where it acts.
@@ -161,8 +182,10 @@ seosynth is a wavetable synthesizer for the browser. The DSP engine is dependenc
 
 ```sh
 rustup target add wasm32-unknown-unknown
-npm run build && npm run dev    # http://localhost:8080
-npm test
+pnpm install
+pnpm build && pnpm dev    # http://localhost:8080/service/seosynth/
+pnpm test
+pnpm run deploy           # Cloudflare (cf CLI), see cloudflare.config.ts
 ```
 
 License: [MIT](LICENSE).

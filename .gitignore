@@ -1,5 +1,6 @@
 /target
-/web/wasm/*.wasm
+/dist
+/.cloudflare
 .DS_Store
 node_modules
 .playwright-mcp

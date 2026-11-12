@@ -6,8 +6,21 @@
   "type": "module",
   "description": "Browser wavetable synthesizer: Rust DSP compiled to WebAssembly",
   "scripts": {
-    "build": "./scripts/build.sh",
-    "dev": "node scripts/serve.mjs",
-    "test": "cargo test --release && ./scripts/build.sh && node --test \"tests/*.test.mjs\""
-  }
+    "build": "node scripts/build.ts",
+    "build:wasm": "node scripts/build.ts wasm",
+    "build:web": "node scripts/build.ts web",
+    "dev": "node scripts/dev.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json",
+    "test": "cargo test --release && node scripts/build.ts && node --test \"tests/*.test.ts\"",
+    "deploy": "node scripts/build.ts && cf deploy dist"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "cf": "1.0.0-beta.30",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "packageManager": "pnpm@10.28.1"
 }

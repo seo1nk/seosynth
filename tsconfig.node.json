@@ -1,0 +1,12 @@
+{
+  // Tests and build scripts: run directly by Node (type stripping), so this
+  // only type-checks. They import the app's sources, so those are included.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node"],
+    "rootDir": "."
+  },
+  "include": ["src", "tests", "scripts", "cloudflare.config.ts"]
+}
