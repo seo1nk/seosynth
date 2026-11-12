@@ -286,7 +286,7 @@ const ENV_SUSTAIN_W = 0.55;
 const ENV_MIN_TOTAL = 3.3;
 
 /** Where the parts of the envelope are drawn, for a given size. */
-interface EnvGeometry {
+export interface EnvGeometry {
   v: Record<string, number>;
   scale: number;
   y: (level: number) => number;
@@ -298,6 +298,45 @@ interface EnvGeometry {
   xR: number;
   top: number;
   bottom: number;
+}
+
+/** How long the playhead takes to cross the sustain plateau, in ms. */
+const SUSTAIN_GLIDE_MS = 180;
+
+/**
+ * Where the playhead goes on the drawn envelope.
+ *
+ * `pos` is the engine's position: the stage (1 attack, 2 hold, 3 decay,
+ * 4 sustain, 5 release) plus the progress through it. How far into a stage
+ * the note is always comes from the engine; the height is read off the
+ * drawn line at that point, so the dot stays on the line even when the
+ * real level started elsewhere (a voice retriggered while still sounding,
+ * or a key let go before the sustain was reached).
+ *
+ * While the key is held (sustain) the dot moves along the plateau to the
+ * dashed line, `sustain` (0..1) of the way, and waits there: that is where
+ * the release starts when the key is let go.
+ */
+export function envPlayhead(g: EnvGeometry, pos: number, sustain: number, curve: (t: number, c: number) => number): [number, number] | null {
+  if (!(pos > 0)) return null;
+  const stage = Math.floor(pos);
+  const t = clamp(pos - stage);
+  const { v } = g;
+  const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
+  switch (stage) {
+    case 1:
+      return [lerp(g.x0, g.xA, t), g.y(curve(t, v.atkCurve))];
+    case 2:
+      return [lerp(g.xA, g.xH, t), g.top];
+    case 3:
+      return [lerp(g.xH, g.xD, t), g.y(1 + (v.sustain - 1) * curve(t, v.decCurve))];
+    case 4:
+      return [lerp(g.xD, g.xS, clamp(sustain)), g.y(v.sustain)];
+    case 5:
+      return [lerp(g.xS, g.xR, t), g.y(v.sustain * (1 - curve(t, v.relCurve)))];
+    default:
+      return null;
+  }
 }
 
 export function EnvDisplay(app: App, e: number, color: string): HTMLElement {
@@ -390,16 +429,16 @@ export function EnvDisplay(app: App, e: number, color: string): HTMLElement {
   for (const i of Object.values(idx)) app.watch(i, () => (dirty = true));
   app.on('patch', () => (dirty = true));
 
+  // When the current note reached its sustain, for the glide along the plateau.
+  let sustainSince = 0;
+  let lastStage = 0;
   app.onFrame((live) => {
-    let next: [number, number] | null = null;
     const pos = live.envPos(e);
-    if (geo && pos > 0) {
-      const stage = Math.floor(pos);
-      const t = pos - stage;
-      const g = geo;
-      const x = [0, g.x0 + (g.xA - g.x0) * t, g.xA + (g.xH - g.xA) * t, g.xH + (g.xD - g.xH) * t, (g.xD + g.xS) / 2, g.xS + (g.xR - g.xS) * t][stage];
-      next = [x, g.y(live.envVal(e))];
-    }
+    const stage = Math.floor(pos);
+    const now = performance.now();
+    if (stage === 4 && lastStage !== 4) sustainSince = now;
+    lastStage = stage;
+    const next = geo ? envPlayhead(geo, pos, (now - sustainSince) / SUSTAIN_GLIDE_MS, (t, c) => core.curve(t, c)) : null;
     const moved = next === null || playhead === null ? next !== playhead : Math.abs(next[0] - playhead[0]) > 0.3 || Math.abs(next[1] - playhead[1]) > 0.3;
     if (dirty || moved) {
       playhead = next;

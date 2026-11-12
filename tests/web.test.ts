@@ -598,3 +598,68 @@ test('wavetable editor strings exist', () => {
     assert.notEqual(option('User 1'), 'User 1');
   }
 });
+
+// --- envelope playhead -------------------------------------------------------------
+
+test('envelope playhead stays on the drawn line and does not jump', async () => {
+  const { envPlayhead } = await import('../src/ui/displays.ts');
+  const core = await EngineCore.fromBytes(bytes, 48000);
+  const curve = (t: number, c: number) => core.curve(t, c);
+  const env = { attack: 0.08, hold: 0.03, decay: 0.25, sustain: 0.5, release: 0.3, atkCurve: 0, decCurve: 0.33, relCurve: 0.33 };
+  for (const [k, v] of Object.entries(env)) core.setPlain(core.idx(`env1.${k}`), v);
+  // The same geometry the display lays out (times drawn compressed as t^0.4).
+  const tw = (t: number) => Math.pow(t, 0.4);
+  const top = 7;
+  const bottom = 113;
+  const scale = 40;
+  const xA = 7 + tw(env.attack) * scale;
+  const xH = xA + tw(env.hold) * scale;
+  const xD = xH + tw(env.decay) * scale;
+  const xS = xD + 0.55 * scale;
+  const xR = xS + tw(env.release) * scale;
+  const g = { v: env, scale, y: (level: number) => bottom - level * (bottom - top), x0: 7, xA, xH, xD, xS, xR, top, bottom };
+  const at = (pos: number, sustain = 1) => must(envPlayhead(g, pos, sustain, curve));
+  const near = (a: [number, number], b: [number, number], what: string) => assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.5, `${what}: ${a} vs ${b}`);
+
+  assert.equal(envPlayhead(g, 0, 0, curve), null, 'no note, no dot');
+  near(at(1), [g.x0, bottom], 'attack starts at the bottom left');
+  near(at(1.9999), [xA, top], 'attack ends at the top');
+  near(at(2), [xA, top], 'hold starts where attack ended');
+  near(at(3), [xH, top], 'decay starts where hold ended');
+  near(at(3.9999), [xD, g.y(env.sustain)], 'decay ends at the sustain level');
+  near(at(4, 0), [xD, g.y(env.sustain)], 'sustain starts where decay ended');
+  near(at(4, 1), [xS, g.y(env.sustain)], 'and stops at the dashed line');
+  near(at(4, 5), [xS, g.y(env.sustain)], 'and stays there');
+  near(at(5), [xS, g.y(env.sustain)], 'release starts where the dot was waiting');
+  near(at(5.9999), [xR, bottom], 'release ends at the bottom right');
+
+  // Driven by the real engine: while the key is held the dot only moves
+  // forward, and letting go continues from where it waited.
+  const T = core.info.tele;
+  const read = (sustain: number) => {
+    const pos = core.telemetry()[T.envPos];
+    return pos > 0 ? at(pos, sustain) : null;
+  };
+  core.noteOn(60, 0.9);
+  let last = -Infinity;
+  for (let n = 0; n < 0.6 * 48000; n += 128) {
+    core.render(128);
+    const p = must(read(1), 'playhead while held');
+    assert.ok(p[0] >= last - 1e-6, `moved back from ${last} to ${p[0]}`);
+    last = p[0];
+  }
+  near([last, 0], [xS, 0], 'held long enough: waiting at the dashed line');
+  core.noteOff(60);
+  core.render(128);
+  const first = must(read(1), 'playhead after release');
+  assert.ok(first[0] - xS < 3, `release continued from the dashed line, not ${first[0] - xS}px later`);
+
+  // A key let go during the attack: the dot is still on the release line.
+  core.noteOn(62, 0.9);
+  core.render(512);
+  core.noteOff(62);
+  core.render(128);
+  const early = must(read(1));
+  const k = (early[0] - xS) / (xR - xS);
+  near(early, [early[0], g.y(env.sustain * (1 - curve(k, env.relCurve)))], 'on the drawn release line');
+});
