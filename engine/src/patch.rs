@@ -17,7 +17,12 @@
 //!   6 fx chain  one byte per unit, in processing order: unit | lane << 6.
 //!               Only a prefix is written; units that are left out follow in
 //!               ascending order on the main lane.
-//!   7 user table  slot u8, then its frames: 128 signed bytes each
+//!   7 user table  slot u8, then its frames: 128 signed bytes each (old
+//!               patches; read only)
+//!   8 user table  the same, but each point is stored as its difference to
+//!               the point before it (wrapping, the first from 0). Drawn and
+//!               recorded waves change smoothly, so the differences are small
+//!               and a share link compresses well (see web share.ts)
 //! ```
 //!
 //! Only values that differ from the defaults are written. Unknown sections
@@ -295,8 +300,12 @@ impl Patch {
             }
             buf.clear();
             buf.push(slot as u8);
-            buf.extend(table.points().iter().map(|p| *p as u8));
-            section(&mut out, 7, &buf);
+            let mut prev = 0i8;
+            for &p in table.points() {
+                buf.push(p.wrapping_sub(prev) as u8);
+                prev = p;
+            }
+            section(&mut out, 8, &buf);
         }
         out
     }
@@ -383,9 +392,20 @@ impl Patch {
                         }
                     }
                 }
-                7 => {
+                7 | 8 => {
                     let slot = s.u8()? as usize;
-                    let points: Vec<i8> = s.b[1..].iter().map(|b| *b as i8).collect();
+                    let mut prev = 0i8;
+                    let points: Vec<i8> = s.b[1..]
+                        .iter()
+                        .map(|&b| {
+                            if tag == 8 {
+                                prev = prev.wrapping_add(b as i8);
+                                prev
+                            } else {
+                                b as i8
+                            }
+                        })
+                        .collect();
                     if let (true, Some(table)) = (slot < USER_TABLES, UserTable::new(&points)) {
                         patch.user_tables[slot] = table;
                     }
@@ -634,11 +654,34 @@ mod tests {
     }
 
     #[test]
+    fn user_tables_are_written_as_differences_and_old_ones_still_load() {
+        // Extremes on purpose: differences of +-254 wrap around.
+        let pts: Vec<i8> = (0..crate::wavetable::USER_POINTS).map(|i| if i % 2 == 0 { 127 } else { -127 }).collect();
+        let mut p = Patch::init();
+        p.user_tables[0] = UserTable::new(&pts).unwrap();
+        let bytes = p.to_bytes();
+        assert_eq!(Patch::from_bytes(&bytes).unwrap().user_tables[0].points(), &pts[..]);
+        // Tag 8, length 129 as a two-byte varint, the slot, then the points.
+        let at = bytes.windows(4).position(|w| w == [8, 0x81, 0x01, 0]).expect("section 8 holding slot 0 + 128 points");
+        assert_eq!(bytes[at + 4] as i8, 127, "the first point counts from zero");
+        assert_eq!(bytes[at + 5] as i8, 2, "-127 - 127 wraps to 2");
+
+        // A link from before: section 7, points as they are.
+        let mut old = vec![MAGIC, FORMAT_VERSION];
+        let mut payload = vec![1u8];
+        payload.extend(pts.iter().map(|v| *v as u8));
+        section(&mut old, 7, &payload);
+        assert_eq!(Patch::from_bytes(&old).unwrap().user_tables[1].points(), &pts[..]);
+    }
+
+    #[test]
     fn broken_user_tables_are_ignored() {
-        for payload in [vec![0u8; 1], vec![0u8; 100], vec![9u8; 129], vec![0u8; 1 + 128 * 17]] {
-            let mut bytes = vec![MAGIC, FORMAT_VERSION];
-            section(&mut bytes, 7, &payload);
-            assert_eq!(Patch::from_bytes(&bytes).unwrap().user_tables, Patch::init().user_tables);
+        for tag in [7, 8] {
+            for payload in [vec![0u8; 1], vec![0u8; 100], vec![9u8; 129], vec![0u8; 1 + 128 * 17]] {
+                let mut bytes = vec![MAGIC, FORMAT_VERSION];
+                section(&mut bytes, tag, &payload);
+                assert_eq!(Patch::from_bytes(&bytes).unwrap().user_tables, Patch::init().user_tables);
+            }
         }
         let mut bytes = vec![MAGIC, FORMAT_VERSION];
         section(&mut bytes, 7, &[]);

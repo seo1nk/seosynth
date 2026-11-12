@@ -6,7 +6,7 @@ import { EngineCore } from '../src/engine/core.ts';
 import { Store } from '../src/store.ts';
 import { createI18n, hasParamText } from '../src/i18n.ts';
 import { PRESETS, CATEGORIES } from '../src/presets.ts';
-import { toBase64Url, fromBase64Url, patchToHash, hashToPatch, shareUrl } from '../src/share.ts';
+import { toBase64Url, fromBase64Url, patchToHash, encodeHash, decodeHash, shareUrl } from '../src/share.ts';
 import { formatValue } from '../src/format.ts';
 import type { AudioMessage } from '../src/engine/types.ts';
 import type { PatchJSON } from '../src/patch-json.ts';
@@ -156,7 +156,7 @@ test('fromJSON rejects junk and tolerates unknown keys', async () => {
   assert.ok(Math.abs(store.plain('filter.cutoff') - 500) < 1);
 });
 
-test('share URL encoding', () => {
+test('share URL encoding', async () => {
   for (const len of [0, 1, 2, 3, 57, 300]) {
     const data = Uint8Array.from({ length: len }, (_, i) => (i * 37 + 11) & 255);
     const text = toBase64Url(data);
@@ -164,21 +164,34 @@ test('share URL encoding', () => {
     assert.deepEqual(Array.from(must(fromBase64Url(text))), Array.from(data));
   }
   const data = Uint8Array.from([78, 1, 250, 251, 252, 253]);
-  assert.deepEqual(Array.from(must(hashToPatch(patchToHash(data)))), Array.from(data));
-  assert.deepEqual(Array.from(must(hashToPatch(`#x=1&${patchToHash(data).slice(1)}`))), Array.from(data));
-  assert.equal(hashToPatch('#nothing'), null);
-  assert.equal(hashToPatch('#p=***'), null);
-  const url = shareUrl(data, 'https://example.com/seosynth/?a=1#old');
-  assert.ok(url.startsWith('https://example.com/seosynth/?a=1#p='));
+  assert.deepEqual(Array.from(must(await decodeHash(patchToHash(data)))), Array.from(data));
+  assert.deepEqual(Array.from(must(await decodeHash(`#x=1&${patchToHash(data).slice(1)}`))), Array.from(data));
+  assert.equal(await decodeHash('#nothing'), null);
+  assert.equal(await decodeHash('#p=***'), null);
+  assert.equal(await decodeHash('#z=bm90LWRlZmxhdGU'), null, 'not deflate data');
+  const url = await shareUrl(data, 'https://example.com/seosynth/?a=1#old');
+  assert.ok(url.startsWith('https://example.com/seosynth/?a=1#p='), 'tiny: stays plain');
+
+  // Compressed when that is shorter, and either form opens.
+  const smooth = Uint8Array.from({ length: 3000 }, (_, i) => Math.round(127 + 100 * Math.sin(i / 9)) & 255);
+  const z = await encodeHash(smooth);
+  assert.ok(z.startsWith('#z=') && z.length < patchToHash(smooth).length * 0.8, `${z.length} vs ${patchToHash(smooth).length}`);
+  assert.deepEqual(Array.from(must(await decodeHash(z))), Array.from(smooth));
+
+  // Something that inflates far beyond any patch is refused.
+  const zeros = new Uint8Array(1024 * 1024);
+  const bomb = new Uint8Array(await new Response(new Blob([zeros]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer());
+  assert.ok(bomb.length < 2000);
+  assert.equal(await decodeHash('#z=' + toBase64Url(bomb)), null);
 });
 
 test('a shared patch survives the URL round trip', async () => {
   const { store } = await makeStore();
   store.fromJSON(PRESETS.find((p) => p.name === 'Talking Lead'));
-  const url = shareUrl(store.toBytes(), 'https://example.com/');
+  const url = await shareUrl(store.toBytes(), 'https://example.com/');
   assert.ok(url.length < 400, `URL is ${url.length} characters`);
   const { store: other } = await makeStore();
-  assert.ok(other.loadBytes(must(hashToPatch(new URL(url).hash))));
+  assert.ok(other.loadBytes(must(await decodeHash(new URL(url).hash))));
   // Values are stored with 16-bit resolution, so compare the encoded form
   // (which must be stable) and check the readable form is close.
   assert.deepEqual(Array.from(other.toBytes()), Array.from(store.toBytes()));
@@ -564,15 +577,16 @@ test('user wavetables survive JSON, the share link and undo', async () => {
   assert.deepEqual(Object.keys(json.userTables), ['1']);
   assert.equal(json.userTables[1].length, 3);
   assert.equal(json.params['oscA.userTable'], 'User 1');
-  const link = patchToHash(store.toBytes());
-  assert.ok(link.length > 3 * per && link.length < 3 * per * 1.5 + 80, `the link is ${link.length} characters`);
+  const link = await encodeHash(store.toBytes());
+  // The table is a regular pattern, which compresses to a fraction.
+  assert.ok(link.startsWith('#z=') && link.length < patchToHash(store.toBytes()).length / 2, `the link is ${link.length} characters`);
 
   store.init();
   assert.equal(store.toJSON().userTables, undefined, 'an untouched table is not written');
   assert.deepEqual(store.fromJSON(json), []);
   assert.deepEqual(Array.from(store.getUserTable(0)), Array.from(drawn));
   store.init();
-  assert.ok(store.loadBytes(must(hashToPatch(link))));
+  assert.ok(store.loadBytes(must(await decodeHash(link))));
   assert.deepEqual(Array.from(store.getUserTable(0)), Array.from(drawn));
   assert.equal(store.plain('oscA.userTable'), 1);
 

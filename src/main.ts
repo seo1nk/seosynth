@@ -4,7 +4,7 @@ import { EngineCore } from './engine/core.ts';
 import { AudioEngine } from './engine/audio.ts';
 import { Store } from './store.ts';
 import { createI18n, detectLang } from './i18n.ts';
-import { hashToPatch, patchToHash } from './share.ts';
+import { decodeHash, encodeHash } from './share.ts';
 import { PRESETS, presetTitle } from './presets.ts';
 import { applyTheme, savedTheme, onSystemThemeChange } from './theme.ts';
 import { h } from './ui/dom.ts';
@@ -183,14 +183,22 @@ async function boot() {
 
   // --- share URL ---------------------------------------------------------------
   let lastHash = '';
-  const writeHash = debounce(() => {
-    lastHash = patchToHash(store.toBytes());
-    history.replaceState(null, '', lastHash);
+  let writing = 0;
+  const writeHash = debounce(async () => {
+    const n = ++writing;
+    const hash = await encodeHash(store.toBytes());
+    if (n !== writing) return; // a newer edit is on its way
+    lastHash = hash;
+    history.replaceState(null, '', hash);
   }, 400);
-  const readHash = (announce: boolean) => {
+  const readHash = async (announce: boolean) => {
     if (location.hash === lastHash) return false;
-    const patch = hashToPatch(location.hash);
-    if (!patch) return false;
+    const patch = await decodeHash(location.hash);
+    if (!patch) {
+      // A link that carries a sound but cannot be read: say so.
+      if (announce && /[#&][pz]=/.test(location.hash)) toast(app.i18n.t('share.invalid'), 4000);
+      return false;
+    }
     app.loading = true;
     const ok = store.loadBytes(patch);
     app.loading = false;
@@ -201,7 +209,7 @@ async function boot() {
     }
     return ok;
   };
-  window.addEventListener('hashchange', () => readHash(true));
+  window.addEventListener('hashchange', () => void readHash(true));
 
   // --- building the page ---------------------------------------------------------
   function mount(lang: Lang) {
@@ -244,8 +252,14 @@ async function boot() {
   }
 
   mount(detectLang());
-  const shared = readHash(true);
-  if (!shared) app.loadPreset(0);
+  const shared = await readHash(true);
+  if (!shared) {
+    // A link that carried a sound which could not be read: say so after
+    // the first preset is in, so its own tip does not hide the message.
+    const broken = /[#&][pz]=/.test(location.hash);
+    app.loadPreset(0);
+    if (broken) toast(app.i18n.t('share.invalid'), 6000);
+  }
   store.history = [store.toBytes()];
   store.cursor = 0;
   store.emit('commit');

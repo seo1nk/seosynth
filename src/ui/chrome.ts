@@ -392,9 +392,13 @@ function openShare(app: App): void {
   const url = h('textarea', { class: 'share-url', readOnly: true, rows: 4, onfocus: () => url.select() });
   // A sound that carries a table of its own makes a long link.
   const long = h('p', { class: 'share-note', hidden: true }, t('share.long'));
-  const refresh = () => {
-    url.value = shareUrl(store.toBytes());
-    long.hidden = url.value.length < 2000;
+  let pending = 0;
+  const refresh = async () => {
+    const n = ++pending;
+    const value = await shareUrl(store.toBytes());
+    if (n !== pending) return; // the name changed again meanwhile
+    url.value = value;
+    long.hidden = value.length < 2000;
   };
   const name = h('input', {
     type: 'text',
