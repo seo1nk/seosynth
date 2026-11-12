@@ -34,12 +34,16 @@ export class EngineCore {
 
   // --- shared buffer --------------------------------------------------------
   // Views are re-created on every use: growing wasm memory detaches old ones.
+  // Ask for the pointer before taking `memory.buffer`, since asking can
+  // allocate (and so grow the memory) the first time.
 
   #bytes(): Uint8Array {
-    return new Uint8Array(this.x.memory.buffer, this.x.io_ptr(), this.x.io_cap());
+    const ptr = this.x.io_ptr();
+    return new Uint8Array(this.x.memory.buffer, ptr, this.x.io_cap());
   }
   #floats(n: number): Float32Array {
-    return new Float32Array(this.x.memory.buffer, this.x.io_ptr(), n);
+    const ptr = this.x.io_ptr();
+    return new Float32Array(this.x.memory.buffer, ptr, n);
   }
   #readString(len: number): string {
     return decoder.decode(this.#bytes().subarray(0, len));
@@ -196,7 +200,8 @@ export class EngineCore {
   // --- Serum 2 export ---------------------------------------------------------
 
   #blob(len: number): Uint8Array<ArrayBuffer> {
-    return new Uint8Array(this.x.memory.buffer, this.x.blob_ptr(), len).slice();
+    const ptr = this.x.blob_ptr();
+    return new Uint8Array(this.x.memory.buffer, ptr, len).slice();
   }
 
   /**
@@ -221,6 +226,17 @@ export class EngineCore {
     return { preset, notes, tables };
   }
 
+  /**
+   * The frames of factory table `index` as generated, before band-limiting
+   * (2048 samples each): what the audio thread asks for, since generating
+   * some tables takes too long for an audio callback.
+   */
+  tableRaw(index: number): Float32Array<ArrayBuffer> {
+    const frames = this.x.table_raw(index);
+    const bytes = this.#blob(frames * 2048 * 4);
+    return new Float32Array(bytes.buffer, bytes.byteOffset, frames * 2048);
+  }
+
   /** A wavetable of the bank as a WAV file Serum can load. */
   serumTableWav(index: number): Uint8Array<ArrayBuffer> {
     return this.#blob(this.x.serum_table_wav(index));
@@ -241,10 +257,12 @@ export class EngineCore {
     return [new Float32Array(buf, this.x.out_l_ptr(), frames).slice(), new Float32Array(buf, this.x.out_r_ptr(), frames).slice()];
   }
   telemetry(): Float32Array {
-    return new Float32Array(this.x.memory.buffer, this.x.telemetry_ptr(), this.info.tele.len);
+    const ptr = this.x.telemetry_ptr();
+    return new Float32Array(this.x.memory.buffer, ptr, this.info.tele.len);
   }
   tap(index: number): Float32Array {
     const { len } = this.info.tap;
-    return new Float32Array(this.x.memory.buffer, this.x.taps_ptr() + index * len * 4, len);
+    const ptr = this.x.taps_ptr();
+    return new Float32Array(this.x.memory.buffer, ptr + index * len * 4, len);
   }
 }

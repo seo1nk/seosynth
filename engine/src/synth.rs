@@ -11,6 +11,7 @@ use crate::params::{
 use crate::patch::{ModSlot, Patch};
 use crate::util::{fast_tanh, BLOCK};
 use crate::voice::{self, lfo_params, ActiveSlot, Shared, Voice, VoiceTaps};
+use crate::tablejobs::{TableJobs, FRAMES_PER_CALL};
 use crate::wavetable::{Bank, UserTable, Wavetable, FACTORY_TABLES, USER_TABLES};
 use std::rc::Rc;
 
@@ -63,7 +64,13 @@ pub struct Synth {
     voices: Vec<Voice>,
     bank: Bank,
     tables: [Rc<Wavetable>; NUM_OSC],
+    /// The bank index of the table each oscillator is playing.
     table_idx: [usize; NUM_OSC],
+    /// On the audio thread, tables are built a little at a time (see
+    /// `tablejobs`) and factory tables are requested from the main thread.
+    /// Elsewhere (previews, tests) they are built on the spot.
+    realtime: bool,
+    jobs: TableJobs,
     lfo_tables: [[f32; LFO_TABLE + 1]; NUM_LFO],
     lfo_free: [f32; NUM_LFO],
     voice_slots: Vec<ActiveSlot>,
@@ -116,6 +123,8 @@ impl Synth {
             tables: [t0.clone(), t0],
             bank,
             table_idx: [0; NUM_OSC],
+            realtime: false,
+            jobs: TableJobs::default(),
             lfo_tables: [[0.0; LFO_TABLE + 1]; NUM_LFO],
             lfo_free: [0.0; NUM_LFO],
             voice_slots: Vec::with_capacity(NUM_SLOTS),
@@ -145,14 +154,41 @@ impl Synth {
         self.sr
     }
 
-    /// Re-derives everything that depends on the patch.
-    fn refresh(&mut self) {
-        // User tables that were edited: let go of them first, so the bank
-        // can rebuild just the frames that changed.
+    /// Build tables a little at a time and ask for factory tables instead of
+    /// generating them (for the audio thread).
+    pub fn set_realtime(&mut self, on: bool) {
+        self.realtime = on;
+    }
+
+    /// A factory table the patch uses that is neither built nor on its way,
+    /// for the audio thread to request from the main thread.
+    pub fn wanted_table(&self) -> Option<usize> {
+        (0..NUM_OSC)
+            .map(|o| self.patch.table_index(o))
+            .find(|&idx| idx < FACTORY_TABLES && self.bank.peek(idx).is_none() && !self.jobs.is_pending(idx))
+    }
+
+    /// Room for the raw frames of factory table `index` (see `tablejobs`).
+    pub fn offer_table(&mut self, index: usize, frames: usize) -> &mut [f32] {
+        self.jobs.offer(index, frames)
+    }
+
+    pub fn offered_table_ready(&mut self) {
+        self.jobs.start_offered(&self.bank);
+    }
+
+    /// Points the oscillators at the tables the patch asks for.
+    fn update_tables(&mut self) {
         for slot in 0..USER_TABLES {
-            if self.bank.user(slot) == &self.patch.user_tables[slot] {
+            if self.bank.user(slot) == &self.patch.user_tables[slot] && !self.jobs.is_pending(FACTORY_TABLES + slot) {
                 continue;
             }
+            if self.realtime {
+                self.jobs.start_user(&self.bank, slot, &self.patch.user_tables[slot]);
+                continue;
+            }
+            // Let go of the table first, so the bank can rebuild just the
+            // frames that changed in place.
             for o in 0..NUM_OSC {
                 if self.table_idx[o] == FACTORY_TABLES + slot {
                     self.tables[o] = self.bank.get(0);
@@ -163,11 +199,35 @@ impl Synth {
         }
         for o in 0..NUM_OSC {
             let idx = self.patch.table_index(o);
-            if idx != self.table_idx[o] {
-                self.tables[o] = self.bank.get(idx);
-                self.table_idx[o] = idx;
+            if idx == self.table_idx[o] {
+                continue;
+            }
+            match self.bank.peek(idx) {
+                Some(table) => {
+                    self.tables[o] = table;
+                    self.table_idx[o] = idx;
+                }
+                // Not built yet: keep playing the current table until it is.
+                // A user table is built from the patch; a factory table
+                // comes from the main thread (`wanted_table`).
+                None if self.realtime => {
+                    if let Some(slot) = idx.checked_sub(FACTORY_TABLES) {
+                        if !self.jobs.is_pending(idx) {
+                            self.jobs.start_user(&self.bank, slot, &self.patch.user_tables[slot]);
+                        }
+                    }
+                }
+                None => {
+                    self.tables[o] = self.bank.get(idx);
+                    self.table_idx[o] = idx;
+                }
             }
         }
+    }
+
+    /// Re-derives everything that depends on the patch.
+    fn refresh(&mut self) {
+        self.update_tables();
         for l in 0..NUM_LFO {
             lfo::render_points(&self.patch.lfo_shapes[l], &mut self.lfo_tables[l]);
         }
@@ -367,6 +427,16 @@ impl Synth {
 
     /// Renders `frames` samples into `out_l` / `out_r`.
     pub fn process(&mut self, frames: usize) {
+        if !self.jobs.run(&mut self.bank, FRAMES_PER_CALL).is_empty() {
+            // A table finished: an edited user table replaces the one that
+            // is playing, a new one is switched to.
+            for o in 0..NUM_OSC {
+                if self.bank.peek(self.table_idx[o]).is_some_and(|t| !Rc::ptr_eq(&t, &self.tables[o])) {
+                    self.table_idx[o] = usize::MAX;
+                }
+            }
+            self.update_tables();
+        }
         let frames = frames.min(MAX_FRAMES);
         let mut peak = (0.0f32, 0.0f32);
         let mut done = 0;
@@ -645,6 +715,7 @@ impl Synth {
 mod tests {
     use super::*;
     use crate::params::{env, env_idx, filter, lfo_idx, unit_on, FILTER_BASE, NUM_UNITS};
+    use crate::wavetable::Bank;
     use crate::patch::ModSlot;
 
     fn render(s: &mut Synth, seconds: f32) -> Vec<f32> {
@@ -846,6 +917,84 @@ mod tests {
         s.preview_osc(0, 0.0, 0.0, &mut buf);
         assert!(buf[4] < 0.8, "back on the factory table");
         assert_eq!(s.table_frames(FACTORY_TABLES), 1);
+    }
+
+    /// Renders `blocks` audio callbacks of 128 frames.
+    fn callbacks(s: &mut Synth, blocks: usize) -> Vec<f32> {
+        let mut out = Vec::new();
+        for _ in 0..blocks {
+            s.process(128);
+            out.extend_from_slice(&s.out_l[..128]);
+        }
+        out
+    }
+
+    #[test]
+    fn on_the_audio_thread_factory_tables_arrive_from_outside_and_build_gradually() {
+        let mut s = Synth::new(48_000.0);
+        s.set_realtime(true);
+        assert_eq!(s.wanted_table(), None, "the default table is built at start");
+        s.set_param(osc_idx(0, osc::WT), defs()[osc_idx(0, osc::WT)].to_norm(2.0)); // Acid Sweep, 48 frames
+        s.note_on(48, 0.9);
+        callbacks(&mut s, 3);
+        assert_eq!(s.table_idx[0], 0, "still playing the old table");
+        assert_eq!(s.wanted_table(), Some(2));
+        let (frames, raw) = crate::tables::generate(2);
+        s.offer_table(2, frames).copy_from_slice(&raw);
+        s.offered_table_ready();
+        assert_eq!(s.wanted_table(), None, "on its way");
+        let calls = frames.div_ceil(FRAMES_PER_CALL);
+        callbacks(&mut s, calls - 1);
+        assert_eq!(s.table_idx[0], 0, "not finished yet");
+        let out = callbacks(&mut s, 1);
+        assert_eq!(s.table_idx[0], 2, "switched once complete");
+        assert_eq!(s.tables[0].frames, frames);
+        assert!(out.iter().all(|v| v.is_finite()));
+
+        // The result is the same table the main thread builds in one go.
+        let mut direct = Bank::new();
+        let whole = direct.get(2);
+        for f in [0, 17, frames - 1] {
+            assert_eq!(s.tables[0].frame(5, f), whole.frame(5, f), "frame {f}");
+        }
+    }
+
+    #[test]
+    fn on_the_audio_thread_user_tables_build_gradually_and_sound_the_same() {
+        use crate::wavetable::USER_POINTS;
+        let frames = 16;
+        let points: Vec<i8> = (0..frames * USER_POINTS).map(|i| ((i * 37 % 255) as i32 - 127) as i8).collect();
+        let table = UserTable::new(&points).unwrap();
+        let setup = |realtime: bool| {
+            let mut s = Synth::new(48_000.0);
+            s.set_realtime(realtime);
+            s.patch.set_plain(osc_idx(0, osc::RAND), 0.0);
+            s.patch.set_plain(osc_idx(0, osc::USER), 1.0);
+            s.patch.set_plain(osc_idx(0, osc::POS), 0.6);
+            s.patch.user_tables[0] = table.clone();
+            s.snap();
+            s
+        };
+        let mut rt = setup(true);
+        assert_eq!(rt.table_idx[0], 0, "nothing built yet, the old table plays");
+        callbacks(&mut rt, frames.div_ceil(FRAMES_PER_CALL));
+        assert_eq!(rt.table_idx[0], FACTORY_TABLES, "built within a few callbacks");
+        // The same number of callbacks on both, so the master gain has
+        // ramped up the same way.
+        let mut direct = setup(false);
+        callbacks(&mut direct, frames.div_ceil(FRAMES_PER_CALL));
+        rt.note_on(55, 0.9);
+        direct.note_on(55, 0.9);
+        let (a, b) = (callbacks(&mut rt, 40), callbacks(&mut direct, 40));
+        let diff = a.iter().zip(&b).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
+        assert!(diff < 1e-5, "differs by {diff}");
+
+        // Editing one frame rebuilds just that frame, in the next callback.
+        let mut edited = points.clone();
+        edited[3 * USER_POINTS] = 127;
+        rt.set_user_table(0, UserTable::new(&edited).unwrap());
+        callbacks(&mut rt, 1);
+        assert_eq!(rt.bank.user(0).points(), &edited[..], "installed after one callback");
     }
 
     #[test]

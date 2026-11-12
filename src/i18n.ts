@@ -304,9 +304,11 @@ const UI: Record<string, Pair> = {
     'Converts the current sound into a Serum 2 preset (.SerumPreset). seosynth and Serum are different synths, so it will not sound identical: slider positions, connections and the effect order are carried over as far as they can be.',
   ],
   'serum.caveat': [
-    '.SerumPreset は公開されていない形式で、コミュニティの解析結果をもとに書き出しています。Serum 2 本体での読み込みはまだ確認できていません。',
-    'The .SerumPreset format is not published; this export follows what the community has worked out, and loading it in Serum 2 itself has not been verified yet.',
+    'この機能はベータ版です。.SerumPreset は公開されていない形式で、コミュニティの解析結果をもとに書き出しています。Serum 2 本体で正しく開けるかは、まだ確認できていません。',
+    'This feature is in beta. The .SerumPreset format is not published; this export follows what the community has worked out, and opening it in Serum 2 itself has not been verified yet.',
   ],
+  'beta': ['ベータ版', 'Beta'],
+  'beta.help': ['試験的な機能です。うまく動かないことがあります。', 'An experimental feature that may not work as expected.'],
   'serum.step1': ['1. プリセット', '1. The preset'],
   'serum.step2': ['2. ウェーブテーブル', '2. The wavetables'],
   'serum.tables.help': [

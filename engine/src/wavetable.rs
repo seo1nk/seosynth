@@ -20,6 +20,7 @@ pub const NUM_MIPS: usize = 11;
 /// `[s[N-1], s[0], ..., s[N-1], s[0], s[1], s[2]]`.
 pub const STRIDE: usize = TABLE_SIZE + 4;
 
+#[derive(Clone)]
 pub struct Wavetable {
     pub frames: usize,
     data: Vec<f32>,
@@ -76,6 +77,12 @@ impl Wavetable {
     /// Build from `frames` consecutive single-cycle waves of `TABLE_SIZE`
     /// samples. Removes DC, normalises every frame to peak 1 and generates
     /// the mip levels.
+    /// A table of `frames` silent frames, to be filled with `set_frame`.
+    pub fn empty(frames: usize) -> Self {
+        assert!(frames >= 1);
+        Wavetable { frames, data: vec![0.0f32; NUM_MIPS * frames * STRIDE] }
+    }
+
     pub fn from_frames(src: &[f32], frames: usize) -> Self {
         assert!(frames >= 1 && src.len() == frames * TABLE_SIZE);
         let mut table = Wavetable { frames, data: vec![0.0f32; NUM_MIPS * frames * STRIDE] };
@@ -285,6 +292,23 @@ impl Bank {
 
     pub fn user(&self, slot: usize) -> &UserTable {
         &self.user[slot]
+    }
+
+    /// The table if it has been built, without building it.
+    pub fn peek(&self, index: usize) -> Option<Rc<Wavetable>> {
+        self.tables.get(index).and_then(|t| t.clone())
+    }
+
+    /// Puts in a table that was built elsewhere (see `TableJobs`). For a
+    /// user table, `source` is what it was built from.
+    pub fn install(&mut self, index: usize, table: Rc<Wavetable>, source: Option<&UserTable>) {
+        if index >= self.tables.len() {
+            return;
+        }
+        self.tables[index] = Some(table);
+        if let (Some(src), Some(slot)) = (source, index.checked_sub(FACTORY_TABLES)) {
+            self.user[slot] = src.clone();
+        }
     }
 
     /// Replaces a user table. Returns true if it changed. Only the frames

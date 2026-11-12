@@ -508,3 +508,4 @@ mod tests {
         assert!((high - 0.25).abs() < 0.01, "duty {high}");
     }
 }
+

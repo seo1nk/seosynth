@@ -161,3 +161,38 @@ test('user wavetables: set, play, preview, save', async () => {
   g.init();
   assert.deepEqual(Array.from(g.getUserTable(1)), Array.from(sine));
 });
+
+test('the audio thread gets factory tables from the main thread and builds them gradually', async () => {
+  const main = await make();
+  const audio = await make();
+  audio.x.set_realtime(1);
+  const x = audio.x;
+  assert.equal(x.table_wanted(), -1, 'the default table is ready');
+  audio.setPlain(audio.idx('oscA.rand'), 0);
+  audio.setPlain(audio.idx('oscA.wt'), 2); // Acid Sweep: 48 frames
+  audio.render(128);
+  assert.equal(x.table_wanted(), 2, 'asks for the new table');
+
+  // What the worklet does with the answer. Allocating can grow the memory,
+  // so the buffer is taken afterwards.
+  const raw = main.tableRaw(2);
+  assert.equal(raw.length, 48 * 2048);
+  const ptr = x.table_offer(2, raw.length / 2048);
+  new Float32Array(x.memory.buffer, ptr, raw.length).set(raw);
+  x.table_offer_ready();
+  assert.equal(x.table_wanted(), -1, 'no longer wanted: on its way');
+
+  // Built within 24 callbacks (two frames each); then a note sounds exactly
+  // like one played on the same table built in one go.
+  for (let k = 0; k < 24; k++) audio.render(128);
+  const direct = await make();
+  direct.setPlain(direct.idx('oscA.rand'), 0);
+  direct.setPlain(direct.idx('oscA.wt'), 2);
+  for (let k = 0; k < 25; k++) direct.render(128);
+  audio.noteOn(48, 0.9);
+  direct.noteOn(48, 0.9);
+  const [a] = audio.render(1024);
+  const [b] = direct.render(1024);
+  const diff = a.reduce((m, v, i) => Math.max(m, Math.abs(v - b[i])), 0);
+  assert.ok(rms(a) > 0.01 && diff < 1e-4, `differs by ${diff}`);
+});

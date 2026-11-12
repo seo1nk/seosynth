@@ -218,6 +218,43 @@ pub extern "C" fn lfo_shape_get(l: usize) -> usize {
     shape.len()
 }
 
+// --- building tables off the audio callback --------------------------------------
+
+/// Called by the audio thread: build tables a little at a time, and ask the
+/// main thread for factory tables (see `tablejobs`).
+#[no_mangle]
+pub extern "C" fn set_realtime(on: u32) {
+    synth().set_realtime(on != 0);
+}
+
+/// A factory table the patch needs that is not built yet, or -1.
+#[no_mangle]
+pub extern "C" fn table_wanted() -> i32 {
+    synth().wanted_table().map_or(-1, |i| i as i32)
+}
+
+/// Generates factory table `index` without band-limiting it and puts the
+/// frames (`TABLE_SIZE` floats each) at `blob_ptr()`. Returns the number of
+/// frames. For the main thread, to hand to the audio thread.
+#[no_mangle]
+pub extern "C" fn table_raw(index: usize) -> usize {
+    let (frames, data) = crate::tables::generate(index.min(crate::wavetable::FACTORY_TABLES - 1));
+    set_blob(data.iter().flat_map(|v| v.to_le_bytes()).collect());
+    frames
+}
+
+/// Room in wasm memory for the raw frames of factory table `index`. Fill
+/// `frames * TABLE_SIZE` floats there, then call `table_offer_ready`.
+#[no_mangle]
+pub extern "C" fn table_offer(index: usize, frames: usize) -> *mut f32 {
+    synth().offer_table(index, frames).as_mut_ptr()
+}
+
+#[no_mangle]
+pub extern "C" fn table_offer_ready() {
+    synth().offered_table_ready();
+}
+
 // --- user wavetables ----------------------------------------------------------
 
 /// Replaces user table `slot` with `frames` frames of `USER_POINTS` signed

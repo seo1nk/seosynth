@@ -141,6 +141,11 @@ export interface EngineExports {
   slot_get(i: number): number;
   lfo_shape_set(l: number, count: number): void;
   lfo_shape_get(l: number): number;
+  set_realtime(on: number): void;
+  table_wanted(): number;
+  table_raw(index: number): number;
+  table_offer(index: number, frames: number): number;
+  table_offer_ready(): void;
   user_table_set(slot: number, frames: number): number;
   user_table_get(slot: number): number;
   fx_chain_set(): number;
@@ -176,10 +181,16 @@ export type AudioMessage =
   | ['touch', number]
   | ['allOff']
   | ['panic']
-  | ['taps', boolean];
+  | ['taps', boolean]
+  /** Raw (not yet band-limited) frames of a factory table, 2048 samples each. */
+  | ['table', number, Float32Array];
 
 /** Messages from the audio thread. */
-export type AudioReply = { type: 'ready'; sampleRate: number } | { type: 'tele'; tele: Float32Array; taps?: Float32Array };
+export type AudioReply =
+  | { type: 'ready'; sampleRate: number }
+  | { type: 'tele'; tele: Float32Array; taps?: Float32Array }
+  /** The audio thread needs this factory table: answer with a 'table' message. */
+  | { type: 'needTable'; index: number };
 
 /** What the main thread hands the audio processor when it is created. */
 export interface ProcessorOptions {

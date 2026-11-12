@@ -162,7 +162,7 @@ export function popover(anchor: HTMLElement, content: Child, { onClose }: Popove
   return close;
 }
 
-export function dialog(app: App, title: string, content: Child, { onClose, wide }: DialogOptions = {}): HTMLDialogElement {
+export function dialog(app: App, title: Child, content: Child, { onClose, wide }: DialogOptions = {}): HTMLDialogElement {
   const dlg = h(
     'dialog',
     { class: `dialog ${wide ? 'wide' : ''}` },
@@ -196,6 +196,12 @@ function download(name: string, data: BlobPart, type: string): void {
 }
 
 const safeName = (name: string): string => (name || 'seosynth').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 60) || 'seosynth';
+
+/** A small "beta" tag for features that are still experimental. */
+export function Beta(app: App): HTMLElement {
+  const { t } = app.i18n;
+  return h('span', { class: 'beta-badge', title: t('beta.help') }, t('beta'));
+}
 
 // ---------------------------------------------------------------------------
 // Top bar
@@ -302,7 +308,7 @@ export function Header(app: App): HTMLElement {
   });
   const menuBtn = h('button', { type: 'button', class: 'tool', 'aria-haspopup': 'true', 'aria-label': t('btn.menu'), title: t('btn.menu'), onclick: () => openMenu() }, icon('menu'));
   function openMenu() {
-    const item = (label: string, fn: () => void) =>
+    const item = (label: Child, fn: () => void) =>
       h('button', { type: 'button', class: 'menu-item', onclick: () => { close(); fn(); } }, label);
     const choice = <V extends string>(label: string, options: [V, string][], current: V, pick: (value: V) => void) =>
       h(
@@ -332,7 +338,7 @@ export function Header(app: App): HTMLElement {
           download(`${safeName(store.getName())}.seosynth.json`, JSON.stringify(store.toJSON(), null, 2), 'application/json');
           app.toast(t('file.exported'));
         }),
-        item(t('file.exportSerum'), () => openSerumExport(app)),
+        item([t('file.exportSerum'), Beta(app)], () => openSerumExport(app)),
         h('div', { class: 'menu-rule' }),
         item(t('matrix.title'), () => app.mods.matrixPanel()),
         item(t('tour.title'), () => app.tour.start()),
@@ -481,7 +487,7 @@ export function openSerumExport(app: App): void {
 
   dialog(
     app,
-    t('serum.title'),
+    [t('serum.title'), Beta(app)],
     h(
       'div',
       { class: 'serum-export' },

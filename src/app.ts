@@ -93,7 +93,7 @@ export interface App {
   inScope<T>(build: () => T): [T, Scope];
 
   popover(anchor: HTMLElement, content: Child, options?: PopoverOptions): () => void;
-  dialog(title: string, content: Child, options?: DialogOptions): HTMLDialogElement;
+  dialog(title: Child, content: Child, options?: DialogOptions): HTMLDialogElement;
   /** Records an undo step a moment after the last call. */
   commitSoon(): void;
   /** Opens the settings of a node, or closes the panel with `null`. */

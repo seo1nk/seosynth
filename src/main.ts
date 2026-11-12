@@ -46,6 +46,8 @@ async function boot() {
   }
 
   const audio = new AudioEngine(bytes, core.info);
+  // Factory tables for the audio thread: generated here, band-limited there.
+  audio.tableSource = (index) => core.tableRaw(index);
   const store = new Store(core, audio);
   const T = core.info.tele;
   const toast = createToaster();

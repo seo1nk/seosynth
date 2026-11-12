@@ -25,6 +25,8 @@ class SeosynthProcessor extends AudioWorkletProcessor {
   peakR: number;
   sendTaps: boolean;
   buffer: ArrayBuffer | null;
+  /** Factory tables asked for and not yet received. */
+  requested = new Set<number>();
   outL!: Float32Array;
   outR!: Float32Array;
   teleView!: Float32Array;
@@ -36,6 +38,8 @@ class SeosynthProcessor extends AudioWorkletProcessor {
     const module = new WebAssembly.Module(wasm);
     this.x = new WebAssembly.Instance(module, {}).exports as unknown as EngineExports;
     this.x.init(sampleRate);
+    // Build tables a little at a time; factory tables come from the main thread.
+    this.x.set_realtime(1);
     this.tele = tele;
     this.tap = tap;
     this.quantum = 0;
@@ -73,7 +77,8 @@ class SeosynthProcessor extends AudioWorkletProcessor {
         break;
       case 'patch': {
         const bytes = m[1];
-        new Uint8Array(x.memory.buffer, x.io_ptr(), bytes.length).set(bytes);
+        const ptr = x.io_ptr(); // before taking the buffer: may allocate
+        new Uint8Array(x.memory.buffer, ptr, bytes.length).set(bytes);
         x.patch_load(bytes.length);
         break;
       }
@@ -95,7 +100,25 @@ class SeosynthProcessor extends AudioWorkletProcessor {
       case 'taps':
         this.sendTaps = m[1];
         break;
+      case 'table': {
+        const [, index, raw] = m;
+        // Allocate first: it may grow the memory, which replaces its buffer.
+        const ptr = x.table_offer(index, raw.length / 2048);
+        new Float32Array(x.memory.buffer, ptr, raw.length).set(raw);
+        x.table_offer_ready();
+        this.requested.delete(index);
+        break;
+      }
     }
+    if (m[0] === 'param' || m[0] === 'patch') this.askForTables();
+  }
+
+  /** Asks the main thread for a factory table the patch needs, if any. */
+  askForTables() {
+    const index = this.x.table_wanted();
+    if (index < 0 || this.requested.has(index)) return;
+    this.requested.add(index);
+    this.port.postMessage({ type: 'needTable', index } satisfies AudioReply);
   }
 
   process(_inputs: Float32Array[][], outputs: Float32Array[][]): boolean {

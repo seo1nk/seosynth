@@ -15,6 +15,8 @@ export class AudioEngine {
   queue: AudioMessage[] = [];
   onTelemetry: ((tele: Float32Array, taps?: Float32Array) => void) | null = null;
   onState: ((state: AudioContextState) => void) | null = null;
+  /** Supplies the raw frames of a factory table the audio thread asks for. */
+  tableSource: ((index: number) => Float32Array) | null = null;
   starting: Promise<void> | null = null;
 
   /**
@@ -63,6 +65,10 @@ export class AudioEngine {
         this.onState?.(ctx.state);
       } else if (m.type === 'tele') {
         this.onTelemetry?.(m.tele, m.taps);
+      } else if (m.type === 'needTable') {
+        const raw = this.tableSource?.(m.index);
+        // The frames are not needed here afterwards: hand the buffer over.
+        if (raw) node.port.postMessage(['table', m.index, raw] satisfies AudioMessage, [raw.buffer]);
       }
     };
     node.onprocessorerror = (e) => console.error('audio processor error', e);

@@ -26,6 +26,7 @@ pub mod patch;
 pub mod serum;
 pub mod sources;
 pub mod synth;
+pub mod tablejobs;
 pub mod tables;
 pub mod util;
 pub mod voice;
