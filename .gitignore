@@ -1,6 +1,18 @@
+# Build output
 /target
 /dist
 /.cloudflare
-.DS_Store
+
+# Dependencies
 node_modules
+
+# Local secrets (cf reads .env)
+.env
+.env.*
+
+# Logs and editor/OS files
+*.log
+.DS_Store
+
+# Browser test captures
 .playwright-mcp
