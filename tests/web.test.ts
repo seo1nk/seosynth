@@ -232,10 +232,16 @@ test('the clip survives JSON, the share link and undo', async () => {
   assert.deepEqual(other.fromJSON({ params: {}, clip: { length: 384, notes: [[60, -1, 1, 1]] } } as unknown as PatchJSON), ['skipped clip']);
 });
 
-test('Serum export: the clip is reported as not carried over', async () => {
+test('Serum export: the clip becomes a Serum clip', async () => {
   const { store } = await makeStore();
-  store.fromJSON({ params: { 'clip.on': true } });
-  assert.ok(store.core.serumExport().notes.some((n) => n.code === 'clip'));
+  store.fromJSON(PRESETS.find((p) => p.name === 'Learn: Clip Sequencer'));
+  const { preset, notes } = store.core.serumExport();
+  const { data } = unpackSerum(preset);
+  assert.equal(data.ClipPlayer0.plainParams.kParamEnabled, 1);
+  const clip = store.getClip();
+  assert.equal(data.MidiClip0.clip.notes.length, clip.notes.length);
+  assert.equal(data.MidiClip0.clip.regionEndBeats, clip.length / 96);
+  assert.ok(notes.some((n) => n.code === 'clip'));
 });
 
 test('connections in old links keep their sources after more were added', async () => {
@@ -297,6 +303,7 @@ function decodeCbor(bytes: Uint8Array): Cbor {
     if (major === 7) {
       if (info === 20) return false;
       if (info === 21) return true;
+      if (info === 22) return null;
       if (info === 26) return (i += 4), view.getFloat32(i - 4);
       if (info === 27) return (i += 8), view.getFloat64(i - 8);
       throw new Error(`unsupported simple value ${info}`);

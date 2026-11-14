@@ -3,6 +3,7 @@
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
+    Null,
     Bool(bool),
     Int(i64),
     Num(f64),
@@ -96,6 +97,7 @@ impl Value {
 
     fn write_cbor(&self, out: &mut Vec<u8>) {
         match self {
+            Value::Null => out.push(0xf6),
             Value::Bool(b) => out.push(if *b { 0xf5 } else { 0xf4 }),
             Value::Int(i) => {
                 if *i >= 0 {
@@ -147,6 +149,7 @@ impl Value {
 
     fn write_json(&self, out: &mut String) {
         match self {
+            Value::Null => out.push_str("null"),
             Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
             Value::Int(i) => out.push_str(&i.to_string()),
             Value::Num(f) => {
@@ -240,6 +243,7 @@ mod tests {
         assert_eq!(Value::Int(-100).to_cbor(), [0x38, 0x63]);
         assert_eq!(Value::Num(1.1).to_cbor(), [0xfb, 0x3f, 0xf1, 0x99, 0x99, 0x99, 0x99, 0x99, 0x9a]);
         assert_eq!(Value::Bool(true).to_cbor(), [0xf5]);
+        assert_eq!(Value::Null.to_cbor(), [0xf6]);
         assert_eq!(Value::F32s(vec![1.5, -0.25]).to_cbor(), [0x82, 0xfa, 0x3f, 0xc0, 0, 0, 0xfa, 0xbe, 0x80, 0, 0]);
         assert_eq!(Value::from("IETF").to_cbor(), [0x64, 0x49, 0x45, 0x54, 0x46]);
         assert_eq!(Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]).to_cbor(), [0x83, 1, 2, 3]);

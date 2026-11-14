@@ -164,7 +164,7 @@ fn filter_type(c: &mut Ctx, name: &str, context: &str) -> &'static str {
         "Comb-" => ("CombN", true),
         "Phaser" => ("Phase12P", false),
         "Formant" => ("FormantI", false),
-        "Reduce" => ("SampHold", false),
+        "Reduce" => ("SNH1", false),
         _ => ("RM", false),
     };
     if !exact {
@@ -468,6 +468,9 @@ fn lfo(c: &mut Ctx, l: usize) -> Value {
         params.push(("kParamPhase", num(c.v(&k("phase")) * 360.0)));
     }
     if c.v(&k("smooth")) > 0.01 {
+        // Serum's Smooth knob runs 0..100; it rounds the shape a little
+        // differently, so the user is told.
+        params.push(("kParamSmooth", num(c.v(&k("smooth")) * 100.0)));
         c.note("lfoSmooth", &format!("LFO {}", l + 1));
     }
     map(vec![
@@ -508,6 +511,10 @@ fn source_id(src: usize) -> Option<i64> {
     })
 }
 
+/// Our cutoff spans 20 Hz..20 kHz, Serum's 8 Hz..22.05 kHz: a full sweep of
+/// ours is this much of Serum's knob.
+const CUTOFF_MOD_SCALE: f32 = 6.907_755 / 7.921_898; // ln(1000) / ln(22050 / 8)
+
 struct Dest {
     module: &'static str,
     id: i64,
@@ -518,10 +525,40 @@ struct Dest {
 }
 
 /// Where one of our parameters lives in Serum's modulation matrix. Only
-/// destinations whose numeric ids are known are listed.
-fn destination(key: &str) -> Option<Dest> {
+/// destinations whose numeric ids are known are listed. `rack` is the effect
+/// units in the order they are written to the rack: Serum numbers an
+/// effect by its place there.
+fn destination(key: &str, rack: &[usize]) -> Option<Dest> {
     let (module_key, param) = key.split_once('.')?;
     let d = |module, id, name, param, scale| Some(Dest { module, id, name, param, scale });
+    let numbered = |prefix: &str| module_key.strip_prefix(prefix).and_then(|n| n.parse::<i64>().ok()).map(|n| n - 1);
+    if let Some(e) = numbered("env") {
+        return match param {
+            "decay" => d("Env", e, "kParamDecay", 2, 1.0),
+            "release" => d("Env", e, "kParamRelease", 4, 1.0),
+            _ => None,
+        };
+    }
+    if let Some(l) = numbered("lfo") {
+        return match param {
+            "rate" => d("LFO", l, "kParamRate", 0, 1.0),
+            _ => None,
+        };
+    }
+    if let Some(unit) = (0..params::NUM_UNITS).find(|&u| unit_key(u) == module_key) {
+        let place = rack.iter().position(|&u| u == unit)? as i64;
+        return match (FX_KEYS[unit % NUM_FX], param) {
+            ("dist", "mix") => d("FXDistortion", place, "kParamWet", 1, 1.0),
+            ("dist", "drive") => d("FXDistortion", place, "kParamDrive", 2, 1.0),
+            ("delay", "mix") => d("FXDelay", place, "kParamWet", 1, 1.0),
+            ("reverb", "mix") => d("FXReverb", place, "kParamWet", 1, 1.0),
+            ("hyper", "mix") => d("FXHyperD", place, "kParamWet", 1, 1.0),
+            ("phaser", "mix") => d("FXPhaser", place, "kParamWet", 1, 1.0),
+            ("phaser", "depth") => d("FXPhaser", place, "kParamDepth", 4, 1.0),
+            ("fxfilter", "cutoff") => d("FXFilter", place, "kParamFreq", 3, CUTOFF_MOD_SCALE),
+            _ => None,
+        };
+    }
     match module_key {
         "oscA" | "oscB" | "oscC" => {
             let id = params::OSC_NAMES.iter().position(|n| *n == module_key).unwrap_or(0) as i64;
@@ -549,8 +586,7 @@ fn destination(key: &str) -> Option<Dest> {
         "filter" | "filter2" => {
             let id = if module_key == "filter" { 0 } else { 1 };
             match param {
-                // Our cutoff spans 20 Hz..20 kHz, Serum's 8 Hz..22.05 kHz.
-                "cutoff" => d("VoiceFilter", id, "kParamFreq", 3, (1000.0f32).ln() / (22_050.0f32 / 8.0).ln()),
+                "cutoff" => d("VoiceFilter", id, "kParamFreq", 3, CUTOFF_MOD_SCALE),
                 "res" => d("VoiceFilter", id, "kParamReso", 4, 1.0),
                 "drive" => d("VoiceFilter", id, "kParamDrive", 5, 1.0),
                 "var" => d("VoiceFilter", id, "kParamVar", 6, 1.0),
@@ -563,12 +599,12 @@ fn destination(key: &str) -> Option<Dest> {
     }
 }
 
-fn mod_slots(c: &mut Ctx, data: &mut Value) {
+fn mod_slots(c: &mut Ctx, data: &mut Value, rack: &[usize]) {
     let mut slot = 0;
     for s in c.patch.slots.iter().filter(|s| s.is_set() && s.amount != 0.0) {
         let key = defs()[s.dst as usize].key.clone();
         let source_key = params::SOURCE_KEYS[s.src as usize];
-        let (Some(source), Some(dest)) = (source_id(s.src as usize), destination(&key)) else {
+        let (Some(source), Some(dest)) = (source_id(s.src as usize), destination(&key, rack)) else {
             c.note("modDropped", &format!("{source_key} > {key}"));
             continue;
         };
@@ -903,23 +939,38 @@ pub fn build(patch: &Patch, bank: &mut Bank) -> (Value, Vec<String>) {
     let sub_module = sub(&mut c);
     d.set("Oscillator4", sub_module);
 
-    // Routing: slots 0-2 are the oscillators, 3 noise, 4 sub. Only "into
-    // the filter or not" is known of Serum's routing: how filter 2 is
-    // connected (in series, beside filter 1, which source into which) is
-    // not carried over.
-    let filter_on = c.on("filter.on") || c.on("filter2.on");
-    if c.on("filter2.on") {
+    // Routing: slots 0-2 are the oscillators, 3 noise, 4 sub. Each source
+    // goes into the filters or straight to the master, and its filter
+    // balance splits it between filter 1 (0) and filter 2 (100): Serum's two
+    // filters always sit side by side. Our parallel mode maps onto that
+    // exactly, and so does a single filter; two filters in series do not.
+    let (f1, f2) = (c.on("filter.on"), c.on("filter2.on"));
+    let parallel = f2 && c.option("filter2.mode") == "Parallel";
+    if f1 && f2 && !parallel {
         c.note("filter2Routing", "");
     }
-    let route = |c: &Ctx, key: &str| {
-        let through = filter_on && c.on(key);
-        module(vec![("kParamRoutingDest", Value::from(if through { "kRoutingDestFilter" } else { "kRoutingDestDirect" }))])
+    let route = |c: &Ctx, source: &str| {
+        let through = (f1 || f2) && c.on(&format!("{source}.toFilter"));
+        let balance = if parallel {
+            match c.option(&format!("{source}.filterSel")) {
+                "Filter1" => 0.0,
+                "Filter2" => 100.0,
+                _ => 50.0,
+            }
+        } else if f2 && !f1 {
+            100.0
+        } else {
+            0.0
+        };
+        module(vec![
+            ("kParamFilterBalance", num(balance)),
+            ("kParamRoutingDest", Value::from(if through { "kRoutingDestFilter" } else { "kRoutingDestMaster" })),
+        ])
     };
-    d.set("RoutingSlot0", route(&c, "oscA.toFilter"));
-    d.set("RoutingSlot1", route(&c, "oscB.toFilter"));
-    d.set("RoutingSlot2", route(&c, "oscC.toFilter"));
-    d.set("RoutingSlot3", route(&c, "noise.toFilter"));
-    d.set("RoutingSlot4", route(&c, "sub.toFilter"));
+    for (slot, source) in ["oscA", "oscB", "oscC", "noise", "sub"].iter().enumerate() {
+        let r = route(&c, source);
+        d.set(&format!("RoutingSlot{slot}"), r);
+    }
     d.set("RoutingSlot5", default_module());
     d.set("RoutingSlot6", default_module());
 
@@ -954,11 +1005,15 @@ pub fn build(patch: &Patch, bank: &mut Bank) -> (Value, Vec<String>) {
     }
     if c.v("master.porta") > 0.0 {
         global.push(("kParamPortamentoTime", num(c.v("master.porta"))));
+        if c.on("master.portaAlways") {
+            global.push(("kParamPortaAlways", flag(true)));
+        }
         c.note("portamento", "");
     }
     if c.v("master.bendRange") != 2.0 {
+        // Serum keeps the downward range as a negative number.
         global.push(("kParamBendRangeUp", num(c.v("master.bendRange"))));
-        c.note("bendRange", "");
+        global.push(("kParamBendRangeDn", num(-c.v("master.bendRange"))));
     }
     if c.v("master.pitch") != 0.0 {
         c.note("masterPitch", "");
@@ -971,11 +1026,15 @@ pub fn build(patch: &Patch, bank: &mut Bank) -> (Value, Vec<String>) {
         c.note("arp", "");
     }
     if c.on("clip.on") {
+        let (clip, once) = midi_clip(&c);
+        d.set("MidiClip0", clip);
+        d.set("ClipPlayer0", module(vec![("kParamEnabled", flag(true))]));
         c.note("clip", "");
+        if once {
+            c.note("clipOnce", "");
+        }
     }
     d.set("Global0", module(global));
-
-    mod_slots(&mut c, &mut d);
 
     // Effects: only the enabled units, in the order the sound meets them.
     // Stacked copies become several modules of the same type. How Serum
@@ -986,11 +1045,14 @@ pub fn build(patch: &Patch, bank: &mut Bank) -> (Value, Vec<String>) {
         c.note("split", "");
     }
     let mut rack = Vec::new();
+    let mut rack_units = Vec::new();
     for &unit in groups.pre.iter().chain(&groups.a).chain(&groups.b).chain(&groups.post) {
         if let Some(entry) = effect(&mut c, unit) {
             rack.push(entry);
+            rack_units.push(unit);
         }
     }
+    mod_slots(&mut c, &mut d, &rack_units);
     d.set("FXRack0", map(vec![("FX", Value::List(rack)), ("displayName", Value::from("")), ("plainParams", Value::from("default"))]));
 
     // Preset-level fields (repeated in the file header).
@@ -1006,6 +1068,39 @@ pub fn build(patch: &Patch, bank: &mut Bank) -> (Value, Vec<String>) {
         d.set(k, v);
     }
     (d, c.notes)
+}
+
+/// The clip as Serum's first MIDI clip, and whether it plays only once
+/// (which is not carried over). Serum counts time in beats and stores a
+/// velocity of 0..1 with seven more per-note attributes, written here with
+/// the values its piano roll gives a new note. Serum is assumed to play a
+/// clip as written on C3 (MIDI 60), so the notes are moved by how far our
+/// root is from it; the note to the user says this is unconfirmed.
+fn midi_clip(c: &Ctx) -> (Value, bool) {
+    let clip = &c.patch.clip;
+    let ppq = crate::clip::PPQ as f64;
+    let shift = 60 - c.v("clip.root") as i32;
+    let notes = clip
+        .notes
+        .iter()
+        .map(|n| {
+            let velocity = (n.velocity as f64 / 127.0 * 1e6).round() / 1e6;
+            let attributes = [velocity, 1.0, 0.0, 0.5, 0.0, 0.5, 0.0, 0.0];
+            map(vec![
+                ("attributes", Value::List(attributes.into_iter().map(Value::Num).collect())),
+                ("channel", Value::Int(0)),
+                ("expressionEvents", Value::List(vec![Value::Null; 5])),
+                ("length", Value::Num(n.length as f64 / ppq)),
+                ("noteNum", Value::Int((n.pitch as i32 + shift).clamp(0, 127) as i64)),
+                ("timeStamp", Value::Num(n.start as f64 / ppq)),
+            ])
+        })
+        .collect();
+    let module = map(vec![
+        ("clip", map(vec![("notes", Value::List(notes)), ("regionEndBeats", Value::Num(clip.length as f64 / ppq))])),
+        ("plainParams", Value::from("default")),
+    ]);
+    (module, !c.on("clip.loop"))
 }
 
 fn header_fields(patch: &Patch) -> Vec<(&'static str, Value)> {
@@ -1196,7 +1291,8 @@ mod tests {
         let cutoff = (FILTER_BASE + filter::CUTOFF) as u16;
         p.slots[0] = ModSlot { src: src::LFO1 as u8, dst: cutoff, amount: 0.5, bipolar: true };
         p.slots[1] = ModSlot { src: src::ENV2 as u8, dst: osc_idx(1, osc::POS) as u16, amount: -1.0, bipolar: false };
-        p.slots[2] = ModSlot { src: src::MACRO1 as u8, dst: lfo_idx(0, crate::params::lfo::RATE) as u16, amount: 0.3, bipolar: false };
+        p.slots[2] = ModSlot { src: src::MACRO1 as u8, dst: index_of_key("env1.attack").unwrap() as u16, amount: 0.3, bipolar: false };
+        p.slots[3] = ModSlot { src: src::MACRO1 as u8, dst: lfo_idx(0, crate::params::lfo::RATE) as u16, amount: 0.3, bipolar: false };
         let (d, notes) = export(&p);
         let s0 = d.get("ModSlot0").unwrap();
         assert_eq!(s0.get("source"), Some(&Value::List(vec![Value::Int(6), Value::Int(0)])));
@@ -1211,8 +1307,87 @@ mod tests {
         assert_eq!(s1.get("destModuleID"), Some(&Value::Int(1)));
         assert_eq!(plain_of(s1, &["plainParams", "kParamAmount"]), &Value::Num(-100.0));
         // The third has no known Serum destination id: dropped and reported.
-        assert_eq!(d.get("ModSlot2").unwrap().get("plainParams"), Some(&Value::from("default")));
-        assert!(notes.iter().any(|n| n == "modDropped\tmacro1 > lfo1.rate"), "{notes:?}");
+        assert!(notes.iter().any(|n| n == "modDropped\tmacro1 > env1.attack"), "{notes:?}");
+        // So the fourth takes the third slot.
+        let s2 = d.get("ModSlot2").unwrap();
+        assert_eq!(s2.get("destModuleTypeString"), Some(&Value::from("LFO")));
+        assert_eq!(s2.get("destModuleID"), Some(&Value::Int(0)));
+        assert_eq!(s2.get("destModuleParamID"), Some(&Value::Int(0)));
+        assert_eq!(d.get("ModSlot3").unwrap().get("plainParams"), Some(&Value::from("default")));
+    }
+
+    #[test]
+    fn envelopes_and_effects_are_modulation_destinations() {
+        let mut p = Patch::init();
+        set(&mut p, "reverb.on", 1.0);
+        set(&mut p, "delay.on", 1.0);
+        set(&mut p, "dist.on", 1.0);
+        let dst = |k: &str| index_of_key(k).unwrap() as u16;
+        p.slots[0] = ModSlot { src: src::MACRO1 as u8, dst: dst("env2.decay"), amount: 0.5, bipolar: false };
+        p.slots[1] = ModSlot { src: src::MACRO1 as u8, dst: dst("reverb.mix"), amount: 0.5, bipolar: false };
+        p.slots[2] = ModSlot { src: src::MACRO1 as u8, dst: dst("dist.drive"), amount: 0.5, bipolar: false };
+        p.slots[3] = ModSlot { src: src::MACRO1 as u8, dst: dst("chorus.mix"), amount: 0.5, bipolar: false };
+        let (d, notes) = export(&p);
+        let slot = |i: usize| {
+            let s = d.get(&format!("ModSlot{i}")).unwrap();
+            (s.get("destModuleTypeString").cloned(), s.get("destModuleID").cloned(), s.get("destModuleParamID").cloned())
+        };
+        assert_eq!(slot(0), (Some("Env".into()), Some(Value::Int(1)), Some(Value::Int(2))));
+        // Effects are numbered by their place in the rack: distortion, delay, reverb.
+        assert_eq!(slot(1), (Some("FXReverb".into()), Some(Value::Int(2)), Some(Value::Int(1))));
+        assert_eq!(slot(2), (Some("FXDistortion".into()), Some(Value::Int(0)), Some(Value::Int(2))));
+        // The chorus is off, so it is not in the rack and the connection is dropped.
+        assert!(notes.iter().any(|n| n == "modDropped\tmacro1 > chorus.mix"), "{notes:?}");
+    }
+
+    #[test]
+    fn filter_routing_follows_serums_balance() {
+        let balance = |d: &Value, slot: usize| number(plain_of(d, &[&format!("RoutingSlot{slot}"), "plainParams", "kParamFilterBalance"]));
+        let dest = |d: &Value, slot: usize| plain_of(d, &[&format!("RoutingSlot{slot}"), "plainParams", "kParamRoutingDest"]).clone();
+        let mut p = Patch::init();
+        set(&mut p, "oscB.toFilter", 0.0);
+        let (d, notes) = export(&p);
+        assert_eq!(balance(&d, 0), 0.0, "one filter: all into filter 1");
+        assert_eq!(dest(&d, 0), Value::from("kRoutingDestFilter"));
+        assert_eq!(dest(&d, 1), Value::from("kRoutingDestMaster"));
+        assert!(!notes.iter().any(|n| n == "filter2Routing"));
+        // In parallel each source picks its filter.
+        set(&mut p, "filter2.on", 1.0);
+        set(&mut p, "filter2.mode", 1.0);
+        set(&mut p, "oscA.filterSel", 1.0);
+        set(&mut p, "sub.filterSel", 2.0);
+        let (d, notes) = export(&p);
+        assert_eq!((balance(&d, 0), balance(&d, 3), balance(&d, 4)), (100.0, 0.0, 50.0));
+        assert!(!notes.iter().any(|n| n == "filter2Routing"));
+        // In series with both on Serum has no match.
+        set(&mut p, "filter2.mode", 0.0);
+        assert!(export(&p).1.iter().any(|n| n == "filter2Routing"));
+        // Filter 2 alone takes everything.
+        set(&mut p, "filter.on", 0.0);
+        let (d, notes) = export(&p);
+        assert_eq!(balance(&d, 0), 100.0);
+        assert!(!notes.iter().any(|n| n == "filter2Routing"));
+    }
+
+    #[test]
+    fn the_clip_becomes_serums_first_midi_clip() {
+        let mut p = Patch::init();
+        set(&mut p, "clip.on", 1.0);
+        set(&mut p, "clip.root", 48.0);
+        let (d, notes) = export(&p);
+        assert_eq!(plain_of(&d, &["ClipPlayer0", "plainParams", "kParamEnabled"]), &flag(true));
+        let clip = plain_of(&d, &["MidiClip0", "clip"]);
+        assert_eq!(clip.get("regionEndBeats"), Some(&Value::Num(4.0)), "one bar");
+        let Some(Value::List(written)) = clip.get("notes") else { panic!() };
+        assert_eq!(written.len(), p.clip.notes.len());
+        let first = &p.clip.notes[1];
+        let n = &written[1];
+        assert_eq!(n.get("noteNum"), Some(&Value::Int(first.pitch as i64 + 12)), "moved from root C2 to C3");
+        assert_eq!(n.get("timeStamp"), Some(&Value::Num(first.start as f64 / 96.0)));
+        assert_eq!(n.get("length"), Some(&Value::Num(first.length as f64 / 96.0)));
+        assert!(notes.iter().any(|n| n == "clip") && !notes.iter().any(|n| n == "clipOnce"));
+        set(&mut p, "clip.loop", 0.0);
+        assert!(export(&p).1.iter().any(|n| n == "clipOnce"));
     }
 
     #[test]

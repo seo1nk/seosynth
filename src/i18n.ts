@@ -359,11 +359,14 @@ const UI: Record<string, Pair> = {
   'serum.note.warpDropped': ['{detail} のワープは移し替えていません。', '{detail}: this warp mode was not carried over.'],
   'serum.note.modDropped': ['つながり「{detail}」は Serum 側の行き先が特定できず、移し替えていません。', 'Connection "{detail}" was not carried over: its Serum destination is unknown.'],
   'serum.note.lfoRandom': ['{detail} のランダムな形は、決まったパターンに置き換えています。', '{detail}: the random shape became a fixed pattern.'],
-  'serum.note.lfoSmooth': ['{detail} の「なめらかさ」は移し替えていません。', '{detail}: smoothing was not carried over.'],
-  'serum.note.portamento': ['グライドは時間だけを移し替えています。', 'Glide: only the time was carried over.'],
-  'serum.note.bendRange': ['ベンドの幅は上方向だけを設定しています。', 'Bend range: only the upward range was set.'],
+  'serum.note.lfoSmooth': ['{detail} の「なめらかさ」は Serum の Smooth に同じ割合で移していますが、かかり方は少し違います。', '{detail}: smoothing became Serum\'s Smooth at the same percentage, which rounds the shape a little differently.'],
+  'serum.note.portamento': ['グライドの時間は、Serum 側の単位が確認できていないため、ずれることがあります。Serum で聞いて合わせてください。', 'Glide: Serum\'s unit for the time is not confirmed, so it may differ. Check it by ear in Serum.'],
   'serum.note.masterPitch': ['全体のピッチは移し替えていません。', 'The overall pitch offset was not carried over.'],
-  'serum.note.clip': ['クリップシーケンサーのフレーズは移し替えていません。', 'The clip sequencer\'s phrase was not carried over.'],
+  'serum.note.clip': [
+    'クリップのフレーズは Serum の最初のクリップに書き出しています。Serum で C3 を押すと、seosynth で基準の音を押したときと同じ高さになるように移調しています（Serum 側の基準は未確認です）。',
+    'The clip\'s phrase is written to Serum\'s first clip, moved so that C3 in Serum plays what the root note plays here (Serum\'s reference note is not confirmed).',
+  ],
+  'serum.note.clipOnce': ['クリップの「1 回だけ」は移し替えていません。Serum ではくり返し鳴ります。', 'Playing the clip once was not carried over: it loops in Serum.'],
   'serum.note.arp': [
     'Serum のアルペジエーターをオンにしていますが、速さ・順番・オクターブ・長さは移し替えていません。Serum 側で合わせてください。',
     'Serum\'s arpeggiator is switched on, but its rate, order, octaves and gate were not carried over: set them in Serum.',
@@ -375,8 +378,8 @@ const UI: Record<string, Pair> = {
     'The split was laid out as one row (lane A, then lane B): how Serum stores parallel routing is not confirmed.',
   ],
   'serum.note.filter2Routing': [
-    'フィルター 2 の設定は書き出しますが、つなぎ方（直列・並列、音源ごとのフィルター）は Serum 側の書き方が分からないため移し替えていません。',
-    'Filter 2 settings are exported, but how it is connected (series or parallel, which source into which filter) is not: how Serum stores it is not known.',
+    'Serum の 2 つのフィルターは並列にしかつなげないため、直列のフィルター 1・2 は並列にしています。音が変わるので、Serum で確かめてください。',
+    'Serum\'s two filters only run side by side, so filters 1 and 2 in series became parallel. This changes the sound: check it in Serum.',
   ],
   'serum.note.reverbDecay': ['Plate リバーブの長さは Serum ではサイズで決まるため、「長さ」は移し替えていません。', 'Plate reverb: Serum sets its length by size, so the decay was not carried over.'],
 };
