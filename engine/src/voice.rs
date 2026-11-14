@@ -293,14 +293,14 @@ impl Voice {
                 rel_curve: plain(defs, &self.m, env_idx(e, env::REL_CURVE)),
             };
             let v = self.envs[e].advance(&p, dt);
-            self.uni[src::ENV1 + e] = v;
-            self.bi[src::ENV1 + e] = 2.0 * v - 1.0;
+            self.uni[src::env(e)] = v;
+            self.bi[src::env(e)] = 2.0 * v - 1.0;
         }
         for l in 0..NUM_LFO {
             let p = lfo_params(defs, &self.m, l, bpm);
             let (v, fade) = self.lfos[l].advance(&p, dt, sh.lfo_free[l], &sh.lfo_tables[l], &mut self.rng);
-            self.uni[src::LFO1 + l] = v * fade;
-            self.bi[src::LFO1 + l] = (2.0 * v - 1.0) * fade;
+            self.uni[src::lfo(l)] = v * fade;
+            self.bi[src::lfo(l)] = (2.0 * v - 1.0) * fade;
         }
         let set = |uni: &mut [f32; src::N], bi: &mut [f32; src::N], s: usize, v: f32| {
             uni[s] = v;
@@ -311,7 +311,7 @@ impl Voice {
         set(&mut self.uni, &mut self.bi, src::AFTERTOUCH, sh.aftertouch);
         set(&mut self.uni, &mut self.bi, src::RANDOM, self.random);
         for k in 0..params::NUM_MACRO {
-            set(&mut self.uni, &mut self.bi, src::MACRO1 + k, sh.base[master::MACRO1 + k]);
+            set(&mut self.uni, &mut self.bi, src::macro_(k), sh.base[master::MACRO1 + k]);
         }
         self.uni[src::NOTE] = self.note as f32 / 127.0;
         self.bi[src::NOTE] = ((self.note as f32 - 60.0) / 60.0).max(-1.0).min(1.0);

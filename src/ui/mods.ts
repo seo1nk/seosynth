@@ -40,7 +40,7 @@ export class Mods {
       // down: otherwise the new connection would seem to do nothing.
       const amount = store.get(dst) > 0.7 ? -0.4 : 0.3;
       if (store.addMod(src, dst, amount, false) < 0) {
-        this.app.toast(i18n.t('matrix.full'));
+        this.app.toast(i18n.t('matrix.full', { n: store.info.numSlots }));
         return false;
       }
       store.commit();

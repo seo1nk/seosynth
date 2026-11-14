@@ -85,6 +85,10 @@ export interface EngineInfo {
   /** The clip sequencer: ticks per quarter note and the limits of a clip. */
   clip: { ppq: number; minLength: number; maxLength: number; maxNotes: number };
   numSlots: number;
+  numLfos: number;
+  /** Envelopes, the amp envelope (env1) included. */
+  numEnvs: number;
+  numMacros: number;
   numVoices: number;
   block: number;
   maxLfoPoints: number;

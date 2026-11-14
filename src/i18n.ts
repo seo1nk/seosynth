@@ -160,7 +160,7 @@ const UI: Record<string, Pair> = {
     'Off: moves one way from the slider position. On: swings both ways around it.',
   ],
   'matrix.remove': ['つながりを外す', 'Remove this connection'],
-  'matrix.full': ['つながりの数が上限（32）に達しています。', 'All 32 connections are in use.'],
+  'matrix.full': ['つながりの数が上限（{n}）に達しています。', 'All {n} connections are in use.'],
   'hint.modAmount': ['押すと、動かす量を変えたり外したりできます。', 'Press to change how far it moves, or to remove it.'],
   'menu.reset': ['初期値に戻す', 'Reset to default'],
   'menu.enter': ['数値で入力', 'Type a value'],
@@ -727,10 +727,17 @@ const SOURCE: Record<string, [Pair, Pair]> = {
   env1: [['アンプのエンベロープ', 'Amp envelope'], ['弾くたびに一度だけ動く（音量と同じ動き）', 'Runs once per note, like the loudness']],
   env2: [['エンベロープ 2', 'Envelope 2'], ['弾くたびに一度だけ動く', 'Runs once per note']],
   env3: [['エンベロープ 3', 'Envelope 3'], ['弾くたびに一度だけ動く', 'Runs once per note']],
+  env4: [['エンベロープ 4', 'Envelope 4'], ['弾くたびに一度だけ動く', 'Runs once per note']],
   lfo1: [['LFO 1', 'LFO 1'], ['くり返し揺らす', 'Wobbles over and over']],
   lfo2: [['LFO 2', 'LFO 2'], ['くり返し揺らす', 'Wobbles over and over']],
   lfo3: [['LFO 3', 'LFO 3'], ['くり返し揺らす', 'Wobbles over and over']],
   lfo4: [['LFO 4', 'LFO 4'], ['くり返し揺らす', 'Wobbles over and over']],
+  lfo5: [['LFO 5', 'LFO 5'], ['くり返し揺らす', 'Wobbles over and over']],
+  lfo6: [['LFO 6', 'LFO 6'], ['くり返し揺らす', 'Wobbles over and over']],
+  lfo7: [['LFO 7', 'LFO 7'], ['くり返し揺らす', 'Wobbles over and over']],
+  lfo8: [['LFO 8', 'LFO 8'], ['くり返し揺らす', 'Wobbles over and over']],
+  lfo9: [['LFO 9', 'LFO 9'], ['くり返し揺らす', 'Wobbles over and over']],
+  lfo10: [['LFO 10', 'LFO 10'], ['くり返し揺らす', 'Wobbles over and over']],
   velocity: [['弾く強さ', 'Velocity'], ['強く弾くほど大きく動く', 'Moves more the harder you play']],
   note: [['音の高さ', 'Note'], ['高い音を弾くほど大きく動く', 'Moves more for higher notes']],
   modWheel: [['MOD ホイール', 'Mod wheel'], ['MIDI キーボードのホイールで動かす', 'Moved by the wheel on a MIDI keyboard']],
@@ -740,6 +747,10 @@ const SOURCE: Record<string, [Pair, Pair]> = {
   macro2: [['マクロ 2', 'Macro 2'], ['自分で動かすスライダー', 'A slider you move yourself']],
   macro3: [['マクロ 3', 'Macro 3'], ['自分で動かすスライダー', 'A slider you move yourself']],
   macro4: [['マクロ 4', 'Macro 4'], ['自分で動かすスライダー', 'A slider you move yourself']],
+  macro5: [['マクロ 5', 'Macro 5'], ['自分で動かすスライダー', 'A slider you move yourself']],
+  macro6: [['マクロ 6', 'Macro 6'], ['自分で動かすスライダー', 'A slider you move yourself']],
+  macro7: [['マクロ 7', 'Macro 7'], ['自分で動かすスライダー', 'A slider you move yourself']],
+  macro8: [['マクロ 8', 'Macro 8'], ['自分で動かすスライダー', 'A slider you move yourself']],
   random: [['ランダム', 'Random'], ['弾くたびに違う値になる', 'A new value for every note']],
 };
 
@@ -797,9 +808,9 @@ function generic(key: string): string {
     .join('.')
     .replace(/^osc[ABC]\./, 'osc.')
     .replace(/^filter2\./, 'filter.')
-    .replace(/^env\d\./, 'env.')
-    .replace(/^lfo\d\./, 'lfo.')
-    .replace(/^macro\d$/, 'macro');
+    .replace(/^env\d+\./, 'env.')
+    .replace(/^lfo\d+\./, 'lfo.')
+    .replace(/^macro\d+$/, 'macro');
 }
 
 export function detectLang(): Lang {
@@ -861,7 +872,7 @@ export function createI18n(lang: Lang) {
     /** A slider's name with its node, e.g. "フィルターのカットオフ". */
     paramTitle(key: string): string {
       const label = api.paramLabel(key);
-      if (/^macro\d$/.test(key)) return label;
+      if (/^macro\d+$/.test(key)) return label;
       const [mod] = key.split('.');
       const node = mod === 'master' ? '' : mod === 'env1' ? api.nodeName('amp') : api.nodeName(mod);
       if (!node || node === mod) return label;

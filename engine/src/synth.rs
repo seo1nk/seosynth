@@ -595,8 +595,8 @@ impl Synth {
             }
             None => {
                 for e in 0..NUM_ENV {
-                    self.g_uni[src::ENV1 + e] = 0.0;
-                    self.g_bi[src::ENV1 + e] = -1.0;
+                    self.g_uni[src::env(e)] = 0.0;
+                    self.g_bi[src::env(e)] = -1.0;
                 }
                 for l in 0..NUM_LFO {
                     // With no note playing only free-running LFOs keep moving.
@@ -604,8 +604,8 @@ impl Synth {
                         if p.mode == LfoMode::Free {
                             let ph = self.lfo_free[l] + p.phase;
                             let v = lfo::eval(p.kind, ph - ph.floor(), &self.lfo_tables[l], 0.5, 0.5);
-                            self.g_uni[src::LFO1 + l] = v;
-                            self.g_bi[src::LFO1 + l] = 2.0 * v - 1.0;
+                            self.g_uni[src::lfo(l)] = v;
+                            self.g_bi[src::lfo(l)] = 2.0 * v - 1.0;
                         }
                     }
                 }
@@ -616,7 +616,7 @@ impl Synth {
                 set(src::MOD_WHEEL, self.mod_wheel);
                 set(src::AFTERTOUCH, self.aftertouch);
                 for k in 0..params::NUM_MACRO {
-                    set(src::MACRO1 + k, self.smoothed[master::MACRO1 + k]);
+                    set(src::macro_(k), self.smoothed[master::MACRO1 + k]);
                 }
                 self.g_uni[src::PITCH_BEND] = (self.pitch_bend + 1.0) * 0.5;
                 self.g_bi[src::PITCH_BEND] = self.pitch_bend;
@@ -786,7 +786,7 @@ impl Synth {
                 }
                 for l in 0..NUM_LFO {
                     t[tele::LFO_PHASE + l] = v.lfos[l].phase;
-                    t[tele::LFO_VAL + l] = v.uni[src::LFO1 + l];
+                    t[tele::LFO_VAL + l] = v.uni[src::lfo(l)];
                 }
                 t[tele::SOURCES..tele::SOURCES + src::N].copy_from_slice(&v.uni);
                 for i in 0..NUM_PARAMS {
@@ -803,7 +803,7 @@ impl Synth {
                 }
                 for l in 0..NUM_LFO {
                     t[tele::LFO_PHASE + l] = self.lfo_free[l];
-                    t[tele::LFO_VAL + l] = self.g_uni[src::LFO1 + l];
+                    t[tele::LFO_VAL + l] = self.g_uni[src::lfo(l)];
                 }
                 t[tele::SOURCES..tele::SOURCES + src::N].copy_from_slice(&self.g_uni);
                 for i in 0..NUM_PARAMS {

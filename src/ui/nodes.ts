@@ -19,7 +19,9 @@ export const FILTERS = ['filter', 'filter2'];
 /** Things that move sliders. Each is one modulation source of the engine
  * (envelope 1 is also one, but it lives inside the amp node). */
 export const MOVERS = [
-  'lfo1', 'lfo2', 'lfo3', 'lfo4', 'env2', 'env3', 'macro1', 'macro2', 'macro3', 'macro4',
+  ...Array.from({ length: 10 }, (_, k) => `lfo${k + 1}`),
+  'env2', 'env3', 'env4',
+  ...Array.from({ length: 8 }, (_, k) => `macro${k + 1}`),
   'velocity', 'note', 'random', 'modWheel', 'pitchBend', 'aftertouch',
 ];
 

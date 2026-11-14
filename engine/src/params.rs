@@ -11,10 +11,10 @@
 use std::sync::OnceLock;
 
 pub const NUM_OSC: usize = 3;
-pub const NUM_ENV: usize = 3;
-pub const NUM_LFO: usize = 4;
-pub const NUM_MACRO: usize = 4;
-pub const NUM_SLOTS: usize = 32;
+pub const NUM_ENV: usize = 4;
+pub const NUM_LFO: usize = 10;
+pub const NUM_MACRO: usize = 8;
+pub const NUM_SLOTS: usize = 64;
 /// Kinds of effect.
 pub const NUM_FX: usize = 10;
 /// Copies of each kind, so the same effect can be stacked.
@@ -131,7 +131,7 @@ pub mod master {
     pub const BPM: usize = 8;
     pub const VEL_SENS: usize = 9;
     pub const MACRO1: usize = 10;
-    pub const N: usize = 14;
+    pub const N: usize = MACRO1 + super::NUM_MACRO;
 }
 
 pub mod osc {
@@ -702,7 +702,8 @@ fn build() -> Vec<ParamDef> {
 
     // --- LFOs -------------------------------------------------------------
     for l in 0..NUM_LFO {
-        let s = 400 + 20 * l as u16;
+        // LFOs 5 and up came later; 480-499 would run into the effects (500-).
+        let s = if l < 4 { 400 + 20 * l as u16 } else { 900 + 20 * (l as u16 - 4) };
         let k = |p: &str| format!("lfo{}.{p}", l + 1);
         let i = |p: usize| lfo_idx(l, p);
         b.choice(i(lfo::SHAPE), s, k("shape"), LFO_SHAPES, 1, 0);
@@ -871,6 +872,9 @@ pub fn index_of_sid(sid: u16) -> Option<usize> {
 // Modulation sources
 // ---------------------------------------------------------------------------
 
+/// Modulation sources. The numbers are stored in patches, so sources that
+/// came later are appended rather than put next to their kind; use `env`,
+/// `lfo` and `macro_` to find the n-th of a kind.
 pub mod src {
     pub const NONE: usize = 0;
     pub const ENV1: usize = 1;
@@ -890,12 +894,28 @@ pub mod src {
     pub const MACRO3: usize = 15;
     pub const MACRO4: usize = 16;
     pub const RANDOM: usize = 17;
-    pub const N: usize = 18;
+    pub const ENV4: usize = 18;
+    pub const LFO5: usize = 19;
+    pub const MACRO5: usize = 25;
+    pub const N: usize = 29;
+
+    /// Envelope `e` (0 is the amp envelope).
+    pub const fn env(e: usize) -> usize {
+        if e < 3 { ENV1 + e } else { ENV4 + e - 3 }
+    }
+    pub const fn lfo(l: usize) -> usize {
+        if l < 4 { LFO1 + l } else { LFO5 + l - 4 }
+    }
+    pub const fn macro_(m: usize) -> usize {
+        if m < 4 { MACRO1 + m } else { MACRO5 + m - 4 }
+    }
 }
 
 pub const SOURCE_KEYS: [&str; src::N] = [
     "none", "env1", "env2", "env3", "lfo1", "lfo2", "lfo3", "lfo4", "velocity", "note",
     "modWheel", "aftertouch", "pitchBend", "macro1", "macro2", "macro3", "macro4", "random",
+    "env4", "lfo5", "lfo6", "lfo7", "lfo8", "lfo9", "lfo10", "macro5", "macro6", "macro7",
+    "macro8",
 ];
 
 #[cfg(test)]
@@ -953,6 +973,21 @@ mod tests {
     }
 
     #[test]
+    fn sources_of_a_kind_are_found_by_number() {
+        for e in 0..NUM_ENV {
+            assert_eq!(SOURCE_KEYS[src::env(e)], format!("env{}", e + 1));
+        }
+        for l in 0..NUM_LFO {
+            assert_eq!(SOURCE_KEYS[src::lfo(l)], format!("lfo{}", l + 1));
+        }
+        for m in 0..NUM_MACRO {
+            assert_eq!(SOURCE_KEYS[src::macro_(m)], format!("macro{}", m + 1));
+        }
+        // The first sources keep their numbers: old patches store them.
+        assert_eq!((src::LFO4, src::MACRO4, src::RANDOM), (7, 16, 17));
+    }
+
+    #[test]
     fn stable_ids_are_frozen() {
         // Guards against accidental renumbering: shared URLs depend on these.
         let expect = [
@@ -970,6 +1005,11 @@ mod tests {
             ("env3.release", 344),
             ("lfo1.rate", 401),
             ("lfo4.phase", 468),
+            ("lfo5.shape", 900),
+            ("lfo10.phase", 1008),
+            ("env4.release", 364),
+            ("macro4", 14),
+            ("macro8", 18),
             ("reverb.mix", 649),
             ("fxfilter.mix", 686),
             ("dist2.drive", 1522),

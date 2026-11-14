@@ -146,7 +146,7 @@ test('fromJSON rejects junk and tolerates unknown keys', async () => {
   const warnings = store.fromJSON({
     name: 'x',
     params: { 'filter.cutoff': 500, 'no.such': 1, 'filter.type': 'Nope' },
-    mods: [{ source: 'lfo9', target: 'filter.cutoff', amount: 1 }, { source: 'lfo1', target: 'oscA.wt', amount: 1 }],
+    mods: [{ source: 'lfo11', target: 'filter.cutoff', amount: 1 }, { source: 'lfo1', target: 'oscA.wt', amount: 1 }],
     fxOrder: ['reverb', 'nope', 'reverb'],
     fxLanes: { delay2: 'a', dist: 'z' },
   });
@@ -236,6 +236,21 @@ test('Serum export: the clip is reported as not carried over', async () => {
   const { store } = await makeStore();
   store.fromJSON({ params: { 'clip.on': true } });
   assert.ok(store.core.serumExport().notes.some((n) => n.code === 'clip'));
+});
+
+test('connections in old links keep their sources after more were added', async () => {
+  const { store } = await makeStore();
+  // A patch from before step 5: macro 4 (source 16) and envelope 3 (source 3)
+  // moving the filter cutoff (stable id 242). Section 3: src, varint sid,
+  // i16 amount, flags.
+  const slot = (src: number) => [src, 0xf2, 0x01, 0x00, 0x40, 0x00];
+  const body = [...slot(16), ...slot(3)];
+  assert.ok(store.loadBytes(Uint8Array.from([0x53, 1, 3, body.length, ...body])));
+  const used = store.activeSlots().map((s) => [store.info.sources[s.src], store.def(s.dst).key]);
+  assert.deepEqual(used, [['macro4', 'filter.cutoff'], ['env3', 'filter.cutoff']]);
+  // The new ones are there too.
+  for (const key of ['env4', 'lfo10', 'macro8']) assert.ok(store.info.sources.includes(key), key);
+  assert.equal(store.info.numSlots, 64);
 });
 
 test('value formatting', async () => {

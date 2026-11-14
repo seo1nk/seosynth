@@ -463,23 +463,22 @@ fn unused_lfo() -> Value {
 /// Serum source id for one of our modulation sources.
 fn source_id(src: usize) -> Option<i64> {
     use params::src::*;
+    // Serum numbers its envelopes 2-5, LFOs 6-15 and macros 25-32.
+    if let Some(e) = (0..NUM_ENV).find(|&e| env(e) == src) {
+        return Some(2 + e as i64);
+    }
+    if let Some(l) = (0..NUM_LFO).find(|&l| lfo(l) == src) {
+        return Some(6 + l as i64);
+    }
+    if let Some(m) = (0..NUM_MACRO).find(|&m| macro_(m) == src) {
+        return Some(25 + m as i64);
+    }
     Some(match src {
-        ENV1 => 2,
-        ENV2 => 3,
-        ENV3 => 4,
-        LFO1 => 6,
-        LFO2 => 7,
-        LFO3 => 8,
-        LFO4 => 9,
         VELOCITY => 16,
         NOTE => 17,
         MOD_WHEEL => 1,
         AFTERTOUCH => 18,
         PITCH_BEND => 33,
-        MACRO1 => 25,
-        MACRO2 => 26,
-        MACRO3 => 27,
-        MACRO4 => 28,
         RANDOM => 21,
         _ => return None,
     })
@@ -907,10 +906,6 @@ pub fn build(patch: &Patch) -> (Value, Vec<String>, Vec<usize>) {
     for e in 0..NUM_ENV {
         d.set(&format!("Env{e}"), envelope(&c, e));
     }
-    d.set(
-        "Env3",
-        module(vec![("kParamCurve1", Value::Num(50.0)), ("kParamCurve2", Value::Num(66.6)), ("kParamCurve3", Value::Num(66.6))]),
-    );
     for l in 0..10 {
         let m = if l < NUM_LFO { lfo(&mut c, l) } else { unused_lfo() };
         d.set(&format!("LFO{l}"), m);

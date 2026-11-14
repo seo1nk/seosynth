@@ -48,7 +48,7 @@ export function modColor(sourceKey: string): string {
   if (!c.mods[sourceKey]) {
     const token = /^macro/.test(sourceKey)
       ? '--mod-macro'
-      : /^(env|lfo)\d$/.test(sourceKey)
+      : /^(env|lfo)\d+$/.test(sourceKey)
         ? `--mod-${sourceKey}`
         : '--mod-play';
     c.mods[sourceKey] = c.style.getPropertyValue(token).trim() || c.muted;

@@ -284,7 +284,7 @@ export class Store {
     }));
     if (mods.length) out.mods = mods;
     const shapes: NonNullable<PatchJSON['lfoShapes']> = {};
-    for (let l = 0; l < 4; l++) {
+    for (let l = 0; l < this.info.numLfos; l++) {
       const pts = c.getLfoShape(l);
       const isDefault = pts.length === 3 && pts[0].y === 0 && pts[1].x === 0.5 && pts[1].y === 1 && pts[2].y === 0 && pts.every((p) => p.curve === 0);
       const round = (v: number) => Number(v.toFixed(4));
@@ -362,7 +362,7 @@ export class Store {
     }
     for (const [l, pts] of Object.entries(obj.lfoShapes ?? {})) {
       const index = Number(l) - 1;
-      if (index >= 0 && index < 4 && Array.isArray(pts)) {
+      if (index >= 0 && index < this.info.numLfos && Array.isArray(pts)) {
         c.setLfoShape(index, pts.map(([x, y, curve]) => ({ x, y, curve: curve ?? 0 })));
       }
     }

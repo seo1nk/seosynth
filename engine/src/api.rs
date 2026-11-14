@@ -561,8 +561,11 @@ pub fn describe_json() -> String {
     }
     o.push_str(&format!("],\"clip\":{{\"ppq\":{},\"minLength\":{},\"maxLength\":{},\"maxNotes\":{}}}", clip::PPQ, clip::MIN_LENGTH, clip::MAX_LENGTH, clip::MAX_NOTES));
     o.push_str(&format!(
-        ",\"numSlots\":{},\"numVoices\":{},\"block\":{},\"maxLfoPoints\":{}",
+        ",\"numSlots\":{},\"numLfos\":{},\"numEnvs\":{},\"numMacros\":{},\"numVoices\":{},\"block\":{},\"maxLfoPoints\":{}",
         NUM_SLOTS,
+        NUM_LFO,
+        params::NUM_ENV,
+        params::NUM_MACRO,
         MAX_VOICES,
         BLOCK,
         crate::lfo::MAX_POINTS
