@@ -116,12 +116,21 @@ fn asym(ph: f32, m: f32) -> f32 {
 
 /// The warp actually applied: modulator modes need a modulator.
 #[inline]
-fn effective_warp(p: &OscParams, modulator: Option<&[f32]>) -> Warp {
-    if p.warp.needs_modulator() && modulator.is_none() {
+fn effective(warp: Warp, modulator: Option<&[f32]>) -> Warp {
+    if warp.needs_modulator() && modulator.is_none() {
         Warp::Off
     } else {
-        p.warp
+        warp
     }
+}
+
+/// Both warps in turn: the second bends the phase the first produced, and
+/// their amplitudes multiply. Shared with the UI preview.
+#[inline(always)]
+pub fn warp2_phase(w1: Warp, a1: f32, w2: Warp, a2: f32, ph: f32, modulator: f32) -> (f32, f32) {
+    let (p1, g1) = warp_phase(w1, a1, ph, modulator);
+    let (p2, g2) = warp_phase(w2, a2, p1.max(0.0).min(1.0), modulator);
+    (p2, g1 * g2)
 }
 
 pub struct OscParams<'a> {
@@ -139,6 +148,9 @@ pub struct OscParams<'a> {
     pub pan: f32,
     pub warp: Warp,
     pub warp_amt: f32,
+    /// The second warp, applied after the first.
+    pub warp2: Warp,
+    pub warp2_amt: f32,
     pub sr: f32,
 }
 
@@ -241,7 +253,13 @@ impl OscState {
         let dmix = (mix_end - mix_start) * inv_n;
 
         let detune_st = p.detune.max(0.0);
-        let top_freq = p.freq * semitones_to_ratio(detune_st) * effective_warp(p, modulator).bandwidth(p.warp_amt);
+        let warp = effective(p.warp, modulator);
+        let warp2 = effective(p.warp2, modulator);
+        let amt = p.warp_amt.max(0.0).min(1.0);
+        let amt2 = p.warp2_amt.max(0.0).min(1.0);
+        // Two warps in a row stretch the spectrum about as much as both together.
+        let bandwidth = (warp.bandwidth(amt) * warp2.bandwidth(amt2)).min(16.0);
+        let top_freq = p.freq * semitones_to_ratio(detune_st) * bandwidth;
         let mip = mip_for(top_freq, p.sr);
         let fa = p.table.frame(mip, fa_i);
         let fb = p.table.frame(mip, fb_i);
@@ -255,9 +273,7 @@ impl OscState {
         let mut tl = [0.0f32; BLOCK];
         let mut tr = [0.0f32; BLOCK];
         // FM/AM/RM without a running partner would only mute or do nothing,
-        // so they fall back to the plain wave.
-        let warp = effective_warp(p, modulator);
-        let amt = p.warp_amt.max(0.0).min(1.0);
+        // so they fall back to the plain wave (see `effective`).
 
         for v in 0..unison {
             let (dx, vpan, vgain) = layout[v];
@@ -303,9 +319,11 @@ impl OscState {
 
             // The match is hoisted out of the sample loop so each mode gets
             // its own tight loop.
-            match warp {
-                Warp::Off => run!(|ph: f32, _m: f32| (ph, 1.0)),
-                _ => run!(|ph: f32, m: f32| warp_phase(warp, amt, ph, m)),
+            match (warp, warp2) {
+                (Warp::Off, Warp::Off) => run!(|ph: f32, _m: f32| (ph, 1.0)),
+                (_, Warp::Off) => run!(|ph: f32, m: f32| warp_phase(warp, amt, ph, m)),
+                (Warp::Off, _) => run!(|ph: f32, m: f32| warp_phase(warp2, amt2, ph, m)),
+                _ => run!(|ph: f32, m: f32| warp2_phase(warp, amt, warp2, amt2, ph, m)),
             }
 
             self.phase[v] = ph;
@@ -337,6 +355,10 @@ mod tests {
     use crate::wavetable::Bank;
 
     fn render(freq: f32, unison: usize, warp: Warp, amt: f32, seconds: f32) -> Vec<f32> {
+        render2(freq, unison, warp, amt, Warp::Off, 0.0, seconds)
+    }
+
+    fn render2(freq: f32, unison: usize, warp: Warp, amt: f32, warp2: Warp, amt2: f32, seconds: f32) -> Vec<f32> {
         let mut bank = Bank::new();
         let table = bank.get(0);
         let sr = 48_000.0;
@@ -359,6 +381,8 @@ mod tests {
                 pan: 0.0,
                 warp,
                 warp_amt: amt,
+                warp2,
+                warp2_amt: amt2,
                 sr,
             };
             osc.process(&p, None, &mut l, &mut r, &mut raw);
@@ -384,7 +408,7 @@ mod tests {
         for _ in 0..(48_000 / BLOCK) {
             let p = OscParams {
                 table: &table, pos: 0.0, freq: 440.0, unison: 1, detune: 0.0, blend: 0.75,
-                width: 1.0, level: 1.0, pan: 0.0, warp: Warp::Off, warp_amt: 0.0, sr,
+                width: 1.0, level: 1.0, pan: 0.0, warp: Warp::Off, warp_amt: 0.0, warp2: Warp::Off, warp2_amt: 0.0, sr,
             };
             osc.process(&p, None, &mut l, &mut r, &mut raw);
             out.extend_from_slice(&l);
@@ -406,6 +430,28 @@ mod tests {
                 assert!(peak > 0.01, "warp {w} amt {amt} silent");
             }
         }
+    }
+
+    #[test]
+    fn two_warps_stay_bounded_and_the_second_acts_on_the_first() {
+        for w1 in 0..14 {
+            for w2 in 0..14 {
+                let out = render2(220.0, 1, Warp::from_index(w1), 0.6, Warp::from_index(w2), 0.6, 0.03);
+                assert!(out.iter().all(|v| v.is_finite()), "warps {w1} + {w2}");
+                let peak = out.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+                assert!(peak < 4.0 && peak > 0.01, "warps {w1} + {w2} peak {peak}");
+            }
+        }
+        // A second warp that is off changes nothing; one that is on changes the sound.
+        let single = render(220.0, 1, Warp::BendPlus, 0.5, 0.05);
+        assert_eq!(render2(220.0, 1, Warp::BendPlus, 0.5, Warp::Off, 0.7, 0.05), single);
+        let both = render2(220.0, 1, Warp::BendPlus, 0.5, Warp::Sync, 0.5, 0.05);
+        assert!(both.iter().zip(&single).any(|(a, b)| (a - b).abs() > 0.1));
+        // Only the second one set sounds like that warp alone.
+        assert_eq!(render2(220.0, 1, Warp::Off, 0.0, Warp::Sync, 0.5, 0.05), render(220.0, 1, Warp::Sync, 0.5, 0.05));
+        // The order matters: Sync then Bend is not Bend then Sync.
+        let other = render2(220.0, 1, Warp::Sync, 0.5, Warp::BendPlus, 0.5, 0.05);
+        assert!(both.iter().zip(&other).any(|(a, b)| (a - b).abs() > 0.1));
     }
 
     #[test]

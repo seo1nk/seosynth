@@ -158,7 +158,10 @@ pub mod osc {
     /// Which filter the oscillator goes into when the filters run in
     /// parallel (see `FILTER_SELECT`).
     pub const FILTER_SEL: usize = 19;
-    pub const N: usize = 20;
+    /// A second warp, applied to the result of the first (as in Serum 2).
+    pub const WARP2: usize = 20;
+    pub const WARP2_AMT: usize = 21;
+    pub const N: usize = 22;
 }
 
 /// Names and stable-id bases of the oscillators. The third came later, so
@@ -639,6 +642,8 @@ fn build() -> Vec<ParamDef> {
         b.flag(i(osc::TO_FILTER), s + 17, k("toFilter"), true, 0);
         b.choice(i(osc::USER), s + 18, k("userTable"), USER_TABLE_OPTIONS, 0, 0);
         b.choice(i(osc::FILTER_SEL), s + 19, k("filterSel"), FILTER_SELECT, 0, 0);
+        b.choice(i(osc::WARP2), s + 20, k("warp2"), WARP_MODES, 0, 0);
+        b.num(i(osc::WARP2_AMT), s + 21, k("warp2Amt"), 0.0, 1.0, 0.0, Lin, "%", MS);
     }
 
     // --- sub / noise ------------------------------------------------------

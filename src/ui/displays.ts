@@ -72,8 +72,9 @@ export function WavetableDisplay(app: App, name: string, color: string): HTMLEle
   const osc = Math.max(0, ['oscA', 'oscB', 'oscC'].indexOf(name));
   const iPos = store.idx(`${name}.pos`);
   const iAmt = store.idx(`${name}.warpAmt`);
+  const iAmt2 = store.idx(`${name}.warp2Amt`);
   let dirty = true;
-  let shown = [-1, -1];
+  let shown = [-1, -1, -1];
 
   const view = autoCanvas('wt-display', (ctx, w, hgt) => {
     const pos = shown[0];
@@ -100,7 +101,7 @@ export function WavetableDisplay(app: App, name: string, color: string): HTMLEle
       ctx.stroke();
     }
     // The waveform that is actually playing, including warp.
-    const wave = core.previewOsc(osc, pos, shown[1], 160);
+    const wave = core.previewOsc(osc, pos, shown[1], shown[2], 160);
     const [ox, oy] = origin(pos);
     ctx.beginPath();
     for (let j = 0; j < wave.length; j++) {
@@ -122,7 +123,7 @@ export function WavetableDisplay(app: App, name: string, color: string): HTMLEle
   // Anything that changes the picture: this oscillator's shape parameters,
   // and the other oscillator when it is used as an FM/AM/RM source.
   for (const p of store.params) {
-    if (/^osc[AB]\.(wt|userTable|pos|warp|warpAmt|oct|semi|coarse|on)$/.test(p.key)) app.watch(p.i, () => (dirty = true));
+    if (/^osc[ABC]\.(wt|userTable|pos|warp|warpAmt|warp2|warp2Amt|oct|semi|coarse|on)$/.test(p.key)) app.watch(p.i, () => (dirty = true));
   }
   app.on('patch', () => (dirty = true));
   // A user table that was drawn on: its picture is out of date.
@@ -133,8 +134,9 @@ export function WavetableDisplay(app: App, name: string, color: string): HTMLEle
   app.onFrame((live) => {
     const pos = live.param(iPos);
     const amt = live.param(iAmt);
-    if (dirty || Math.abs(pos - shown[0]) > 0.002 || Math.abs(amt - shown[1]) > 0.004) {
-      shown = [pos, amt];
+    const amt2 = live.param(iAmt2);
+    if (dirty || Math.abs(pos - shown[0]) > 0.002 || Math.abs(amt - shown[1]) > 0.004 || Math.abs(amt2 - shown[2]) > 0.004) {
+      shown = [pos, amt, amt2];
       dirty = false;
       view.redraw();
     }

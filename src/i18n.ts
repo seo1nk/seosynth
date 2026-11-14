@@ -536,6 +536,8 @@ const PARAM: Record<string, [Pair, Pair]> = {
   'osc.rand': [['スタートのばらつき', 'Random start'], ['鳴らすたびに開始位置をばらつかせる量。0%にすると毎回同じアタックになります。', 'Randomises the start position per note. At 0% every attack is identical.']],
   'osc.warp': [['ワープ', 'Warp'], ['波形を変形させる方法。Sync は鋭く、Bend は偏らせ、FM/AM/RM はもう一方のオシレーターで変調します。', 'How the waveform is bent. Sync is sharp, Bend skews it, FM/AM/RM use the other oscillator.']],
   'osc.warpAmt': [['ワープの量', 'Warp amount'], ['ワープのかかり具合。', 'How strongly the warp is applied.']],
+  'osc.warp2': [['ワープ 2', 'Warp 2'], ['1 つ目のワープで変形した波形を、さらに変形させます。順番で音が変わります（Bend → Sync と Sync → Bend は別の音）。', 'Bends the waveform again after the first warp. The order matters: Bend then Sync is not Sync then Bend.']],
+  'osc.warp2Amt': [['ワープ 2 の量', 'Warp 2 amount'], ['2 つ目のワープのかかり具合。', 'How strongly the second warp is applied.']],
   'osc.toFilter': [['フィルターを通す', 'Through the filters'], ['オンでフィルターを通ります。オフだとフィルターを迂回します。', 'On: goes through the filters. Off: bypasses them.']],
   'osc.filterSel': [['通すフィルター', 'Into filter'], ['フィルターが並列のとき、どちらに通すか。「両方」は半分ずつ両方に通して足します。', 'With the filters in parallel, which one this goes through. Both sends half into each and adds them.']],
   'osc.userTable': [['テーブルの種類', 'Table source'], ['内蔵のウェーブテーブルを鳴らすか、自分で作ったテーブルを鳴らすかを選びます。', 'Plays a built-in wavetable, or one you made yourself.']],

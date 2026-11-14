@@ -346,6 +346,8 @@ impl Voice {
 
         let osc_on: [bool; NUM_OSC] = core::array::from_fn(|o| is_on(m, osc_idx(o, osc::ON)));
         let warps: [Warp; NUM_OSC] = core::array::from_fn(|o| Warp::from_index(plain(defs, m, osc_idx(o, osc::WARP)) as usize));
+        let warps2: [Warp; NUM_OSC] = core::array::from_fn(|o| Warp::from_index(plain(defs, m, osc_idx(o, osc::WARP2)) as usize));
+        let listens: [bool; NUM_OSC] = core::array::from_fn(|o| warps[o].needs_modulator() || warps2[o].needs_modulator());
         // Render an oscillator after the one it listens to (FM, AM, RM), so
         // it hears it without delay. A and B listening to each other is a
         // loop: one of them hears the other's previous block.
@@ -355,7 +357,7 @@ impl Voice {
         while count < NUM_OSC {
             let ready = (0..NUM_OSC).find(|&o| {
                 let src = OSC_MODULATOR[o];
-                !done[o] && (!warps[o].needs_modulator() || !osc_on[src] || done[src])
+                !done[o] && (!listens[o] || !osc_on[src] || done[src])
             });
             let o = ready.unwrap_or_else(|| (0..NUM_OSC).find(|&o| !done[o]).unwrap());
             done[o] = true;
@@ -388,9 +390,11 @@ impl Voice {
                 pan: plain(defs, m, i(osc::PAN)),
                 warp: warps[o],
                 warp_amt: plain(defs, m, i(osc::WARP_AMT)),
+                warp2: warps2[o],
+                warp2_amt: plain(defs, m, i(osc::WARP2_AMT)),
                 sr: sh.sr,
             };
-            let modulator: Option<&[f32]> = if warps[o].needs_modulator() && osc_on[other] {
+            let modulator: Option<&[f32]> = if listens[o] && osc_on[other] {
                 Some(if done[other] { &raw[other][..n] } else { &self.raw_prev[other][..n] })
             } else {
                 None

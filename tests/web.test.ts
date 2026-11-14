@@ -400,6 +400,25 @@ test('Serum export: values land in the right modules', async () => {
   assert.equal(data.tags[1], 'Mono');
 });
 
+test('the second warp survives the share link and reaches the Serum export', async () => {
+  const { store } = await makeStore();
+  store.fromJSON(PRESETS.find((p) => p.name === 'Learn: Dual Warp'));
+  assert.equal(store.toJSON().params['oscA.warp2'], 'Sync');
+  const link = await encodeHash(store.toBytes());
+  store.init();
+  assert.equal(store.plain('oscA.warp2'), 0, 'off in a new patch');
+  assert.ok(store.loadBytes(must(await decodeHash(link))));
+  assert.equal(store.toJSON().params['oscA.warp2'], 'Sync');
+  assert.ok(Math.abs(store.plain('oscA.warp2Amt') - 0.1) < 1e-3);
+  const wt = unpackSerum(store.core.serumExport().preset).data.Oscillator0.WTOsc0.plainParams;
+  assert.equal(wt.kParamWarpMenu, 'kBendPos');
+  assert.equal(wt.kParamWarpMenu2, 'kSync');
+  // Both warps show in the preview: it differs from the first warp alone.
+  const both = store.core.previewOsc(0, 0.5, 0.45, 0.6, 64);
+  const first = store.core.previewOsc(0, 0.5, 0.45, 0, 64);
+  assert.ok(both.some((v, i) => Math.abs(v - first[i]) > 0.1));
+});
+
 test('Serum export: the arpeggiator is switched on in Serum', async () => {
   const { store } = await makeStore();
   store.fromJSON(PRESETS.find((p) => p.name === 'Learn: Arpeggiator'));

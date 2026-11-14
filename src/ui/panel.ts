@@ -457,6 +457,9 @@ function oscillator(app: App, id: string): Parts {
     more: [
       Select(app, k('warp'), { arrows: true }),
       when(app, [k('warp')], () => app.store.plain(k('warp')) > 0, Slider(app, k('warpAmt'))),
+      // The second warp appears once the first is in use (or it is set already).
+      when(app, [k('warp'), k('warp2')], () => app.store.plain(k('warp')) > 0 || app.store.plain(k('warp2')) > 0, Select(app, k('warp2'), { arrows: true })),
+      when(app, [k('warp2')], () => app.store.plain(k('warp2')) > 0, Slider(app, k('warp2Amt'))),
       Stepper(app, k('semi')),
       Slider(app, k('fine')),
       Slider(app, k('coarse')),

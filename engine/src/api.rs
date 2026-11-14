@@ -381,9 +381,9 @@ pub extern "C" fn patch_init() {
 // --- previews -----------------------------------------------------------------
 
 #[no_mangle]
-pub extern "C" fn preview_osc(osc: usize, pos: f32, warp_amt: f32, n: usize) -> usize {
+pub extern "C" fn preview_osc(osc: usize, pos: f32, warp_amt: f32, warp2_amt: f32, n: usize) -> usize {
     let mut buf = vec![0.0f32; n.max(2).min(4096)];
-    synth().preview_osc(osc, pos, warp_amt, &mut buf);
+    synth().preview_osc(osc, pos, warp_amt, warp2_amt, &mut buf);
     write_f32s(&buf)
 }
 

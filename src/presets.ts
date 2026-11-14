@@ -69,6 +69,24 @@ export const PRESETS: Preset[] = [
     mods: [mod('lfo1', 'oscA.pos', 1)],
   },
   {
+    name: 'Learn: Dual Warp',
+    ja: '学ぶ：ワープを 2 つ重ねる',
+    cat: 'learn',
+    demo: 'bass',
+    note: [
+      'OSC A にワープを 2 つ順にかけています。Bend+ で波形を片寄らせ、それを Sync がさらに鋭くし、ENV 2 が Sync の量を動かします。OSC A の「くわしい設定」で「ワープ 2」を切ったり、2 つを入れ替えたりして聞き比べてみましょう。',
+      'OSC A runs two warps in a row: Bend+ skews the wave, Sync then sharpens it, and ENV 2 moves the Sync amount. Under OSC A\'s "More settings", switch Warp 2 off or swap the two to hear the difference.',
+    ],
+    params: {
+      'master.mono': true, 'oscA.oct': -1, 'oscA.rand': 0,
+      'oscA.warp': 'Bend+', 'oscA.warpAmt': 0.45, 'oscA.warp2': 'Sync', 'oscA.warp2Amt': 0.1,
+      'filter.type': 'LP24', 'filter.cutoff': 2200, 'filter.res': 0.2,
+      'env2.attack': 0.002, 'env2.decay': 0.35, 'env2.sustain': 0,
+      'env1.release': 0.12, 'dist.on': true, 'dist.drive': 0.25, 'dist.mix': 0.5,
+    },
+    mods: [mod('env2', 'oscA.warp2Amt', 0.55)],
+  },
+  {
     name: 'Learn: Arpeggiator',
     ja: '学ぶ：アルペジエーター',
     cat: 'learn',

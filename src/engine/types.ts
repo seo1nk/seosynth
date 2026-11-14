@@ -183,7 +183,7 @@ export interface EngineExports {
   patch_save(): number;
   patch_load(len: number): number;
   patch_init(): void;
-  preview_osc(osc: number, pos: number, warpAmt: number, n: number): number;
+  preview_osc(osc: number, pos: number, warpAmt: number, warp2Amt: number, n: number): number;
   preview_table(table: number, pos: number, n: number): number;
   table_frames(table: number): number;
   preview_lfo(l: number, n: number): number;

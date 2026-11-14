@@ -214,8 +214,8 @@ export class EngineCore {
 
   // --- previews -------------------------------------------------------------
 
-  previewOsc(osc: number, pos: number, warpAmt: number, n = 256): Float32Array {
-    return this.#readFloats(this.x.preview_osc(osc, pos, warpAmt, n));
+  previewOsc(osc: number, pos: number, warpAmt: number, warp2Amt: number, n = 256): Float32Array {
+    return this.#readFloats(this.x.preview_osc(osc, pos, warpAmt, warp2Amt, n));
   }
   previewTable(table: number, pos: number, n = 128): Float32Array {
     return this.#readFloats(this.x.preview_table(table, pos, n));

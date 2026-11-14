@@ -177,18 +177,9 @@ fn filter_type(c: &mut Ctx, name: &str, context: &str) -> &'static str {
 // Modules
 // ---------------------------------------------------------------------------
 
-fn oscillator(c: &mut Ctx, o: usize) -> Value {
-    let name = params::OSC_NAMES[o];
-    let label = ["OSC A", "OSC B", "OSC C"][o];
-    let k = |p: &str| format!("{name}.{p}");
-
-    let mut wt = vec![
-        ("kParamTablePos", num(1.0 + c.v(&k("pos")) * 255.0)),
-        ("kParamInitialPhase", num(c.v(&k("phase")) * 360.0)),
-        ("kParamRandomPhase", num(c.v(&k("rand")) * 100.0)),
-    ];
-    let warp = c.option(&k("warp"));
-    let menu = match warp {
+/// Serum's warp menu entry for one of our warp modes.
+fn warp_menu(c: &mut Ctx, label: &str, warp: &str) -> Option<&'static str> {
+    match warp {
         "Sync" => Some("kSync"),
         "SyncWin" => {
             c.note("warpApprox", &format!("{label}: SyncWin"));
@@ -208,10 +199,27 @@ fn oscillator(c: &mut Ctx, o: usize) -> Value {
             None
         }
         _ => None,
-    };
-    if let Some(m) = menu {
-        wt.push(("kParamWarpMenu", Value::from(m)));
-        wt.push(("kParamWarp", num(c.v(&k("warpAmt")))));
+    }
+}
+
+fn oscillator(c: &mut Ctx, o: usize) -> Value {
+    let name = params::OSC_NAMES[o];
+    let label = ["OSC A", "OSC B", "OSC C"][o];
+    let k = |p: &str| format!("{name}.{p}");
+
+    let mut wt = vec![
+        ("kParamTablePos", num(1.0 + c.v(&k("pos")) * 255.0)),
+        ("kParamInitialPhase", num(c.v(&k("phase")) * 360.0)),
+        ("kParamRandomPhase", num(c.v(&k("rand")) * 100.0)),
+    ];
+    // Serum 2 also has two warps in a row, stored as a second menu and knob.
+    for (warp_key, amt_key, menu_name, knob_name) in
+        [("warp", "warpAmt", "kParamWarpMenu", "kParamWarp"), ("warp2", "warp2Amt", "kParamWarpMenu2", "kParamWarp2")]
+    {
+        if let Some(m) = warp_menu(c, label, c.option(&k(warp_key))) {
+            wt.push((menu_name, Value::from(m)));
+            wt.push((knob_name, num(c.v(&k(amt_key)))));
+        }
     }
 
     // An oscillator that is on carries its table; one that is off points at
@@ -526,6 +534,7 @@ fn destination(key: &str) -> Option<Dest> {
                 "width" => d("Oscillator", id, "kParamDetuneWid", 27, 1.0),
                 "pos" => d("WTOsc", id, "kParamTablePos", 6, 1.0),
                 "warpAmt" => d("WTOsc", id, "kParamWarp", 0, 1.0),
+                "warp2Amt" => d("WTOsc", id, "kParamWarp2", 3, 1.0),
                 _ => None,
             }
         }
@@ -1130,6 +1139,7 @@ mod tests {
         near(plain_of(&d, &["Oscillator0", "plainParams", "kParamUnison"]), 7.0);
         assert_eq!(plain_of(&d, &["Oscillator0", "WTOsc0", "plainParams", "kParamWarpMenu"]), &Value::from("kSync"));
         near(plain_of(&d, &["Oscillator0", "WTOsc0", "plainParams", "kParamWarp"]), 0.25);
+        assert!(plain_of(&d, &["Oscillator0", "WTOsc0", "plainParams"]).get("kParamWarpMenu2").is_none(), "no second warp");
         // The table is embedded, 256 frames of 2048 samples.
         let wt = plain_of(&d, &["Oscillator0", "WTOsc0"]);
         assert_eq!(wt.get("tableDisplayName"), Some(&Value::from("PWM")));
@@ -1160,6 +1170,24 @@ mod tests {
         assert_eq!(plain_of(&d, &["LFO0", "curveData", "yVals"]), &floats(&[1.0, 0.0, 1.0]));
         assert_eq!(plain_of(&d, &["LFO0", "curveData", "xVals"]), &floats(&[0.0, 0.5, 1.0]));
         assert_eq!(plain_of(&d, &["LFO0", "curveData", "numPoints"]), &Value::Int(2));
+    }
+
+    #[test]
+    fn the_second_warp_is_exported() {
+        let mut p = Patch::init();
+        set(&mut p, "oscA.warp", 3.0); // Bend+
+        set(&mut p, "oscA.warpAmt", 0.4);
+        set(&mut p, "oscA.warp2", 11.0); // FM
+        set(&mut p, "oscA.warp2Amt", 0.3);
+        p.slots[0] = ModSlot { src: src::LFO1 as u8, dst: osc_idx(0, osc::WARP2_AMT) as u16, amount: 0.5, bipolar: false };
+        let (d, _) = export(&p);
+        let wt = plain_of(&d, &["Oscillator0", "WTOsc0", "plainParams"]);
+        assert_eq!(wt.get("kParamWarpMenu"), Some(&Value::from("kBendPos")));
+        assert_eq!(wt.get("kParamWarpMenu2"), Some(&Value::from("kFM_OSC")));
+        assert_eq!(wt.get("kParamWarp2"), Some(&Value::Num(0.3)));
+        let slot = d.get("ModSlot0").unwrap();
+        assert_eq!(slot.get("destModuleParamName"), Some(&Value::from("kParamWarp2")));
+        assert_eq!(slot.get("destModuleParamID"), Some(&Value::Int(3)));
     }
 
     #[test]

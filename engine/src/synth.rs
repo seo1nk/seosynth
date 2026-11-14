@@ -5,7 +5,7 @@ use crate::arp::{Arp, ArpEvent, ArpMode, ArpSettings};
 use crate::clip::{ClipEvent, ClipPlayer, ClipSettings};
 use crate::fx::{self, Ctx, FxChain};
 use crate::lfo::{self, sanitize_points, LfoMode, LfoPoint, LFO_TABLE};
-use crate::osc::{warp_phase, Warp};
+use crate::osc::{warp2_phase, Warp};
 use crate::params::{
     self, arp, clip, defs, master, osc, osc_idx, src, ARP_BASE, CLIP_BASE, F_GLOBAL, F_MOD, F_SMOOTH, NUM_ENV, NUM_LFO,
     NUM_OSC, NUM_PARAMS, NUM_SLOTS,
@@ -817,15 +817,16 @@ impl Synth {
     // --- previews for the UI -------------------------------------------------
 
     /// One cycle of an oscillator as it currently sounds: table position and
-    /// warp applied. `pos` and `warp_amt` are passed in so the UI can animate
-    /// them with the live modulated values.
-    pub fn preview_osc(&mut self, o: usize, pos: f32, warp_amt: f32, out: &mut [f32]) {
+    /// both warps applied. `pos` and the warp amounts are passed in so the UI
+    /// can animate them with the live modulated values.
+    pub fn preview_osc(&mut self, o: usize, pos: f32, warp_amt: f32, warp2_amt: f32, out: &mut [f32]) {
         let o = o.min(NUM_OSC - 1);
         let other = params::OSC_MODULATOR[o];
         let p = &self.patch;
         let table = self.bank.get(p.table_index(o));
         let other_table = self.bank.get(p.table_index(other));
         let warp = Warp::from_index(p.plain(osc_idx(o, osc::WARP)) as usize);
+        let warp2 = Warp::from_index(p.plain(osc_idx(o, osc::WARP2)) as usize);
         let pitch = |x: usize| p.plain(osc_idx(x, osc::OCT)) * 12.0 + p.plain(osc_idx(x, osc::SEMI)) + p.plain(osc_idx(x, osc::COARSE));
         let ratio = (2.0f32).powf((pitch(other) - pitch(o)) / 12.0);
         let other_pos = p.plain(osc_idx(other, osc::POS));
@@ -833,13 +834,15 @@ impl Synth {
         let n = out.len();
         for (i, v) in out.iter_mut().enumerate() {
             let ph = i as f32 / n as f32;
-            let modulator = if warp.needs_modulator() && other_on {
+            let modulator = if (warp.needs_modulator() || warp2.needs_modulator()) && other_on {
                 let mp = ph * ratio;
                 other_table.sample(0, other_pos, mp - mp.floor())
             } else {
                 0.0
             };
-            let (wp, amp) = warp_phase(warp, warp_amt.max(0.0).min(1.0), ph, modulator);
+            // A modulator mode with nothing to listen to plays the plain wave, as in the voice.
+            let usable = |w: Warp| if w.needs_modulator() && !other_on { Warp::Off } else { w };
+            let (wp, amp) = warp2_phase(usable(warp), warp_amt.max(0.0).min(1.0), usable(warp2), warp2_amt.max(0.0).min(1.0), ph, modulator);
             *v = table.sample(0, pos, wp.min(0.999_999)) * amp;
         }
     }
@@ -1081,10 +1084,10 @@ mod tests {
         s.set_user_table(0, UserTable::new(&square).unwrap());
         assert!(render(&mut s, 0.05).iter().all(|v| v.is_finite()));
         let mut buf = [0.0f32; 64];
-        s.preview_osc(0, 0.0, 0.0, &mut buf);
+        s.preview_osc(0, 0.0, 0.0, 0.0, &mut buf);
         assert!(buf[4] > 0.8 && buf[60] < -0.8, "the preview shows the square, flat right after its edge");
         s.set_param(osc_idx(0, osc::USER), 0.0);
-        s.preview_osc(0, 0.0, 0.0, &mut buf);
+        s.preview_osc(0, 0.0, 0.0, 0.0, &mut buf);
         assert!(buf[4] < 0.8, "back on the factory table");
         assert_eq!(s.table_frames(FACTORY_TABLES), 1);
     }
@@ -1264,7 +1267,7 @@ mod tests {
     fn previews_produce_waveforms() {
         let mut s = Synth::new(48_000.0);
         let mut buf = [0.0f32; 256];
-        s.preview_osc(0, 0.5, 0.0, &mut buf);
+        s.preview_osc(0, 0.5, 0.0, 0.0, &mut buf);
         assert!(rms(&buf) > 0.3);
         s.preview_table(3, 0.5, &mut buf);
         assert!(rms(&buf) > 0.3);
