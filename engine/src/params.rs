@@ -674,7 +674,7 @@ fn build() -> Vec<ParamDef> {
     b.num(i(filter::DRIVE), 244, "filter.drive", 0.0, 1.0, 0.0, Lin, "%", MS);
     b.num(i(filter::VAR), 245, "filter.var", 0.0, 1.0, 0.0, Lin, "%", MS);
     b.num(i(filter::MIX), 246, "filter.mix", 0.0, 1.0, 1.0, Lin, "%", MS);
-    b.num(i(filter::KEYTRACK), 247, "filter.keytrack", 0.0, 1.0, 0.0, Lin, "%", 0);
+    b.num(i(filter::KEYTRACK), 247, "filter.keytrack", 0.0, 1.0, 0.0, Lin, "%", MS);
     b.num(i(filter::STEREO), 248, "filter.stereo", -1.0, 1.0, 0.0, Lin, "pan", MS);
 
     // The second filter: the same parameters, off and wide open by default.
@@ -686,7 +686,7 @@ fn build() -> Vec<ParamDef> {
     b.num(i(filter::DRIVE), 844, "filter2.drive", 0.0, 1.0, 0.0, Lin, "%", MS);
     b.num(i(filter::VAR), 845, "filter2.var", 0.0, 1.0, 0.0, Lin, "%", MS);
     b.num(i(filter::MIX), 846, "filter2.mix", 0.0, 1.0, 1.0, Lin, "%", MS);
-    b.num(i(filter::KEYTRACK), 847, "filter2.keytrack", 0.0, 1.0, 0.0, Lin, "%", 0);
+    b.num(i(filter::KEYTRACK), 847, "filter2.keytrack", 0.0, 1.0, 0.0, Lin, "%", MS);
     b.num(i(filter::STEREO), 848, "filter2.stereo", -1.0, 1.0, 0.0, Lin, "pan", MS);
     b.choice(i(filter2::MODE), 849, "filter2.mode", FILTER_MODES, 0, 0);
 
@@ -700,9 +700,9 @@ fn build() -> Vec<ParamDef> {
         b.num(i(env::DECAY), s + 2, k("decay"), 0.0, 20.0, 1.0, Pow(4.0), "s", MS);
         b.num(i(env::SUSTAIN), s + 3, k("sustain"), 0.0, 1.0, 1.0, Lin, "%", MS);
         b.num(i(env::RELEASE), s + 4, k("release"), 0.0, 20.0, 0.015, Pow(4.0), "s", MS);
-        b.num(i(env::ATK_CURVE), s + 5, k("atkCurve"), -1.0, 1.0, 0.0, Lin, "curve", 0);
-        b.num(i(env::DEC_CURVE), s + 6, k("decCurve"), -1.0, 1.0, 0.33, Lin, "curve", 0);
-        b.num(i(env::REL_CURVE), s + 7, k("relCurve"), -1.0, 1.0, 0.33, Lin, "curve", 0);
+        b.num(i(env::ATK_CURVE), s + 5, k("atkCurve"), -1.0, 1.0, 0.0, Lin, "curve", MS);
+        b.num(i(env::DEC_CURVE), s + 6, k("decCurve"), -1.0, 1.0, 0.33, Lin, "curve", MS);
+        b.num(i(env::REL_CURVE), s + 7, k("relCurve"), -1.0, 1.0, 0.33, Lin, "curve", MS);
     }
 
     // --- LFOs -------------------------------------------------------------
@@ -716,9 +716,9 @@ fn build() -> Vec<ParamDef> {
         b.flag(i(lfo::SYNC), s + 2, k("sync"), true, 0);
         b.choice(i(lfo::DIV), s + 3, k("div"), DIVISIONS, 8, 0);
         b.choice(i(lfo::MODE), s + 4, k("mode"), LFO_MODES, 0, 0);
-        b.num(i(lfo::RISE), s + 5, k("rise"), 0.0, 10.0, 0.0, Pow(3.0), "s", 0);
-        b.num(i(lfo::DELAY), s + 6, k("delay"), 0.0, 10.0, 0.0, Pow(3.0), "s", 0);
-        b.num(i(lfo::SMOOTH), s + 7, k("smooth"), 0.0, 1.0, 0.0, Lin, "%", 0);
+        b.num(i(lfo::RISE), s + 5, k("rise"), 0.0, 10.0, 0.0, Pow(3.0), "s", MS);
+        b.num(i(lfo::DELAY), s + 6, k("delay"), 0.0, 10.0, 0.0, Pow(3.0), "s", MS);
+        b.num(i(lfo::SMOOTH), s + 7, k("smooth"), 0.0, 1.0, 0.0, Lin, "%", MS);
         b.num(i(lfo::PHASE), s + 8, k("phase"), 0.0, 1.0, 0.0, Lin, "%", 0);
     }
 
@@ -755,7 +755,7 @@ fn build() -> Vec<ParamDef> {
         b.num(i(flanger::RATE), sid + 541, k("flanger", "rate"), 0.02, 10.0, 0.3, Log, "Hz", GMS);
         b.num(i(flanger::DEPTH), sid + 542, k("flanger", "depth"), 0.0, 1.0, 0.6, Lin, "%", GMS);
         b.num(i(flanger::FEEDBACK), sid + 543, k("flanger", "feedback"), 0.0, 0.95, 0.5, Lin, "%", GMS);
-        b.num(i(flanger::PHASE), sid + 544, k("flanger", "phase"), 0.0, 1.0, 0.25, Lin, "%", GS);
+        b.num(i(flanger::PHASE), sid + 544, k("flanger", "phase"), 0.0, 1.0, 0.25, Lin, "%", GMS);
         b.num(i(flanger::MIX), sid + 545, k("flanger", "mix"), 0.0, 1.0, 0.5, Lin, "%", GMS);
 
         let i = |p: usize| PHASER_BASE + shift + p;
@@ -764,7 +764,7 @@ fn build() -> Vec<ParamDef> {
         b.num(i(phaser::DEPTH), sid + 562, k("phaser", "depth"), 0.0, 1.0, 0.6, Lin, "%", GMS);
         b.num(i(phaser::FREQ), sid + 563, k("phaser", "freq"), 50.0, 8000.0, 600.0, Log, "Hz", GMS);
         b.num(i(phaser::FEEDBACK), sid + 564, k("phaser", "feedback"), 0.0, 0.95, 0.5, Lin, "%", GMS);
-        b.num(i(phaser::PHASE), sid + 565, k("phaser", "phase"), 0.0, 1.0, 0.25, Lin, "%", GS);
+        b.num(i(phaser::PHASE), sid + 565, k("phaser", "phase"), 0.0, 1.0, 0.25, Lin, "%", GMS);
         b.num(i(phaser::MIX), sid + 566, k("phaser", "mix"), 0.0, 1.0, 0.5, Lin, "%", GMS);
 
         let i = |p: usize| CHORUS_BASE + shift + p;
@@ -795,8 +795,8 @@ fn build() -> Vec<ParamDef> {
         b.flag(i(comp::ON), sid + 620, k("comp", "on"), false, F_GLOBAL);
         b.num(i(comp::THRESHOLD), sid + 621, k("comp", "threshold"), -60.0, 0.0, -18.0, Lin, "dB", GMS);
         b.num(i(comp::RATIO), sid + 622, k("comp", "ratio"), 1.0, 20.0, 4.0, Log, "x", GMS);
-        b.num(i(comp::ATTACK), sid + 623, k("comp", "attack"), 0.1, 500.0, 10.0, Log, "ms", GS);
-        b.num(i(comp::RELEASE), sid + 624, k("comp", "release"), 5.0, 2000.0, 150.0, Log, "ms", GS);
+        b.num(i(comp::ATTACK), sid + 623, k("comp", "attack"), 0.1, 500.0, 10.0, Log, "ms", GMS);
+        b.num(i(comp::RELEASE), sid + 624, k("comp", "release"), 5.0, 2000.0, 150.0, Log, "ms", GMS);
         b.num(i(comp::GAIN), sid + 625, k("comp", "gain"), 0.0, 24.0, 0.0, Lin, "dB", GMS);
         b.flag(i(comp::MULTIBAND), sid + 626, k("comp", "multiband"), false, F_GLOBAL);
         b.num(i(comp::MIX), sid + 627, k("comp", "mix"), 0.0, 1.0, 1.0, Lin, "%", GMS);
@@ -846,8 +846,8 @@ fn build() -> Vec<ParamDef> {
     b.choice(i(arp::MODE), 861, "arp.mode", ARP_MODES, 0, F_GLOBAL);
     b.choice(i(arp::DIV), 862, "arp.div", DIVISIONS, 14, F_GLOBAL);
     b.int(i(arp::OCTAVES), 863, "arp.octaves", 1, 4, 1, "", F_GLOBAL);
-    b.num(i(arp::GATE), 864, "arp.gate", 0.05, 1.0, 0.6, Lin, "%", F_GLOBAL);
-    b.num(i(arp::SWING), 865, "arp.swing", 0.0, 1.0, 0.0, Lin, "%", F_GLOBAL);
+    b.num(i(arp::GATE), 864, "arp.gate", 0.05, 1.0, 0.6, Lin, "%", GMS);
+    b.num(i(arp::SWING), 865, "arp.swing", 0.0, 1.0, 0.0, Lin, "%", GMS);
 
     // --- the clip sequencer -------------------------------------------------
     let i = |p: usize| CLIP_BASE + p;

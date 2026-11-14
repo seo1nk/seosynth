@@ -542,6 +542,7 @@ fn destination(key: &str, rack: &[usize]) -> Option<Dest> {
     if let Some(l) = numbered("lfo") {
         return match param {
             "rate" => d("LFO", l, "kParamRate", 0, 1.0),
+            "smooth" => d("LFO", l, "kParamSmooth", 1, 1.0),
             _ => None,
         };
     }

@@ -718,12 +718,15 @@ impl Synth {
             Player::Keys => {}
             Player::Arp => {
                 let p = |k: usize| plain(&self.smoothed, ARP_BASE + k);
+                // Gate and swing can be modulated: they are read as modulated
+                // in the last block (global modulation runs after the voices).
+                let moved = |k: usize| plain(&self.global_m, ARP_BASE + k);
                 let settings = ArpSettings {
                     mode: ArpMode::from_index(p(arp::MODE) as usize),
                     div: p(arp::DIV) as usize,
                     octaves: p(arp::OCTAVES) as u8,
-                    gate: p(arp::GATE),
-                    swing: p(arp::SWING),
+                    gate: moved(arp::GATE),
+                    swing: moved(arp::SWING),
                     bpm,
                     sr: self.sr,
                 };
@@ -954,6 +957,56 @@ mod tests {
         s.note_off(60);
         render(&mut s, 0.3);
         assert_eq!(s.active_voices(), 0);
+    }
+
+    #[test]
+    fn the_newer_destinations_change_the_sound() {
+        let key = |k: &str| params::index_of_key(k).unwrap_or_else(|| panic!("no {k}"));
+        // (destination, settings that make it audible); macro 1 at full moves it.
+        let cases: &[(&str, &[(&str, f32)])] = &[
+            ("filter.keytrack", &[("filter.cutoff", 300.0)]),
+            ("filter2.keytrack", &[("filter2.on", 1.0), ("filter2.cutoff", 300.0)]),
+            ("env1.decCurve", &[("env1.decay", 0.3), ("env1.sustain", 0.1)]),
+            ("lfo1.rise", &[]),
+            ("lfo1.delay", &[]),
+            ("lfo1.smooth", &[("lfo1.shape", 4.0)]),
+            ("phaser.phase", &[("phaser.on", 1.0), ("phaser.mix", 1.0)]),
+            ("comp.attack", &[("comp.on", 1.0), ("comp.threshold", -40.0)]),
+            ("comp.release", &[("comp.on", 1.0), ("comp.threshold", -40.0)]),
+            ("flanger.phase", &[("flanger.on", 1.0), ("flanger.mix", 1.0)]),
+            ("arp.gate", &[("arp.on", 1.0), ("arp.gate", 0.2)]),
+            ("arp.swing", &[("arp.on", 1.0), ("arp.div", 10.0)]),
+        ];
+        for &(dst, setup) in cases {
+            let run = |connect: bool| {
+                let mut s = Synth::new(48_000.0);
+                s.patch.set_plain(FILTER_BASE + filter::CUTOFF, 2000.0);
+                for &(k, v) in setup {
+                    s.patch.set_plain(key(k), v);
+                }
+                s.patch.set_plain(master::MACRO1, 1.0);
+                s.snap();
+                // LFO 1 moves the cutoff, so its own settings are heard.
+                s.set_slot(0, ModSlot { src: src::LFO1 as u8, dst: (FILTER_BASE + filter::CUTOFF) as u16, amount: 0.4, bipolar: false });
+                if connect {
+                    let amount = if s.patch.values[key(dst)] > 0.5 { -0.6 } else { 0.6 };
+                    s.set_slot(1, ModSlot { src: src::MACRO1 as u8, dst: key(dst) as u16, amount, bipolar: false });
+                }
+                s.note_on(48, 0.8);
+                // Both channels: some destinations (the phase offsets) only move the right.
+                let mut out = Vec::new();
+                for _ in 0..(0.6 * 48_000.0 / 128.0) as usize {
+                    s.process(128);
+                    out.extend_from_slice(&s.out_l[..128]);
+                    out.extend_from_slice(&s.out_r[..128]);
+                }
+                out
+            };
+            let (plain, moved) = (run(false), run(true));
+            let diff = plain.iter().zip(&moved).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
+            assert!(diff > 1e-3, "{dst}: connecting it changed nothing");
+            assert!(moved.iter().all(|v| v.is_finite()), "{dst}");
+        }
     }
 
     #[test]
