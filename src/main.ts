@@ -50,7 +50,8 @@ async function boot() {
   audio.tableSource = (index) => core.tableRaw(index);
   const store = new Store(core, audio);
   const T = core.info.tele;
-  const toast = createToaster();
+  // Words are looked up when a message is shown (the language can change).
+  const toast = createToaster((key) => app.i18n.t(key));
 
   // Latest state reported by the audio thread. Before audio runs, values
   // fall back to the patch so the displays still make sense.

@@ -99,11 +99,15 @@ body {
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font);
-  font-size: 14px;
   font-weight: 500;
   line-height: 1.5;
   -webkit-text-size-adjust: 100%;
   overscroll-behavior: none;
+}
+/* Sizes are in rem so the text follows the size people set in their
+   browser or system; the root size itself is left alone. */
+body {
+  font-size: 0.875rem;
 }
 
 button,
@@ -141,6 +145,18 @@ p {
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
+}
+/* The instrument's controls are dragged and pressed, so they do not select
+   text; sentences that explain things can still be selected and copied. */
+.help,
+.tour,
+.board-hint,
+.editor-intro,
+.editor-note,
+.clip-hint,
+.note-list {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .boot {
@@ -194,7 +210,7 @@ p {
 }
 .btn.small {
   padding: 4px 12px;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 .btn.quiet {
   border-color: transparent;
@@ -214,7 +230,7 @@ p {
   border: 0;
   background: none;
   font-weight: 700;
-  font-size: 16px;
+  font-size: 1rem;
 }
 .tool:hover:not(:disabled) {
   background: var(--well);
@@ -224,7 +240,7 @@ p {
   cursor: default;
 }
 .tool.wide {
-  font-size: 13px;
+  font-size: 0.8125rem;
   padding: 0 12px;
 }
 .tool[aria-pressed='true'] {
@@ -239,7 +255,7 @@ p {
   border: 0;
   background: none;
   color: var(--muted);
-  font-size: 20px;
+  font-size: 1.25rem;
   line-height: 1;
   flex: none;
 }
@@ -253,7 +269,7 @@ p {
   border-radius: 999px;
   border: 1.5px solid var(--rule);
   background: var(--paper);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -279,7 +295,7 @@ p {
 
 .caret {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 /* --- top bar ------------------------------------------------------------------ */
@@ -294,7 +310,7 @@ p {
   background: var(--paper);
 }
 .brand {
-  font-size: 19px;
+  font-size: 1.1875rem;
   font-weight: 900;
   letter-spacing: -0.02em;
 }
@@ -319,14 +335,14 @@ p {
   background: var(--well);
 }
 .sound-label {
-  font-size: 11.5px;
+  font-size: 0.7188rem;
   color: var(--muted);
   flex: none;
 }
 .sound-name {
   flex: 1;
   font-weight: 700;
-  font-size: 15px;
+  font-size: 0.9375rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -341,7 +357,7 @@ p {
   background: var(--sound);
   color: var(--on-sound);
   font-weight: 900;
-  font-size: 15px;
+  font-size: 0.9375rem;
 }
 .listen:hover {
   filter: brightness(1.06);
@@ -409,7 +425,7 @@ p {
   border-radius: 10px;
   background: var(--paper);
   border: 1.5px solid var(--ink);
-  font-size: 13px;
+  font-size: 0.8125rem;
   pointer-events: none;
 }
 .board-tools {
@@ -464,7 +480,7 @@ p {
 }
 .node-name {
   font-weight: 700;
-  font-size: 13.5px;
+  font-size: 0.8438rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -499,7 +515,7 @@ p {
   border-radius: 999px;
   background: var(--c);
   color: #fff;
-  font-size: 10.5px;
+  font-size: 0.6562rem;
   font-weight: 700;
   white-space: nowrap;
   box-shadow: 0 0 0 calc(var(--v, 0) * 5px) color-mix(in srgb, var(--c) 32%, transparent);
@@ -521,7 +537,7 @@ p {
   left: 14px;
   right: 12px;
   top: 6px;
-  font-size: 11.5px;
+  font-size: 0.7188rem;
   font-weight: 700;
   line-height: 1.35;
   color: var(--muted);
@@ -542,7 +558,7 @@ p {
   background: color-mix(in srgb, var(--c, var(--ink)) 12%, var(--paper));
   box-shadow: 0 7px 0 -3px color-mix(in srgb, var(--c, var(--ink)) 45%, transparent), 0 12px 18px -6px var(--shade);
   font-weight: 700;
-  font-size: 13.5px;
+  font-size: 0.8438rem;
   white-space: nowrap;
 }
 .mover-pulse {
@@ -567,7 +583,7 @@ p {
   position: absolute;
   left: 0;
   top: 0;
-  font-size: 11.5px;
+  font-size: 0.7188rem;
   font-weight: 700;
   color: var(--muted);
   white-space: nowrap;
@@ -661,13 +677,13 @@ p {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 20px;
+  font-size: 1.25rem;
   font-weight: 900;
   line-height: 1.25;
 }
 .panel-title p {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 .panel.is-mover .panel-head {
   border-bottom-color: var(--c);
@@ -689,7 +705,7 @@ p {
   overscroll-behavior: contain;
 }
 .panel-about {
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.75;
   color: var(--muted);
   user-select: text;
@@ -717,14 +733,14 @@ p {
   border-top: 1.5px solid var(--rule);
 }
 .panel-section h3 {
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 900;
 }
 
 .more > summary {
   cursor: pointer;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--muted);
   padding: 4px 0;
   list-style: none;
@@ -752,7 +768,7 @@ p {
   padding: 10px 20px 12px;
   border-top: 1.5px solid var(--ink);
   background: var(--well);
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   line-height: 1.6;
 }
 .help-head {
@@ -784,12 +800,12 @@ p {
   gap: 10px;
 }
 .ctl-label {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
 }
 .ctl-label small {
   margin-left: 8px;
-  font-size: 11.5px;
+  font-size: 0.7188rem;
   font-weight: 500;
   color: var(--muted);
 }
@@ -797,7 +813,7 @@ p {
   padding: 0;
   border: 0;
   background: none;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -886,7 +902,7 @@ p {
   border: 1.5px dashed var(--faint);
   background: none;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1;
 }
 .mod-add:hover {
@@ -959,7 +975,7 @@ p {
   border: 0;
   background: none;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 0.8125rem;
   text-align: left;
 }
 .switch-track {
@@ -1021,7 +1037,7 @@ select {
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238c98a1'/%3E%3C/svg%3E")
     no-repeat right 11px center;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 0.8125rem;
   text-overflow: ellipsis;
   cursor: pointer;
 }
@@ -1031,7 +1047,7 @@ select {
   border-radius: 10px;
   border: 1.5px solid var(--ink);
   background: var(--paper);
-  font-size: 16px;
+  font-size: 1rem;
   font-weight: 700;
   line-height: 1;
   flex: none;
@@ -1055,7 +1071,7 @@ select {
   padding: 6px 8px;
   border: 0;
   background: var(--paper);
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   font-weight: 700;
   display: grid;
   place-items: center;
@@ -1100,7 +1116,7 @@ input[type='range'] {
   flex: 1;
 }
 .order output {
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   font-variant-numeric: tabular-nums;
   color: var(--muted);
   white-space: nowrap;
@@ -1163,7 +1179,7 @@ input[type='range'] {
 }
 .io-cell figcaption {
   margin-top: 3px;
-  font-size: 11.5px;
+  font-size: 0.7188rem;
   color: var(--muted);
 }
 .io-arrow {
@@ -1212,7 +1228,7 @@ input[type='range'] {
   border-radius: 10px;
   border: 1.5px solid var(--rule);
   background: var(--paper);
-  font-size: 11.5px;
+  font-size: 0.7188rem;
   font-weight: 700;
   align-items: center;
 }
@@ -1284,11 +1300,11 @@ input[type='range'] {
 .route-name {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
 }
 .route-amount {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -1302,7 +1318,7 @@ input[type='range'] {
 }
 .empty {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.7;
 }
 .link-form {
@@ -1315,7 +1331,7 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  font-size: 11.5px;
+  font-size: 0.7188rem;
   color: var(--muted);
   min-width: 0;
 }
@@ -1328,9 +1344,15 @@ input[type='range'] {
 .popover {
   position: fixed;
   z-index: 200;
+  /* Placed by script next to its button (see popover() in chrome.ts), so
+     the browser's centring of popovers is turned off. */
+  inset: auto;
+  margin: 0;
+  color: var(--ink);
   max-width: min(440px, calc(100vw - 16px));
   max-height: calc(100dvh - 16px);
   overflow: auto;
+  overscroll-behavior: contain;
   background: var(--paper);
   border: 1.5px solid var(--ink);
   border-radius: 14px;
@@ -1348,7 +1370,7 @@ input[type='range'] {
   padding: 6px 10px 4px;
 }
 .menu-sub {
-  font-size: 11.5px;
+  font-size: 0.7188rem;
   font-weight: 700;
   color: var(--muted);
   padding: 8px 10px 2px;
@@ -1389,7 +1411,7 @@ input[type='range'] {
   gap: 8px;
 }
 .menu-item.pick > span {
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 500;
   color: var(--muted);
 }
@@ -1399,7 +1421,7 @@ input[type='range'] {
   justify-content: space-between;
   gap: 14px;
   padding: 5px 10px;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 .menu-choice .segmented button {
   padding: 4px 12px;
@@ -1439,7 +1461,7 @@ input[type='range'] {
   white-space: nowrap;
 }
 .source-what {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 .play-settings {
@@ -1462,7 +1484,7 @@ input[type='range'] {
 }
 .sound-cat h4 {
   margin: 6px 10px 2px;
-  font-size: 11.5px;
+  font-size: 0.7188rem;
   color: var(--muted);
 }
 
@@ -1481,6 +1503,55 @@ input[type='range'] {
 .dialog::backdrop {
   background: color-mix(in srgb, var(--ink) 34%, transparent);
 }
+/* Scrolling inside the dialog or over its backdrop stays there. */
+.dialog:modal {
+  overscroll-behavior: contain;
+}
+.dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+/* Opening and closing: a short fade (and a small rise, unless motion is
+   reduced). `display` and `overlay` keep it in the top layer while it fades. */
+.dialog,
+.popover {
+  opacity: 0;
+  transition-property: opacity, translate, display, overlay;
+  transition-duration: 0.18s;
+  transition-timing-function: ease-out;
+  transition-behavior: allow-discrete;
+  @media (prefers-reduced-motion: no-preference) {
+    translate: 0 6px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    transition-duration: 0.08s;
+  }
+}
+.dialog[open],
+.popover:is(:popover-open, :not([popover])) {
+  opacity: 1;
+  translate: 0 0;
+  @starting-style {
+    opacity: 0;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    @starting-style {
+      translate: 0 6px;
+    }
+  }
+}
+.dialog::backdrop {
+  transition-property: opacity, display, overlay;
+  transition-duration: 0.18s;
+  transition-behavior: allow-discrete;
+  opacity: 0;
+}
+.dialog[open]::backdrop {
+  opacity: 1;
+  @starting-style {
+    opacity: 0;
+  }
+}
 .dialog header {
   display: flex;
   align-items: center;
@@ -1489,7 +1560,7 @@ input[type='range'] {
   border-bottom: 1.5px solid var(--rule);
 }
 .dialog h2 {
-  font-size: 18px;
+  font-size: 1.125rem;
   font-weight: 900;
 }
 .dialog-body {
@@ -1518,7 +1589,7 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   color: var(--muted);
 }
 .share input,
@@ -1528,16 +1599,16 @@ input[type='range'] {
   border: 1.5px solid var(--ink);
   background: var(--paper);
   color: var(--ink);
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 .share-url {
   resize: none;
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   word-break: break-all;
 }
 .serum-export h3 {
   margin-top: 6px;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 900;
 }
 .serum-export .caveat {
@@ -1570,7 +1641,7 @@ input[type='range'] {
 .file-list code {
   font-family: inherit;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 0.8125rem;
   word-break: break-all;
 }
 .note-list li {
@@ -1590,6 +1661,13 @@ input[type='range'] {
 
 .toasts {
   position: fixed;
+  /* A manual popover: the browser's centring and frame are turned off. */
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
   left: 50%;
   top: 68px;
   transform: translateX(-50%);
@@ -1599,15 +1677,38 @@ input[type='range'] {
   max-width: calc(100vw - 24px);
 }
 .toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   max-width: min(600px, calc(100vw - 24px));
-  padding: 9px 16px;
+  padding: 9px 8px 9px 16px;
   border-radius: 12px;
   background: var(--ink);
   color: var(--paper);
-  font-size: 13.5px;
+  font-size: 0.844rem;
   font-weight: 700;
   line-height: 1.5;
+  pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
   transition: opacity 0.35s;
+  @starting-style {
+    opacity: 0;
+  }
+}
+.toast-close {
+  flex: none;
+  border: 0;
+  background: none;
+  color: inherit;
+  opacity: 0.75;
+  padding: 0 6px;
+  font-size: 1.1rem;
+  line-height: 1.2;
+}
+.toast-close:hover,
+.toast-close:focus-visible {
+  opacity: 1;
 }
 .toast.out {
   opacity: 0;
@@ -1616,6 +1717,10 @@ input[type='range'] {
 .tour {
   position: fixed;
   z-index: 150;
+  /* A manual popover placed by script: no browser centring or frame. */
+  inset: auto;
+  margin: 0;
+  color: var(--ink);
   width: min(330px, calc(100vw - 16px));
   padding: 14px 16px;
   background: var(--paper);
@@ -1625,18 +1730,18 @@ input[type='range'] {
   line-height: 1.7;
 }
 .tour h3 {
-  font-size: 16px;
+  font-size: 1rem;
   font-weight: 900;
   margin: 2px 0 4px;
 }
 .tour p {
-  font-size: 13px;
+  font-size: 0.8125rem;
   margin-bottom: 12px;
 }
 .tour-step {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -1651,7 +1756,7 @@ input[type='range'] {
 }
 .tour-actions .btn {
   padding: 6px 13px;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 .tour-focus {
   outline: 3px solid var(--mod-lfo1) !important;
@@ -1752,7 +1857,7 @@ input[type='range'] {
   gap: 3px;
   width: 34px;
   white-space: nowrap;
-  font-size: 10.5px;
+  font-size: 0.6562rem;
   font-weight: 700;
   color: var(--muted);
 }
@@ -1835,7 +1940,7 @@ input[type='range'] {
   --pr-playhead: var(--mod-lfo2);
 }
 .clip-sel {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
   min-width: 9em;
 }
@@ -1850,7 +1955,7 @@ input[type='range'] {
 }
 .clip-hint {
   flex-basis: 100%;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 .piano {
@@ -1876,7 +1981,7 @@ input[type='range'] {
   border-right: 0;
 }
 .key.white > span {
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 700;
   color: #5b6975;
   padding-bottom: 3px;
@@ -1910,7 +2015,7 @@ input[type='range'] {
 
 /* --- phones ---------------------------------------------------------------------------- */
 
-@media (max-width: 760px) {
+@media (max-width: 47.5em) {
   .top {
     flex-wrap: wrap;
     gap: 8px;
@@ -1918,7 +2023,7 @@ input[type='range'] {
   }
   .brand {
     order: 1;
-    font-size: 17px;
+    font-size: 1.0625rem;
   }
   /* Row one: name and tools. Row two: choose a sound, listen. */
   .top-right {
@@ -1978,7 +2083,7 @@ input[type='range'] {
     padding: 8px 10px 10px 16px;
   }
   .panel-title h2 {
-    font-size: 18px;
+    font-size: 1.125rem;
   }
   .panel-scroll {
     padding: 12px 16px 20px;
@@ -2012,7 +2117,7 @@ input[type='range'] {
   .kb-bar .chip-toggle,
   .kb-mode button {
     padding: 5px 9px;
-    font-size: 12.5px;
+    font-size: 0.7812rem;
   }
   .kb-drawer-btn .long {
     display: none;
@@ -2036,7 +2141,7 @@ input[type='range'] {
   }
   .wheel-wrap {
     width: 28px;
-    font-size: 9.5px;
+    font-size: 0.5938rem;
   }
   .wheel {
     width: 20px;
@@ -2094,7 +2199,7 @@ input[type='range'] {
   border-radius: 999px;
   background: var(--paper);
   color: var(--ink);
-  font-size: 10.5px;
+  font-size: 0.6562rem;
   font-weight: 700;
   line-height: 16px;
   white-space: nowrap;
@@ -2121,7 +2226,7 @@ input[type='range'] {
   display: none;
 }
 .stack-note {
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   font-variant-numeric: tabular-nums;
   color: var(--muted);
 }
@@ -2132,7 +2237,7 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   color: var(--muted);
 }
 
@@ -2170,7 +2275,7 @@ input[type='range'] {
 }
 .editor-intro,
 .editor-note {
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.7;
   color: var(--muted);
 }
@@ -2238,7 +2343,7 @@ input[type='range'] {
   border-top: 1.5px solid var(--rule);
 }
 .editor-part h3 {
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 900;
 }
 .editor-part-head {
@@ -2264,7 +2369,7 @@ input[type='range'] {
   border: 1.5px solid var(--rule);
   border-radius: 10px;
   background: var(--paper);
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 700;
   color: var(--muted);
 }
@@ -2279,7 +2384,7 @@ input[type='range'] {
 }
 .frame-add {
   border-style: dashed;
-  font-size: 18px;
+  font-size: 1.125rem;
   color: var(--ink);
 }
 .frame-add:disabled {
@@ -2297,7 +2402,7 @@ input[type='range'] {
 }
 .import-status {
   min-height: 1.6em;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
 }
 .dialog-actions.between {
@@ -2306,7 +2411,7 @@ input[type='range'] {
   border-top: 1.5px solid var(--rule);
 }
 .share-note {
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   line-height: 1.6;
   color: var(--muted);
 }
@@ -2321,7 +2426,7 @@ input[type='range'] {
   padding: 0 7px;
   border: 1.5px solid currentColor;
   border-radius: 999px;
-  font-size: 10.5px;
+  font-size: 0.6562rem;
   font-weight: 700;
   line-height: 16px;
   vertical-align: 0.15em;

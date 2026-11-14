@@ -256,7 +256,6 @@ export class Keyboard {
       {
         type: 'button',
         class: 'chip-toggle',
-        'aria-haspopup': 'true',
         onclick: () => {
           const [content, scope] = app.inScope(() =>
             h(

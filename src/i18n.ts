@@ -229,6 +229,7 @@ const UI: Record<string, Pair> = {
   'kb.hold.help': ['オンにすると、鍵盤を離しても音が鳴り続けます。', 'When on, notes keep sounding after you let go.'],
   'kb.settings': ['弾き方の設定', 'Playing settings'],
   'kb.piano': ['鍵盤', 'Keyboard'],
+  'toast.region': ['お知らせ', 'Notifications'],
   'kb.midi.help': ['MIDI キーボードをつなぎます。', 'Connects a MIDI keyboard.'],
   'kb.mode': ['鳴らし方', 'Keys play'],
   'kb.mode.keys': ['ふつう', 'Notes'],

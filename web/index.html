@@ -3,13 +3,29 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- Follow the text size set in the operating system (sizes are in rem). -->
+    <meta name="text-scale" content="scale" />
+    <!--
+      Only this site's own files, the font from Google Fonts, and the
+      WebAssembly engine (compiled in the page and in the audio worklet).
+      No HTML is ever built from strings, so Trusted Types can be enforced.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'"
+    />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <title>seosynth | ブラウザで動くウェーブテーブルシンセ</title>
     <meta name="description" content="音の流れがグラフで見えるウェーブテーブルシンセサイザー。インストール不要、音色はリンクで共有できます。" />
     <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#18222d" media="(prefers-color-scheme: dark)" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23172a3a'/%3E%3Cpath d='M5 16c3-9 5-9 8 0s5 9 8 0 5-9 6-3' fill='none' stroke='%2300c781' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet" />
+    <!-- Google Fonts serves different CSS per browser, so it cannot be pinned
+         with integrity; the policy above limits it to these two hosts. -->
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet" referrerpolicy="no-referrer" />
     <link rel="stylesheet" href="css/app.css" />
   </head>
   <body>

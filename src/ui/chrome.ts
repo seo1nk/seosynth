@@ -107,23 +107,113 @@ export class Help {
 // Toasts, pop-overs, dialogs
 // ---------------------------------------------------------------------------
 
-export function createToaster(): Toaster {
-  const host = h('div', { class: 'toasts', role: 'status', 'aria-live': 'polite' });
+/** The Popover API: top layer, light dismiss and Esc handled by the browser. */
+const hasPopover = typeof HTMLElement !== 'undefined' && Object.hasOwn(HTMLElement.prototype, 'popover');
+
+/**
+ * Short messages at the top of the screen. They sit in one named region,
+ * in the top layer (a manual popover) so nothing covers them, and each can
+ * be closed. While a modal dialog is open the page behind it is inert, so a
+ * message waits until the dialog closes.
+ */
+export function createToaster(t: (key: string) => string): Toaster {
+  const notify = (document as Document & { ariaNotify?: (text: string) => void }).ariaNotify;
+  const host = h('div', { class: 'toasts', role: 'region' });
+  // Without ariaNotify() the region itself announces what appears in it.
+  if (typeof notify !== 'function') host.setAttribute('aria-live', 'polite');
+  if (hasPopover) host.setAttribute('popover', 'manual');
   document.body.append(host);
-  const toast = (message: string, ms = 2800) => {
-    const el = h('div', { class: 'toast' }, message);
-    host.replaceChildren(el);
-    setTimeout(() => el.classList.add('out'), ms);
-    setTimeout(() => el.remove(), ms + 400);
+  let timers: ReturnType<typeof setTimeout>[] = [];
+  /** Where focus was before it went into a toast (given back when it closes). */
+  let before: HTMLElement | null = null;
+  host.addEventListener('focusin', (e) => {
+    if (!host.contains(e.relatedTarget as Node)) before = e.relatedTarget as HTMLElement | null;
+  });
+
+  const setShown = (shown: boolean) => {
+    if (!hasPopover) return;
+    if (shown && !host.matches(':popover-open')) host.showPopover();
+    if (!shown && host.matches(':popover-open')) host.hidePopover();
   };
-  return Object.assign(toast, { clear: () => host.replaceChildren() });
+  const clear = () => {
+    for (const id of timers) clearTimeout(id);
+    timers = [];
+    const hadFocus = host.contains(document.activeElement);
+    host.replaceChildren();
+    setShown(false);
+    if (hadFocus) before?.focus({ preventScroll: true });
+  };
+  const show = (message: string, ms: number) => {
+    clear();
+    host.setAttribute('aria-label', t('toast.region'));
+    const el = h(
+      'div',
+      { class: 'toast' },
+      h('span', {}, message),
+      h('button', { type: 'button', class: 'toast-close', 'aria-label': t('btn.close'), onclick: clear }, '×'),
+    );
+    host.replaceChildren(el);
+    setShown(true);
+    if (typeof notify === 'function') notify.call(document, message);
+    timers.push(setTimeout(() => el.classList.add('out'), ms));
+    timers.push(setTimeout(clear, ms + 400));
+  };
+  const toast = (message: string, ms = 2800) => {
+    const modal = document.querySelector<HTMLDialogElement>('dialog:modal');
+    if (modal) modal.addEventListener('close', () => show(message, ms), { once: true });
+    else show(message, ms);
+  };
+  return Object.assign(toast, { clear });
 }
 
-/** A floating panel next to `anchor`. Returns a function that closes it. */
+/**
+ * A floating panel next to `anchor`. Returns a function that closes it.
+ * It is an auto popover: in the top layer (also above a dialog), closed by
+ * a press outside or Esc, after which focus goes back where it was.
+ */
 export function popover(anchor: HTMLElement, content: Child, { onClose }: PopoverOptions = {}): () => void {
   document.querySelector('.popover')?.dispatchEvent(new Event('dismiss'));
-  const el = h('div', { class: 'popover', role: 'dialog' }, content);
+  const el = h('div', { class: 'popover' }, content);
   document.body.append(el);
+  let closed = false;
+  const finish = () => {
+    if (closed) return;
+    closed = true;
+    anchor.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', outside, true);
+    document.removeEventListener('keydown', key, true);
+    el.remove();
+    onClose?.();
+  };
+  // Without the Popover API: close on a press outside and on Esc by hand.
+  const outside = (e: PointerEvent) => {
+    if (!el.contains(e.target as Node)) finish();
+  };
+  const key = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape') return;
+    // Only this pop-over closes, not the panel behind it.
+    e.stopPropagation();
+    finish();
+    anchor.focus?.();
+  };
+  if (hasPopover) {
+    el.setAttribute('popover', 'auto');
+    el.addEventListener('toggle', (e) => {
+      if ((e as ToggleEvent).newState === 'closed') finish();
+    });
+    // `source` ties the popover to its button (ignored where unsupported).
+    (el.showPopover as (options?: { source?: HTMLElement }) => void)({ source: anchor });
+  } else {
+    // Deferred so the click that opened it does not close it again.
+    setTimeout(() => {
+      if (closed) return;
+      document.addEventListener('pointerdown', outside, true);
+      document.addEventListener('keydown', key, true);
+    });
+  }
+  anchor.setAttribute('aria-expanded', 'true');
+
+  // Next to the button: centred under it, or above it if there is no room.
   const a = anchor.getBoundingClientRect();
   const r = el.getBoundingClientRect();
   const left = clamp(a.left + a.width / 2 - r.width / 2, 8, Math.max(8, window.innerWidth - r.width - 8));
@@ -131,56 +221,56 @@ export function popover(anchor: HTMLElement, content: Child, { onClose }: Popove
   const top = below ? a.bottom + 8 : Math.max(8, a.top - r.height - 8);
   el.style.left = `${left}px`;
   el.style.top = `${top}px`;
-  let closed = false;
+
   const close = () => {
-    if (closed) return;
-    closed = true;
-    el.remove();
-    document.removeEventListener('pointerdown', outside, true);
-    document.removeEventListener('keydown', key, true);
-    onClose?.();
-  };
-  const outside = (e: PointerEvent) => {
-    if (!el.contains(e.target as Node)) close();
-  };
-  const key = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      // Only this pop-over closes, not the panel behind it.
-      e.stopPropagation();
-      close();
-      anchor.focus?.();
-    }
+    if (hasPopover && el.matches(':popover-open')) el.hidePopover();
+    else finish();
   };
   el.addEventListener('dismiss', close);
-  // Deferred so the click that opened it does not close it again.
-  setTimeout(() => {
-    if (closed) return;
-    document.addEventListener('pointerdown', outside, true);
-    document.addEventListener('keydown', key, true);
-  });
   el.querySelector<HTMLElement>('button:not(:disabled), input, select')?.focus({ preventScroll: true });
   return close;
 }
 
+let dialogCount = 0;
+
+/**
+ * A modal dialog. It closes with its × button, Esc, or a press on the
+ * backdrop (`closedby="any"`, with a fallback where that is missing).
+ */
 export function dialog(app: App, title: Child, content: Child, { onClose, wide }: DialogOptions = {}): HTMLDialogElement {
+  const titleId = `dialog-title-${++dialogCount}`;
   const dlg = h(
     'dialog',
-    { class: `dialog ${wide ? 'wide' : ''}` },
+    { class: `dialog ${wide ? 'wide' : ''}`, closedby: 'any', 'aria-labelledby': titleId },
     h(
       'header',
       {},
-      h('h2', {}, title),
+      h('h2', { id: titleId }, title),
       h('button', { type: 'button', class: 'icon-btn', 'aria-label': app.i18n.t('btn.close'), onclick: () => dlg.close() }, '×'),
     ),
     h('div', { class: 'dialog-body' }, content),
   );
   dlg.addEventListener('close', () => {
-    dlg.remove();
     onClose?.();
+    // Gone once its closing transition has played.
+    setTimeout(() => dlg.remove(), 300);
   });
-  dlg.addEventListener('click', (e) => {
-    if (e.target === dlg) dlg.close();
-  });
+  if (!('closedBy' in HTMLDialogElement.prototype)) {
+    // A press and its release both on the backdrop close it. The position is
+    // tested rather than the target: the dialog is also the target of its
+    // own padding and of the gaps between its children.
+    const outside = (e: PointerEvent) => {
+      const r = dlg.getBoundingClientRect();
+      return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+    };
+    let pressedOutside = false;
+    dlg.addEventListener('pointerdown', (e) => {
+      pressedOutside = outside(e);
+    });
+    dlg.addEventListener('pointerup', (e) => {
+      if (pressedOutside && outside(e)) dlg.close();
+    });
+  }
   document.body.append(dlg);
   dlg.showModal();
   return dlg;
@@ -224,7 +314,7 @@ export function Header(app: App): HTMLElement {
   };
   const soundBtn = h(
     'button',
-    { type: 'button', class: 'sound-btn', 'aria-haspopup': 'true', title: t('preset.title'), onclick: () => openSounds() },
+    { type: 'button', class: 'sound-btn', title: t('preset.title'), onclick: () => openSounds() },
     h('span', { class: 'sound-label' }, t('preset.label')),
     nameEl,
     h('span', { class: 'caret', 'aria-hidden': 'true' }, '▾'),
@@ -306,7 +396,7 @@ export function Header(app: App): HTMLElement {
       }
     },
   });
-  const menuBtn = h('button', { type: 'button', class: 'tool', 'aria-haspopup': 'true', 'aria-label': t('btn.menu'), title: t('btn.menu'), onclick: () => openMenu() }, icon('menu'));
+  const menuBtn = h('button', { type: 'button', class: 'tool', 'aria-label': t('btn.menu'), title: t('btn.menu'), onclick: () => openMenu() }, icon('menu'));
   function openMenu() {
     const item = (label: Child, fn: () => void) =>
       h('button', { type: 'button', class: 'menu-item', onclick: () => { close(); fn(); } }, label);
@@ -486,8 +576,10 @@ export function openSerumExport(app: App): void {
       { name: 'README.txt', data: `${t('serum.readme')}\n\n${notes.map((n) => `- ${noteText(n)}`).join('\n')}\n` },
     ];
     download(`${base} (Serum 2).zip`, zip(files), 'application/zip');
-    app.toast(t('file.exported'));
+    // Said inside the dialog: a message behind it would not be seen.
+    saved.textContent = t('file.exported');
   };
+  const saved = h('span', { class: 'muted', role: 'status' });
 
   dialog(
     app,
@@ -497,7 +589,7 @@ export function openSerumExport(app: App): void {
       { class: 'serum-export' },
       h('p', {}, t('serum.intro')),
       h('p', { class: 'caveat' }, t('serum.caveat')),
-      h('div', { class: 'dialog-actions start' }, h('button', { type: 'button', class: 'btn primary', onclick: downloadZip }, t('serum.zip'))),
+      h('div', { class: 'dialog-actions start' }, h('button', { type: 'button', class: 'btn primary', onclick: downloadZip }, t('serum.zip')), saved),
       h('h3', {}, t('serum.step1')),
       h(
         'ul',
@@ -603,11 +695,13 @@ export class Tour {
     const baseline = (def.changed ?? []).map((k) => store.plain(k));
     const check = h('span', { class: 'tour-check', hidden: true }, t('tour.did'));
     const last = step === TOUR.length - 1;
+    // A manual popover: in the top layer, and it stays open while the
+    // learner works on the page. Named by its heading.
     this.el = h(
       'aside',
-      { class: 'tour', role: 'dialog', 'aria-label': t('tour.title') },
+      { class: 'tour', role: 'dialog', 'aria-labelledby': 'tour-title', tabindex: -1 },
       h('div', { class: 'tour-step' }, h('span', {}, t('tour.step', { n: step + 1, total: TOUR.length })), check),
-      h('h3', {}, t(`tour.${step + 1}.title`)),
+      h('h3', { id: 'tour-title' }, t(`tour.${step + 1}.title`)),
       h('p', {}, t(`tour.${step + 1}.body`)),
       h(
         'div',
@@ -618,7 +712,14 @@ export class Tour {
       ),
     );
     document.body.append(this.el);
+    if (hasPopover) {
+      this.el.setAttribute('popover', 'manual');
+      this.el.showPopover();
+    }
     this.#place();
+    // Focus goes into the step, so keyboard and screen reader users are
+    // taken to it; Tab reaches its buttons.
+    this.el.focus({ preventScroll: true });
     this.timer = setInterval(() => {
       const done = def.done ? def.done(this.app) : def.changed ? def.changed.some((k, n) => Math.abs(store.plain(k) - baseline[n]) > 1e-4) : false;
       check.hidden = !done;

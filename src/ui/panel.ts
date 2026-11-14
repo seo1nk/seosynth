@@ -143,7 +143,6 @@ function TablePicker(app: App, name: string): HTMLElement {
     {
       type: 'button',
       class: 'table-pick',
-      'aria-haspopup': 'true',
       onclick: () => {
         const builtIn = userSlot() < 0 ? Math.round(store.getPlain(iWt)) : -1;
         const card = (table: number, text: string, pressed: boolean, choose: () => void) =>
