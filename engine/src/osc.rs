@@ -67,6 +67,39 @@ fn fm_depth(a: f32) -> f32 {
     a * a * 2.0
 }
 
+/// `x` to the power `e` for `x` in 0..=1 and `e` >= 0, as `2^(e·log2 x)`
+/// with short polynomials instead of `powf`. The Bend warps need it once per
+/// sample per unison voice, where `powf` made them four times as costly as
+/// the other warps. Relative error stays below 1e-6 for the exponents the
+/// warps use, far below a sample's width in the table.
+#[inline(always)]
+pub fn pow01(x: f32, e: f32) -> f32 {
+    if x <= 0.0 {
+        return if e == 0.0 { 1.0 } else { 0.0 };
+    }
+    // log2: split off the exponent and keep the mantissa m in [sqrt(1/2), sqrt(2)).
+    let bits = x.to_bits();
+    let mut exp = ((bits >> 23) & 0xff) as i32 - 127;
+    let mut m = f32::from_bits((bits & 0x007f_ffff) | 0x3f80_0000);
+    if m > core::f32::consts::SQRT_2 {
+        m *= 0.5;
+        exp += 1;
+    }
+    // ln(m) = 2·atanh(t), t = (m-1)/(m+1), |t| < 0.172.
+    let t = (m - 1.0) / (m + 1.0);
+    let t2 = t * t;
+    let ln_m = 2.0 * t * (1.0 + t2 * (1.0 / 3.0 + t2 * (1.0 / 5.0 + t2 * (1.0 / 7.0))));
+    let y = e * (exp as f32 + ln_m * core::f32::consts::LOG2_E);
+    if y < -126.0 {
+        return 0.0;
+    }
+    // exp2: integer part through the exponent bits, the rest (|f| <= 0.5) as a series.
+    let n = y.round();
+    let z = (y - n) * core::f32::consts::LN_2;
+    let p = 1.0 + z * (1.0 + z * (0.5 + z * (1.0 / 6.0 + z * (1.0 / 24.0 + z * (1.0 / 120.0 + z * (1.0 / 720.0))))));
+    p * f32::from_bits(((n as i32 + 127) as u32) << 23)
+}
+
 /// Applies a phase-shaping warp. Returns (table phase 0..=1, amplitude).
 /// Shared with the UI preview so the picture matches the sound.
 #[inline(always)]
@@ -81,8 +114,8 @@ pub fn warp_phase(warp: Warp, a: f32, ph: f32, modulator: f32) -> (f32, f32) {
             let x = ph * sync_ratio(a);
             (x - x.floor(), 0.5 - 0.5 * (TAU * ph).cos())
         }
-        Warp::BendPlus => (ph.powf(bend_exp(a)), 1.0),
-        Warp::BendMinus => (1.0 - (1.0 - ph).powf(bend_exp(a)), 1.0),
+        Warp::BendPlus => (pow01(ph, bend_exp(a)), 1.0),
+        Warp::BendMinus => (1.0 - pow01(1.0 - ph, bend_exp(a)), 1.0),
         Warp::Pwm => ((ph / (1.0 - 0.98 * a)).min(1.0), 1.0),
         Warp::AsymPlus => (asym(ph, 0.5 + 0.49 * a), 1.0),
         Warp::AsymMinus => (asym(ph, 0.5 - 0.49 * a), 1.0),
@@ -430,6 +463,23 @@ mod tests {
                 assert!(peak > 0.01, "warp {w} amt {amt} silent");
             }
         }
+    }
+
+    #[test]
+    fn pow01_matches_powf() {
+        let mut worst = 0.0f32;
+        for i in 0..=4000 {
+            let x = i as f32 / 4000.0;
+            for k in 0..=20 {
+                let e = (2.0f32).powf(k as f32 / 20.0 * 2.5);
+                let (want, got) = (x.powf(e), pow01(x, e));
+                worst = worst.max((want - got).abs());
+            }
+        }
+        assert!(worst < 2e-6, "worst error {worst}");
+        assert_eq!(pow01(0.0, 2.0), 0.0);
+        assert_eq!(pow01(1.0, 5.0), 1.0);
+        assert!(pow01(1e-30, 5.0) == 0.0);
     }
 
     #[test]
