@@ -368,6 +368,17 @@ pub mod split {
     pub const N: usize = 3;
 }
 
+/// The arpeggiator (see `arp`).
+pub mod arp {
+    pub const ON: usize = 0;
+    pub const MODE: usize = 1;
+    pub const DIV: usize = 2;
+    pub const OCTAVES: usize = 3;
+    pub const GATE: usize = 4;
+    pub const SWING: usize = 5;
+    pub const N: usize = 6;
+}
+
 pub const OSC_BASE: usize = master::N;
 pub const SUB_BASE: usize = OSC_BASE + NUM_OSC * osc::N;
 pub const NOISE_BASE: usize = SUB_BASE + sub::N;
@@ -389,7 +400,8 @@ pub const FXFILTER_BASE: usize = EQ_BASE + eq::N;
 /// `c * FX_BLOCK` after the first copy.
 pub const FX_BLOCK: usize = FXFILTER_BASE + fxfilter::N - HYPER_BASE;
 pub const SPLIT_BASE: usize = HYPER_BASE + FX_COPIES * FX_BLOCK;
-pub const NUM_PARAMS: usize = SPLIT_BASE + split::N;
+pub const ARP_BASE: usize = SPLIT_BASE + split::N;
+pub const NUM_PARAMS: usize = ARP_BASE + arp::N;
 
 #[inline]
 pub const fn osc_idx(o: usize, p: usize) -> usize {
@@ -505,6 +517,8 @@ pub const REVERB_MODES: &[&str] = &["Plate", "Hall"];
 pub const EQ_LOW_TYPES: &[&str] = &["Shelf", "Peak", "HP"];
 pub const EQ_HIGH_TYPES: &[&str] = &["Shelf", "Peak", "LP"];
 pub const SPLIT_MODES: &[&str] = &["Copy", "Bands", "MidSide", "LeftRight"];
+/// The order the arpeggiator plays the held keys in.
+pub const ARP_MODES: &[&str] = &["Up", "Down", "UpDown", "Played", "Random", "Chord"];
 
 // ---------------------------------------------------------------------------
 // Table construction
@@ -811,6 +825,15 @@ fn build() -> Vec<ParamDef> {
     b.num(i(split::FREQ), 701, "split.freq", 40.0, 12000.0, 400.0, Log, "Hz", GMS);
     b.num(i(split::BALANCE), 702, "split.balance", 0.0, 1.0, 0.5, Lin, "ab", GMS);
 
+    // --- the arpeggiator ----------------------------------------------------
+    let i = |p: usize| ARP_BASE + p;
+    b.flag(i(arp::ON), 860, "arp.on", false, F_GLOBAL);
+    b.choice(i(arp::MODE), 861, "arp.mode", ARP_MODES, 0, F_GLOBAL);
+    b.choice(i(arp::DIV), 862, "arp.div", DIVISIONS, 14, F_GLOBAL);
+    b.int(i(arp::OCTAVES), 863, "arp.octaves", 1, 4, 1, "", F_GLOBAL);
+    b.num(i(arp::GATE), 864, "arp.gate", 0.05, 1.0, 0.6, Lin, "%", F_GLOBAL);
+    b.num(i(arp::SWING), 865, "arp.swing", 0.0, 1.0, 0.0, Lin, "%", F_GLOBAL);
+
     assert_eq!(b.defs.len(), NUM_PARAMS);
     b.defs
 }
@@ -937,6 +960,8 @@ mod tests {
             ("dist2.drive", 1522),
             ("fxfilter3.mix", 2686),
             ("split.balance", 702),
+            ("arp.on", 860),
+            ("arp.swing", 865),
         ];
         for (key, sid) in expect {
             let i = index_of_key(key).expect(key);

@@ -68,6 +68,25 @@ export const PRESETS: Preset[] = [
     },
     mods: [mod('lfo1', 'oscA.pos', 1)],
   },
+  {
+    name: 'Learn: Arpeggiator',
+    ja: '学ぶ：アルペジエーター',
+    cat: 'learn',
+    demo: 'chords',
+    note: [
+      '和音を押さえたままにすると、1 音ずつ順番に鳴ります。鍵盤の横の「アルペジオ ▾」で順番やオクターブを変えてみましょう。',
+      'Hold a chord and its notes play one by one. Try another order or more octaves under "Arpeggio ▾" next to the keyboard.',
+    ],
+    params: {
+      'arp.on': true, 'arp.octaves': 2, 'arp.gate': 0.45,
+      'oscA.unison': 3, 'oscA.detune': 0.12,
+      'filter.type': 'LP24', 'filter.cutoff': 900, 'filter.res': 0.25, 'filter.keytrack': 0.4,
+      'env2.attack': 0.001, 'env2.decay': 0.22, 'env2.sustain': 0,
+      'env1.decay': 0.4, 'env1.sustain': 0.2, 'env1.release': 0.18,
+      'delay.on': true, 'delay.mode': 'PingPong', 'delay.mix': 0.2, 'delay.divL': '1/8.', 'reverb.on': true, 'reverb.mix': 0.2,
+    },
+    mods: [mod('env2', 'filter.cutoff', 0.35)],
+  },
 
   // --- Bass ---------------------------------------------------------------------
   {

@@ -346,6 +346,14 @@ test('Serum export: values land in the right modules', async () => {
   assert.equal(data.tags[1], 'Mono');
 });
 
+test('Serum export: the arpeggiator is reported as not carried over', async () => {
+  const { store } = await makeStore();
+  store.fromJSON(PRESETS.find((p) => p.name === 'Learn: Arpeggiator'));
+  assert.ok(store.core.serumExport().notes.some((n) => n.code === 'arp'));
+  store.fromJSON(PRESETS.find((p) => p.name === 'Acid Line'));
+  assert.ok(!store.core.serumExport().notes.some((n) => n.code === 'arp'));
+});
+
 test('Serum export: wavetable WAV', async () => {
   const { store } = await makeStore();
   const wav = store.core.serumTableWav(store.info.tables.indexOf('PWM'));

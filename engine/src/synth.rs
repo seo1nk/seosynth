@@ -1,11 +1,12 @@
 //! The complete instrument: voice allocation, global modulation, effects,
 //! and the signal taps / telemetry the UI draws from.
 
+use crate::arp::{Arp, ArpEvent, ArpMode, ArpSettings};
 use crate::fx::{self, Ctx, FxChain};
 use crate::lfo::{self, sanitize_points, LfoMode, LfoPoint, LFO_TABLE};
 use crate::osc::{warp_phase, Warp};
 use crate::params::{
-    self, defs, master, osc, osc_idx, src, F_GLOBAL, F_MOD, F_SMOOTH, NUM_ENV, NUM_LFO,
+    self, arp, defs, master, osc, osc_idx, src, ARP_BASE, F_GLOBAL, F_MOD, F_SMOOTH, NUM_ENV, NUM_LFO,
     NUM_OSC, NUM_PARAMS, NUM_SLOTS,
 };
 use crate::patch::{ModSlot, Patch};
@@ -76,6 +77,11 @@ pub struct Synth {
     voice_slots: Vec<ActiveSlot>,
     global_slots: Vec<ActiveSlot>,
     fx: FxChain,
+    arp: Arp,
+    /// Whether the arpeggiator was on during the last block.
+    arp_was_on: bool,
+    /// Notes the voices are playing and have not been told to stop: the
+    /// keys, or the arpeggiator's notes while it is on.
     held: Vec<u8>,
     age: u64,
     last_pitch: Option<f32>,
@@ -130,6 +136,8 @@ impl Synth {
             voice_slots: Vec::with_capacity(NUM_SLOTS),
             global_slots: Vec::with_capacity(NUM_SLOTS),
             fx: FxChain::new(sr),
+            arp: Arp::new(),
+            arp_was_on: false,
             held: Vec::with_capacity(32),
             age: 0,
             last_pitch: None,
@@ -308,6 +316,11 @@ impl Synth {
 
     // --- performance input ---------------------------------------------------
 
+    fn arp_on(&self) -> bool {
+        self.patch.values[ARP_BASE + arp::ON] >= 0.5
+    }
+
+    /// A key goes down. With the arpeggiator on, it joins the pattern.
     pub fn note_on(&mut self, note: u8, velocity: f32) {
         let note = note.min(127);
         let velocity = velocity.max(0.0).min(1.0);
@@ -315,6 +328,21 @@ impl Synth {
             self.note_off(note);
             return;
         }
+        self.arp.press(note, velocity);
+        if !self.arp_on() {
+            self.voice_on(note, velocity);
+        }
+    }
+
+    /// A key comes up.
+    pub fn note_off(&mut self, note: u8) {
+        self.arp.release(note);
+        if !self.arp_on() {
+            self.voice_off(note);
+        }
+    }
+
+    fn voice_on(&mut self, note: u8, velocity: f32) {
         self.age += 1;
         self.held.retain(|n| *n != note);
         self.held.push(note);
@@ -360,7 +388,7 @@ impl Synth {
         self.last_pitch = Some(note as f32);
     }
 
-    pub fn note_off(&mut self, note: u8) {
+    fn voice_off(&mut self, note: u8) {
         self.held.retain(|n| *n != note);
         if self.smoothed[master::MONO] >= 0.5 {
             let v = &mut self.voices[0];
@@ -390,6 +418,9 @@ impl Synth {
     }
 
     pub fn all_notes_off(&mut self) {
+        self.arp.clear_keys();
+        self.arp.stop();
+        self.arp.events.clear();
         self.held.clear();
         for v in self.voices.iter_mut() {
             if v.active && v.gate {
@@ -400,6 +431,9 @@ impl Synth {
 
     /// Silence everything immediately.
     pub fn panic(&mut self) {
+        self.arp.clear_keys();
+        self.arp.stop();
+        self.arp.events.clear();
         self.held.clear();
         for v in self.voices.iter_mut() {
             v.kill();
@@ -464,6 +498,7 @@ impl Synth {
             }
         }
         let bpm = plain(&self.smoothed, master::BPM);
+        self.run_arp(n, bpm);
 
         // Free-running LFO clocks.
         let mut free_params = [None; NUM_LFO];
@@ -595,6 +630,55 @@ impl Synth {
         write(tap::OUT, &out_tap[..n], pos);
         self.tap_pos = (pos + n) & (tap::LEN - 1);
         peak
+    }
+
+    /// Switches the arpeggiator in or out and lets it play this block.
+    fn run_arp(&mut self, n: usize, bpm: f32) {
+        let on = self.arp_on();
+        if on != self.arp_was_on {
+            self.arp_was_on = on;
+            let keys: Vec<(u8, f32)> = self.arp.keys().collect();
+            if on {
+                // The keys held stop sounding as a chord and become the pattern.
+                for &(note, _) in keys.iter() {
+                    self.voice_off(note);
+                }
+            } else {
+                // The pattern stops; the keys still held sound as played.
+                self.arp.stop();
+                self.carry_out_arp();
+                for &(note, vel) in keys.iter() {
+                    self.voice_on(note, vel);
+                }
+            }
+        }
+        if !on {
+            return;
+        }
+        let p = |k: usize| plain(&self.smoothed, ARP_BASE + k);
+        let settings = ArpSettings {
+            mode: ArpMode::from_index(p(arp::MODE) as usize),
+            div: p(arp::DIV) as usize,
+            octaves: p(arp::OCTAVES) as u8,
+            gate: p(arp::GATE),
+            swing: p(arp::SWING),
+            bpm,
+            sr: self.sr,
+        };
+        self.arp.advance(n, &settings);
+        self.carry_out_arp();
+    }
+
+    fn carry_out_arp(&mut self) {
+        let events = std::mem::take(&mut self.arp.events);
+        for e in events.iter() {
+            match *e {
+                ArpEvent::On(note, vel) => self.voice_on(note, vel),
+                ArpEvent::Off(note) => self.voice_off(note),
+            }
+        }
+        self.arp.events = events;
+        self.arp.events.clear();
     }
 
     fn update_telemetry(&mut self, peak: (f32, f32)) {
@@ -1118,5 +1202,86 @@ mod tests {
         let (ra, rb) = (render(&mut a, 0.1), render(&mut b, 0.1));
         let diff = ra.iter().zip(rb.iter()).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
         assert!(diff < 1e-3, "max difference {diff}");
+    }
+
+    /// The note the newest voice plays, every 1/16 at 120 bpm (6000 samples
+    /// at 48 kHz), sampled in the middle of each step while the gate is open.
+    fn arp_notes(s: &mut Synth, steps: usize) -> Vec<f32> {
+        let mut notes = Vec::new();
+        for _ in 0..steps {
+            // 1500 samples in, then on to the next step.
+            for _ in 0..12 {
+                s.process(125);
+            }
+            notes.push(s.telemetry[tele::NOTE]);
+            for _ in 0..36 {
+                s.process(125);
+            }
+        }
+        notes
+    }
+
+    #[test]
+    fn the_arpeggiator_plays_the_held_keys_in_turn() {
+        let mut s = Synth::new(48_000.0);
+        s.patch.set_plain(ARP_BASE + arp::ON, 1.0);
+        s.patch.set_plain(ARP_BASE + arp::OCTAVES, 2.0);
+        s.snap();
+        s.note_on(64, 0.8);
+        s.note_on(60, 0.8);
+        assert_eq!(arp_notes(&mut s, 5), [60.0, 64.0, 72.0, 76.0, 60.0]);
+        // Only one note sounds at a time (the last one ringing out aside).
+        assert!(s.active_voices() <= 2, "{}", s.active_voices());
+        s.note_off(60);
+        s.note_off(64);
+        render(&mut s, 0.5);
+        assert_eq!(s.active_voices(), 0);
+    }
+
+    #[test]
+    fn switching_the_arpeggiator_while_keys_are_held() {
+        let mut s = Synth::new(48_000.0);
+        s.note_on(60, 0.8);
+        s.note_on(67, 0.8);
+        s.process(128);
+        assert_eq!(s.active_voices(), 2);
+        // On: the chord becomes the pattern.
+        s.set_param(ARP_BASE + arp::ON, 1.0);
+        assert_eq!(arp_notes(&mut s, 3), [60.0, 67.0, 60.0]);
+        // Off: the keys still held sound together again.
+        s.set_param(ARP_BASE + arp::ON, 0.0);
+        render(&mut s, 0.5);
+        assert_eq!(s.active_voices(), 2);
+        assert!(s.voices.iter().filter(|v| v.active).all(|v| v.gate));
+        s.all_notes_off();
+        s.set_param(ARP_BASE + arp::ON, 1.0);
+        render(&mut s, 0.5);
+        assert_eq!(s.active_voices(), 0, "all notes off also stops the pattern");
+    }
+
+    #[test]
+    fn a_tied_arpeggio_glides_in_mono_legato() {
+        let mut s = Synth::new(48_000.0);
+        s.patch.set_plain(master::MONO, 1.0);
+        s.patch.set_plain(master::LEGATO, 1.0);
+        s.patch.set_plain(ARP_BASE + arp::ON, 1.0);
+        s.patch.set_plain(ARP_BASE + arp::GATE, 1.0);
+        s.snap();
+        s.note_on(60, 0.8);
+        s.note_on(63, 0.8);
+        assert_eq!(arp_notes(&mut s, 4), [60.0, 63.0, 60.0, 63.0]);
+        assert!(s.voices[0].gate, "the note is held across the steps");
+    }
+
+    #[test]
+    fn a_tied_repeated_note_does_not_pile_up_voices() {
+        let mut s = Synth::new(48_000.0);
+        s.patch.set_plain(ARP_BASE + arp::ON, 1.0);
+        s.patch.set_plain(ARP_BASE + arp::GATE, 1.0);
+        s.snap();
+        s.note_on(60, 0.8);
+        arp_notes(&mut s, 6);
+        let gated = s.voices.iter().filter(|v| v.active && v.gate).count();
+        assert_eq!(gated, 1);
     }
 }

@@ -6,15 +6,19 @@
 //! Signal flow:
 //!
 //! ```text
+//! keys ─► ARP (when on) ─► voices, each of them:
+//!
 //! OSC A ─┐
-//! OSC B ─┼─► FILTER ─► AMP (Env 1) ─► FX chain ─► MASTER
-//! SUB   ─┤     ▲
-//! NOISE ─┘     └ each source can also bypass the filter
+//! OSC B ─┤
+//! OSC C ─┼─► FILTER 1 ─► FILTER 2 ─► AMP (Env 1) ─► FX chain ─► MASTER
+//! SUB   ─┤     ▲  (filter 2 in series, or beside filter 1)
+//! NOISE ─┘     └ each source can also bypass the filters
 //!
 //! Envelopes, LFOs, macros, velocity... ─► mod matrix ─► any knob
 //! ```
 
 pub mod api;
+pub mod arp;
 pub mod env;
 pub mod fft;
 pub mod filter;

@@ -943,6 +943,11 @@ pub fn build(patch: &Patch) -> (Value, Vec<String>, Vec<usize>) {
     if c.v("master.pitch") != 0.0 {
         c.note("masterPitch", "");
     }
+    // Serum 2 has an arpeggiator of its own, but how a preset stores it has
+    // not been worked out yet.
+    if c.on("arp.on") {
+        c.note("arp", "");
+    }
     d.set("Global0", module(global));
 
     mod_slots(&mut c, &mut d);

@@ -40,6 +40,8 @@ export interface Live {
   readonly active: boolean;
   readonly voices: number;
   readonly note: number;
+  /** The newest note is still held (not ringing out). */
+  readonly gate: boolean;
   readonly pitch: number;
   readonly peakL: number;
   readonly peakR: number;

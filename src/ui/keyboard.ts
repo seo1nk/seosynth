@@ -1,9 +1,10 @@
-// Playing notes: on-screen piano, computer keyboard, MIDI, and a small
-// phrase player so you can listen while both hands are on the knobs.
+// Playing notes: on-screen piano, computer keyboard, MIDI, the
+// arpeggiator's switch, and a small phrase player so you can listen while
+// both hands are on the knobs.
 
 import { h, clamp } from './dom.ts';
 import { noteName } from '../format.ts';
-import { Slider, Switch } from './controls.ts';
+import { Segmented, Select, Slider, Stepper, Switch } from './controls.ts';
 import type { App } from '../app.ts';
 
 const LOW = 36; // C2
@@ -41,6 +42,8 @@ const PHRASES: Record<string, Phrase> = {
   lead: { root: 60, steps: [0, null, 3, 7, null, 10, 12, null, 10, 7, null, 3, 5, null, 7, null], div: 2, gate: 0.85 },
   pad: { root: 48, steps: [[0, 7, 12, 15, 19], null, null, null, null, null, null, null, [-4, 3, 8, 12, 15], null, null, null, null, null, null, null], div: 1, gate: 7.6 },
   hit: { root: 60, steps: [0, null, null, null, -5, null, null, null], div: 1, gate: 0.5 },
+  // With the arpeggiator on: chords held for a bar each, for it to play.
+  chords: { root: 48, steps: [[0, 3, 7], null, null, null, [-4, 0, 3], null, null, null, [-7, -4, 0], null, null, null, [-2, 2, 5], null, null, null], div: 1, gate: 3.9 },
 };
 
 export class Keyboard {
@@ -60,6 +63,10 @@ export class Keyboard {
   readonly sustained = new Set<number>();
   /** Something was played since the page opened (the guide checks this). */
   played = false;
+  /** The key lit for the note the arpeggiator is playing. */
+  arpLit: HTMLElement | null = null;
+  /** The arpeggiator has been switched on here before (its tip is shown once). */
+  arpTold = false;
   readonly el: HTMLElement;
   midiBtn!: HTMLButtonElement;
   shiftOctave!: (d: number) => void;
@@ -71,6 +78,7 @@ export class Keyboard {
     this.app = app;
     this.el = this.#build();
     this.#bindComputerKeys();
+    app.onFrame((live) => this.#lightArp(live.gate ? live.note : -1));
   }
 
   // --- notes ------------------------------------------------------------------
@@ -216,6 +224,7 @@ export class Keyboard {
       },
       i18n.t('btn.hold'),
     );
+    const arp = this.#arpControls();
     this.midiBtn = h('button', { type: 'button', class: 'chip-toggle', 'aria-pressed': 'false', onclick: () => this.#connectMidi() }, i18n.t('kb.midi'));
     const bend = h('input', {
       type: 'range',
@@ -274,12 +283,82 @@ export class Keyboard {
           h('button', { type: 'button', class: 'step', 'aria-label': i18n.t('kb.octave.down'), onclick: () => shift(-1) }, '‹'),
           octLabel,
           h('button', { type: 'button', class: 'step', 'aria-label': i18n.t('kb.octave.up'), onclick: () => shift(1) }, '›'),
+          arp,
         ),
         h('div', { class: 'kb-row' }, holdBtn, this.midiBtn, settings),
         h('label', { class: 'kb-row' }, h('span', { class: 'ctl-label' }, i18n.sourceName('pitchBend')), bend),
       ),
       piano,
     );
+  }
+
+  // --- arpeggiator --------------------------------------------------------------
+
+  /** The arpeggiator's switch, and a button for its settings beside it. */
+  #arpControls(): HTMLElement {
+    const app = this.app;
+    const { store, i18n } = app;
+    const on = store.idx('arp.on');
+    const toggle = h(
+      'button',
+      {
+        type: 'button',
+        class: 'chip-toggle',
+        'aria-pressed': 'false',
+        title: i18n.t('kb.arp.help'),
+        onclick: () => {
+          const next = store.get(on) < 0.5;
+          store.set(on, next ? 1 : 0);
+          store.commit();
+          if (next && !this.arpTold) {
+            this.arpTold = true;
+            app.toast(i18n.t('kb.arp.tip'));
+          }
+        },
+      },
+      i18n.t('kb.arp'),
+    );
+    app.watch(on, (v) => toggle.setAttribute('aria-pressed', String(v >= 0.5)));
+    const more: HTMLButtonElement = h(
+      'button',
+      {
+        type: 'button',
+        class: 'chip-more',
+        'aria-haspopup': 'true',
+        'aria-label': i18n.t('kb.arp.settings'),
+        title: i18n.t('kb.arp.settings'),
+        onclick: () => {
+          const [content, scope] = app.inScope(() =>
+            h(
+              'div',
+              { class: 'menu play-settings arp-settings' },
+              h('div', { class: 'menu-title' }, i18n.nodeName('arp')),
+              h('p', { class: 'menu-note' }, i18n.nodeRole('arp')),
+              Switch(app, 'arp.on'),
+              Segmented(app, 'arp.mode', { class: 'wrap' }),
+              Select(app, 'arp.div', { arrows: true }),
+              Stepper(app, 'arp.octaves'),
+              Slider(app, 'arp.gate'),
+              Slider(app, 'arp.swing'),
+              Slider(app, 'master.bpm'),
+            ),
+          );
+          app.popover(more, content, { onClose: () => scope.dispose() });
+        },
+      },
+      '▾',
+    );
+    return h('span', { class: 'chip-split' }, toggle, more);
+  }
+
+  /** Lights the key of the note the arpeggiator is playing (-1: none). */
+  #lightArp(note: number): void {
+    const arpOn = this.app.store.plain('arp.on') >= 0.5;
+    const el = arpOn && note >= 0 ? (this.keyEls.get(note - this.octave * 12) ?? null) : null;
+    if (el === this.arpLit) return;
+    this.arpLit?.classList.remove('arp');
+    el?.classList.add('arp');
+    this.arpLit = el;
   }
 
   #bindComputerKeys() {
@@ -379,7 +458,9 @@ export class Keyboard {
     this.app.onDemo?.(true);
     const tick = () => {
       if (this.demo !== state) return;
-      const phrase = PHRASES[this.app.demoPhrase?.() ?? 'arp'] ?? PHRASES.arp;
+      // With the arpeggiator on, chords are held for it to play.
+      const name = this.app.store.plain('arp.on') >= 0.5 ? 'chords' : this.app.demoPhrase?.() ?? 'arp';
+      const phrase = PHRASES[name] ?? PHRASES.arp;
       const bpm = this.app.store.plain('master.bpm');
       const stepMs = 60000 / bpm / phrase.div;
       const entry = phrase.steps[state.step % phrase.steps.length];

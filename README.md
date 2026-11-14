@@ -39,6 +39,7 @@ Rust で書いたシンセエンジンを WebAssembly にして、ブラウザ�
 | うごき | エンベロープ ×3（AHDSR＋カーブ）、LFO ×4（プリセット波形または自分で描く、テンポ同期）、マクロ ×4、弾く強さ／音の高さ／MOD ホイールなど。最大 32 のつながり |
 | エフェクト | ハイパー、ディストーション、フランジャー、フェイザー、コーラス、ディレイ、コンプレッサー、リバーブ、EQ、全体フィルター。順番を入れ替え可能、同じものを 3 つまで重ねがけ、途中で 2 本に分岐（同じ音を 2 つに／低音と高音／中央と左右／左と右） |
 | 演奏 | 画面の鍵盤、PC キーボード、MIDI キーボード（Web MIDI）、「聴く」ボタンでのフレーズ再生、ポリ 16 声／モノ／レガート／グライド |
+| アルペジエーター | 押さえた鍵盤をテンポに合わせて 1 音ずつ鳴らします。順番 6 種（上へ／下へ／上下／弾いた順／ランダム／和音）、1 音の長さ（音符）、1〜4 オクターブ、音の長さ、スウィング。鍵盤の横のボタンでオン／オフし、鳴っている音の鍵盤が光ります |
 
 **共有と書き出し**
 
@@ -49,9 +50,10 @@ Rust で書いたシンセエンジンを WebAssembly にして、ブラウザ�
 ### Serum 2 への書き出し（ベータ版）
 
 - `.SerumPreset` は **公開されていない形式** です。コミュニティによる解析（下記）をもとに、ヘッダー＋JSON メタデータ＋Zstandard 圧縮した CBOR という構造で書き出しています
-- 書き出したファイルは、別実装の zstd／CBOR デコーダーで読み戻し、Serum 2 の初期プリセットとモジュール構成が一致することを確認しています。ただし **Serum 2 本体での読み込みは未確認** です（開発環境に Serum がないため）。読み込めない場合は Issue で教えてください
+- 書き出したファイルは、別実装の zstd／CBOR デコーダーで読み戻し、Serum 2 の初期プリセットとモジュール構成が一致することを確認しています。Serum 2 本体でも読み込み、おおむね意図どおりに鳴ることを確認しました。うまく読み込めない音色があれば Issue で教えてください
 - seosynth と Serum は別のシンセなので、同じ音にはなりません。スライダーの位置、つながり、エフェクトの順番を移し替えるものです。移し替えられなかった項目は、書き出しダイアログの「変換メモ」に表示されます
 - 重ねたエフェクトは、同じ種類のモジュールを並べて書き出します。分岐は Serum 側の配線の書き方が確認できていないため、1 本に並べ直して書き出します
+- アルペジエーターの設定は、Serum 側の書き方が確認できていないため移し替えません
 - Serum はウェーブテーブルを自分のフォルダから読み込むため、テーブルは WAV として別に書き出します。`Serum 2 Presets/Tables/seosynth/` に置いてください（ZIP にまとめてダウンロードできます）
 
 形式の調査で参考にしたもの：
@@ -91,6 +93,7 @@ flowchart LR
 
 **音の流れ**
 
+0. 鍵盤の音は、アルペジエーターがオンならいったんそこに集まり、テンポに合わせて 1 音ずつボイスに送られます。アルペジエーターは押さえている鍵盤をいつも覚えているので、和音を押さえたままオンにすればすぐ鳴り始め、オフにすれば押さえている和音がそのまま鳴ります。拍の位置は 32 サンプルごとの区切りで鳴らしますが、時計は端数まで持つのでずれていきません
 1. 1 ボイスごとに、オシレーター A・B・C（ウェーブテーブル）、サブ、ノイズ → フィルター → アンプ（エンベロープ 1）。音源ごとにフィルターを通すか迂回するかを選べます。フィルター 2 はフィルター 1 の後ろ（直列）か横（並列）につなぎ、並列では音源ごとにフィルター 1・2・両方を選びます（両方は半分ずつ足すので、素通しなら音量は変わりません）。FM・AM・RM の変調元は、A は B、B は A、C は A です
 2. 最大 16 ボイスを足し合わせ、エフェクトチェーンへ
 3. エフェクトは 10 種類 × 3 つ = 30 個のユニットで、並び順と「通る道」（本線・A・B）をユニットごとに持ちます。分岐は 1 か所までで、最初に道 A か B を持つユニットの位置で 2 本に分かれ、まとめ直されます。分け方は、同じ音を 2 つに／低音と高音（4 次の Linkwitz-Riley クロスオーバー）／中央と左右／左と右です
@@ -104,7 +107,7 @@ flowchart LR
 
 **パラメーターとモジュレーション**
 
-- 全 416 パラメーターを 1 つの表（`params.rs`）で管理します。値は 0〜1 に正規化して持ち、表示や計算のときに実際の単位へ変換します
+- 全 422 パラメーターを 1 つの表（`params.rs`）で管理します。値は 0〜1 に正規化して持ち、表示や計算のときに実際の単位へ変換します
 - 各パラメーターには変わらない「安定 ID」があり、保存形式はこの ID で記録します。パラメーターを足しても、古い URL やファイルはそのまま開けます
 - 17 のモジュレーション元（エンベロープ、LFO、弾く強さ、マクロなど）を最大 32 本、220 のパラメーターにつなげます。モジュレーションは正規化した値の上で足し合わせます。ボイスごとのもの（フィルターなど）と全体で 1 つのもの（エフェクトなど）を分けて計算します
 
@@ -150,6 +153,7 @@ engine/              Rust のシンセエンジン
   src/filter.rs        フィルター
   src/env.rs lfo.rs    エンベロープ、LFO
   src/voice.rs         1 ボイス：音源 → フィルター → アンプ
+  src/arp.rs           アルペジエーター（鍵盤とボイスのあいだ）
   src/fx/              エフェクトと、それを並べるチェーン（重ねがけ、分岐）
   src/synth.rs         ボイス管理、モジュレーション、タップとテレメトリ
   src/patch.rs         パッチと共有用バイナリ形式
@@ -187,10 +191,10 @@ seosynth is a wavetable synthesizer for the browser. The DSP engine is dependenc
 - **The whole sound as a graph.** The centre of the screen is a whiteboard you can drag and pinch-zoom. Nodes on the signal path have on/off switches, and the sound line runs through every node that is switched on to the output, brightening where sound flows. Sources run in parallel; effects that are off wait in a tray below. Effects can be stacked (up to three of each) and the chain can split into two lanes that run side by side (two copies, lows and highs, centre and sides, or left and right) and join again. Pressing a node opens its settings (a side panel on desktop, a bottom sheet on phones) with sliders, a picture of the sound going in and coming out, and an explanation.
 - **Movement on its own layer.** LFOs, envelopes, macros and playing gestures float on a separate plane. You add one, pick the node and slider it should move, and a coloured tag and dashed line show where it acts.
 - **Wavetables of your own.** Draw one cycle of the wave with the pointer and hear it change as you draw; add frames to make it morph. Or choose an audio file: its pitch is detected and its waveforms become the frames, all inside the browser. These tables travel in the share link too.
-- **Synth features** modelled on Serum's layout: three wavetable oscillators (22 generated tables plus two of your own, unison, 13 warp modes), sub, noise, two 19-type filters in series or parallel, 3 envelopes, 4 LFOs with drawable shapes, 4 macros, up to 32 connections and ten kinds of effect that can be reordered, stacked and run in parallel. Japanese and English, light and dark.
+- **Synth features** modelled on Serum's layout: three wavetable oscillators (22 generated tables plus two of your own, unison, 13 warp modes), sub, noise, two 19-type filters in series or parallel, 3 envelopes, 4 LFOs with drawable shapes, 4 macros, up to 32 connections and ten kinds of effect that can be reordered, stacked and run in parallel. An arpeggiator plays held keys in time with the tempo (six orders, note length, up to four octaves, gate, swing). Japanese and English, light and dark.
 - **Sharing.** The whole patch is encoded into the URL fragment, so a link is the preset. Presets can also be saved as JSON.
-- **Serum 2 export (beta).** Writes a `.SerumPreset` plus the wavetables as WAV. The format is unpublished and the export follows community reverse-engineering; files round-trip through independent decoders and match the structure of a real init preset, but loading in Serum 2 itself has not been verified yet. It is a translation of settings, not a clone of the sound.
+- **Serum 2 export (beta).** Writes a `.SerumPreset` plus the wavetables as WAV. The format is unpublished and the export follows community reverse-engineering; files round-trip through independent decoders, match the structure of a real init preset, and load in Serum 2 sounding broadly as intended. It is a translation of settings, not a clone of the sound; the arpeggiator is not carried over yet.
 
-**Architecture.** Everything runs in the browser; there is no server-side code. The Rust engine exposes plain `extern "C"` functions and describes itself as JSON (parameters, options, buffer layouts), so the UI holds no parameter tables of its own. Two instances run: one in the AudioWorklet makes the sound, one on the main thread holds the authoritative patch and draws previews. Each voice runs oscillators A, B and C, sub and noise into two filters (in series, or in parallel with each source choosing) and the amp; up to 16 voices feed a chain of 30 effect units (ten kinds, three copies each) with one optional fork into two lanes. All 416 parameters carry stable ids, so share links and files keep working as the synth grows. The engine records 46 signal taps and telemetry that drive the board's glowing lines, the scopes and the moving dots on sliders. The UI is plain DOM in TypeScript, compiled file by file to ES modules; a `Store` is the single entry point for edits and keeps undo history as patch snapshots.
+**Architecture.** Everything runs in the browser; there is no server-side code. The Rust engine exposes plain `extern "C"` functions and describes itself as JSON (parameters, options, buffer layouts), so the UI holds no parameter tables of its own. Two instances run: one in the AudioWorklet makes the sound, one on the main thread holds the authoritative patch and draws previews. Keys pass through the arpeggiator (when on) to the voices. Each voice runs oscillators A, B and C, sub and noise into two filters (in series, or in parallel with each source choosing) and the amp; up to 16 voices feed a chain of 30 effect units (ten kinds, three copies each) with one optional fork into two lanes. All 422 parameters carry stable ids, so share links and files keep working as the synth grows. The engine records 46 signal taps and telemetry that drive the board's glowing lines, the scopes and the moving dots on sliders. The UI is plain DOM in TypeScript, compiled file by file to ES modules; a `Store` is the single entry point for edits and keeps undo history as patch snapshots.
 
 License: [MIT](LICENSE).

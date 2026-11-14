@@ -228,6 +228,10 @@ const UI: Record<string, Pair> = {
   'kb.octave.up': ['オクターブを上げる', 'Octave up'],
   'kb.hold.help': ['オンにすると、鍵盤を離しても音が鳴り続けます。', 'When on, notes keep sounding after you let go.'],
   'kb.settings': ['弾き方の設定', 'Playing settings'],
+  'kb.arp': ['アルペジオ', 'Arpeggio'],
+  'kb.arp.help': ['オンにすると、押さえた鍵盤の音をテンポに合わせて 1 音ずつ鳴らします。', 'When on, the keys you hold are played one at a time, in time with the tempo.'],
+  'kb.arp.tip': ['和音を押さえたままにしてみましょう。▾ で順番や速さを変えられます。', 'Hold down a chord. Use ▾ to change the order and the speed.'],
+  'kb.arp.settings': ['アルペジエーターの設定', 'Arpeggiator settings'],
   'kb.midi': ['MIDI', 'MIDI'],
   'kb.midi.on': ['MIDI キーボードがつながりました', 'MIDI keyboard connected'],
   'kb.midi.none': ['MIDI 機器が見つかりません。つないでからもう一度押してください。', 'No MIDI device found. Connect one and press again.'],
@@ -333,6 +337,7 @@ const UI: Record<string, Pair> = {
   'serum.note.portamento': ['グライドは時間だけを移し替えています。', 'Glide: only the time was carried over.'],
   'serum.note.bendRange': ['ベンドの幅は上方向だけを設定しています。', 'Bend range: only the upward range was set.'],
   'serum.note.masterPitch': ['全体のピッチは移し替えていません。', 'The overall pitch offset was not carried over.'],
+  'serum.note.arp': ['アルペジエーターは移し替えていません。Serum 側でアルペジエーターをオンにしてください。', 'The arpeggiator was not carried over: switch on the arpeggiator in Serum.'],
   'serum.note.distApprox': ['ディストーションの {detail} は Downsample で代用しています。', 'Distortion {detail} is approximated by Downsample.'],
   'serum.note.delayLong': ['8 小節のディレイは Serum の最長（4 小節）にしています。', 'An 8-bar delay was shortened to Serum\'s longest (4 bars).'],
   'serum.note.split': [
@@ -353,6 +358,14 @@ const UI: Record<string, Pair> = {
 // Nodes on the signal path: [name, what it does, longer explanation].
 /** Nodes: [name, role, explanation]. */
 const NODE: Record<string, [Pair, Pair, Pair]> = {
+  arp: [
+    ['アルペジエーター', 'Arpeggiator'],
+    ['押さえた鍵盤の音を、テンポに合わせて 1 音ずつ鳴らします。', 'Plays the keys you hold one at a time, in time with the tempo.'],
+    [
+      'アルペジエーターは、押さえた和音をばらして順番に鳴らします。和音を押さえておくだけで、フレーズのように聞こえます。',
+      'The arpeggiator breaks the chord you hold into single notes and plays them in turn, so holding a chord already sounds like a phrase.',
+    ],
+  ],
   oscA: [
     ['オシレーター A', 'Oscillator A'],
     ['波形をくり返して音を出す', 'Repeats a waveform to make a tone'],
@@ -468,7 +481,7 @@ const PARAM: Record<string, [Pair, Pair]> = {
   'master.porta': [['グライド', 'Glide'], ['音程が次の音へすべるように移る時間。', 'Time for the pitch to slide to the next note.']],
   'master.portaAlways': [['いつもグライド', 'Always glide'], ['オン：いつもグライド。オフ：音を重ねて弾いたときだけ。', 'On: always glide. Off: only when notes overlap.']],
   'master.bendRange': [['ベンドの幅', 'Bend range'], ['ピッチベンドで動く音程の幅。', 'How far the pitch wheel bends.']],
-  'master.bpm': [['テンポ', 'Tempo'], ['テンポ（BPM）。同期したLFOやディレイ、デモ演奏の速さに使われます。', 'Tempo in BPM, used by synced LFOs, the delay and the demo player.']],
+  'master.bpm': [['テンポ', 'Tempo'], ['テンポ（BPM）。アルペジエーター、同期したLFOやディレイ、デモ演奏の速さに使われます。', 'Tempo in BPM, used by the arpeggiator, synced LFOs, the delay and the demo player.']],
   'master.velSens': [['弾く強さの効き', 'Velocity'], ['鍵盤を弾く強さが音量に影響する度合い。0%で常に同じ音量。', 'How much playing harder makes it louder. 0% means always the same.']],
   macro: [['マクロ', 'Macro'], ['自由に使えるスライダー。複数のスライダーにつなぐと、ひとつでまとめて動かせます。', 'A free slider. Connect it to several sliders to move them all at once.']],
 
@@ -634,6 +647,13 @@ const PARAM: Record<string, [Pair, Pair]> = {
   'fxfilter.var': [['バリエーション', 'Variation'], ['バリエーション。タイプによって働きが変わります。', 'Depends on the type.']],
   'fxfilter.mix': [['ミックス', 'Mix'], ['エフェクト音の割合。', 'Amount of the effect.']],
 
+  'arp.on': [['電源', 'On'], ['アルペジエーターを使うかどうか。オフにすると、押さえた音がそのまま鳴ります。', 'Switch the arpeggiator on or off. When off, the keys you hold sound as they are.']],
+  'arp.mode': [['順番', 'Order'], ['押さえた音を鳴らす順番。上へ・下へ・上下、弾いた順、ランダム、または全部いっしょ（和音）。', 'The order the held notes are played in: up, down, up and down, as played, random, or all together (chord).']],
+  'arp.div': [['1 音の長さ', 'Rate'], ['1 音ごとの間隔を音符で決めます。1/16 で 1 拍に 4 音です。', 'How far apart the notes are, as a note length. 1/16 plays four notes per beat.']],
+  'arp.octaves': [['オクターブ', 'Octaves'], ['何オクターブ上まで続けて鳴らすか。2 にすると、押さえた音を 1 オクターブ上でもう一度鳴らします。', 'How many octaves the pattern climbs. At 2 the held notes are played again an octave up.']],
+  'arp.gate': [['音の長さ', 'Gate'], ['1 音のうち音を鳴らしている長さ。短いと歯切れよく、100% で次の音とつながります。', 'How much of each step the note sounds. Short is crisp; at 100% each note runs into the next.']],
+  'arp.swing': [['スウィング', 'Swing'], ['2 音目ごとに少し遅らせて、はねたリズムにします。', 'Delays every second note for a bouncy, shuffled rhythm.']],
+
   'split.mode': [['分け方', 'Divide by'], ['音を 2 つの道にどう分けるか。', 'How the sound is divided between the two lanes.']],
   'split.freq': [['分ける高さ', 'Crossover'], ['この高さより下が低音の道、上が高音の道に進みます。', 'Sound below this goes to the lows lane, sound above it to the highs lane.']],
   'split.balance': [
@@ -697,6 +717,12 @@ const OPTION: Record<string, Pair> = {
   Env: ['一度だけ', 'Once'],
   Free: ['止めずに動かす', 'Free running'],
   Normal: ['ふつう', 'Normal'],
+  Up: ['上へ', 'Up'],
+  Down: ['下へ', 'Down'],
+  UpDown: ['上下', 'Up & down'],
+  Played: ['弾いた順', 'As played'],
+  Random: ['ランダム', 'Random'],
+  Chord: ['和音', 'Chord'],
   PingPong: ['左右に往復', 'Ping-pong'],
   Tap: ['左に 1 回、右にくり返し', 'One left, repeats right'],
   'User 1': ['自分のテーブル 1', 'My table 1'],

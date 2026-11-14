@@ -43,6 +43,29 @@ test('plays a note', async () => {
   assert.equal(e.telemetry()[e.info.tele.voices], 0);
 });
 
+test('the arpeggiator plays a held chord one note at a time', async () => {
+  const e = await make();
+  e.setPlain(e.idx('arp.on'), 1);
+  e.setPlain(e.idx('arp.mode'), e.params[e.idx('arp.mode')].options.indexOf('Down'));
+  const T = e.info.tele;
+  e.noteOn(60, 0.8);
+  e.noteOn(64, 0.8);
+  e.noteOn(67, 0.8);
+  // 1/16 at 120 bpm is 6000 samples at 48 kHz: look in the middle of each step.
+  const notes: number[] = [];
+  for (let step = 0; step < 4; step++) {
+    renderSeconds(e, 1500 / 48000);
+    notes.push(e.telemetry()[T.note]);
+    renderSeconds(e, 4500 / 48000);
+  }
+  assert.deepEqual(notes, [67, 64, 60, 67]);
+  e.noteOff(60);
+  e.noteOff(64);
+  e.noteOff(67);
+  renderSeconds(e, 0.5);
+  assert.equal(e.telemetry()[T.voices], 0);
+});
+
 test('parameter conversion and patch roundtrip', async () => {
   const e = await make();
   const cutoff = e.idx('filter.cutoff');
