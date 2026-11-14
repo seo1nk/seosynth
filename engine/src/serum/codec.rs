@@ -1,9 +1,10 @@
 //! Byte-level pieces of the preset container: a zstd frame writer that
-//! stores data uncompressed, MD5, and a WAV writer for wavetables.
+//! stores data uncompressed, and MD5.
 
 /// Wraps `data` in a valid Zstandard frame made of raw (uncompressed)
-/// blocks. Any zstd decoder reads it; presets are a few kilobytes, so
-/// skipping real compression costs nothing that matters.
+/// blocks. Any zstd decoder reads it. Without embedded wavetables a preset
+/// is a few kilobytes; each embedded table adds about 2.6 MB, which real
+/// compression would only partly win back (the samples are floats).
 pub fn zstd_store(data: &[u8]) -> Vec<u8> {
     const MAX_BLOCK: usize = 1 << 17;
     let mut out = Vec::with_capacity(data.len() + 16 + data.len() / MAX_BLOCK * 3);
@@ -78,40 +79,6 @@ pub fn md5_hex(data: &[u8]) -> String {
     state.iter().flat_map(|v| v.to_le_bytes()).map(|b| format!("{b:02x}")).collect()
 }
 
-/// Mono 32-bit float WAV with the `clm ` chunk that tells wavetable synths
-/// each cycle is `cycle` samples long.
-pub fn wavetable_wav(samples: &[f32], cycle: usize, sample_rate: u32) -> Vec<u8> {
-    let clm = format!("<!>{cycle} 10000000 wavetable (seosynth)");
-    let clm = clm.as_bytes();
-    let clm_pad = clm.len() % 2;
-    let data_len = samples.len() * 4;
-    let riff_len = 4 + (8 + 16) + (8 + clm.len() + clm_pad) + (8 + data_len);
-    let mut out = Vec::with_capacity(riff_len + 8);
-    out.extend_from_slice(b"RIFF");
-    out.extend_from_slice(&(riff_len as u32).to_le_bytes());
-    out.extend_from_slice(b"WAVE");
-    out.extend_from_slice(b"fmt ");
-    out.extend_from_slice(&16u32.to_le_bytes());
-    out.extend_from_slice(&3u16.to_le_bytes()); // IEEE float
-    out.extend_from_slice(&1u16.to_le_bytes()); // mono
-    out.extend_from_slice(&sample_rate.to_le_bytes());
-    out.extend_from_slice(&(sample_rate * 4).to_le_bytes());
-    out.extend_from_slice(&4u16.to_le_bytes());
-    out.extend_from_slice(&32u16.to_le_bytes());
-    out.extend_from_slice(b"clm ");
-    out.extend_from_slice(&(clm.len() as u32).to_le_bytes());
-    out.extend_from_slice(clm);
-    if clm_pad == 1 {
-        out.push(0);
-    }
-    out.extend_from_slice(b"data");
-    out.extend_from_slice(&(data_len as u32).to_le_bytes());
-    for s in samples {
-        out.extend_from_slice(&s.to_le_bytes());
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,19 +129,5 @@ mod tests {
             let data: Vec<u8> = (0..len).map(|i| (i * 31 % 251) as u8).collect();
             assert_eq!(unstore(&zstd_store(&data)), data, "len {len}");
         }
-    }
-
-    #[test]
-    fn wav_layout() {
-        let wav = wavetable_wav(&[0.0, 0.5, -0.5, 1.0], 2, 44_100);
-        assert_eq!(&wav[..4], b"RIFF");
-        assert_eq!(u32::from_le_bytes([wav[4], wav[5], wav[6], wav[7]]) as usize, wav.len() - 8);
-        assert_eq!(&wav[8..16], b"WAVEfmt ");
-        let clm = wav.windows(4).position(|w| w == b"clm ").unwrap();
-        assert!(std::str::from_utf8(&wav[clm + 8..clm + 12]).unwrap().starts_with("<!>2"));
-        let data = wav.windows(4).position(|w| w == b"data").unwrap();
-        assert_eq!(data % 2, 0, "chunks are word aligned");
-        assert_eq!(u32::from_le_bytes([wav[data + 4], wav[data + 5], wav[data + 6], wav[data + 7]]), 16);
-        assert_eq!(wav.len(), data + 8 + 16);
     }
 }

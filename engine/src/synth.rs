@@ -850,9 +850,9 @@ impl Synth {
         self.bank.get(table).render_cycle(pos, out);
     }
 
-    /// The wavetable bank, for exporting tables.
-    pub fn bank_mut(&mut self) -> &mut Bank {
-        &mut self.bank
+    /// The patch as a Serum 2 preset, with its wavetables embedded.
+    pub fn serum_export(&mut self) -> crate::serum::Export {
+        crate::serum::pack(&self.patch, &mut self.bank)
     }
 
     pub fn table_frames(&mut self, table: usize) -> usize {

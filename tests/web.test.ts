@@ -274,8 +274,6 @@ test('value formatting', async () => {
 
 // --- Serum 2 export -------------------------------------------------------------
 
-import { zip, crc32 } from '../src/zip.ts';
-
 /** A decoded CBOR value: its shape is whatever the exporter wrote. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Cbor = any;
@@ -299,6 +297,7 @@ function decodeCbor(bytes: Uint8Array): Cbor {
     if (major === 7) {
       if (info === 20) return false;
       if (info === 21) return true;
+      if (info === 26) return (i += 4), view.getFloat32(i - 4);
       if (info === 27) return (i += 8), view.getFloat64(i - 8);
       throw new Error(`unsupported simple value ${info}`);
     }
@@ -356,7 +355,7 @@ test('Serum export: every preset produces a well-formed file', async () => {
   const { store } = await makeStore();
   for (const preset of PRESETS) {
     store.fromJSON(preset);
-    const { preset: file, notes, tables } = store.core.serumExport();
+    const { preset: file, notes } = store.core.serumExport();
     const { meta, data } = unpackSerum(file);
     assert.equal(meta.fileType, 'SerumPreset');
     assert.equal(meta.product, 'Serum2');
@@ -364,12 +363,20 @@ test('Serum export: every preset produces a well-formed file', async () => {
     assert.match(meta.hash, /^[0-9a-f]{32}$/);
     assert.equal(Object.keys(data).length, 175, `${preset.name}: module count`);
     assert.equal(data.presetName, preset.name);
-    assert.equal(notes[0].code, 'tables');
-    // Every table the preset points at is offered for download, and nothing else.
-    const referenced = ['Oscillator0', 'Oscillator1']
-      .filter((o) => data[o].plainParams.kParamEnable === 1)
-      .map((o, k) => data[o][`WTOsc${o.at(-1)}`].relativePathToWT);
-    assert.deepEqual([...new Set(referenced)].sort(), tables.map((t) => t.path).sort(), preset.name);
+    // Oscillators that are on carry their table; the others point at Serum's own.
+    for (const o of [0, 1, 2]) {
+      const osc = data[`Oscillator${o}`];
+      const wt = osc[`WTOsc${o}`];
+      if (osc.plainParams.kParamEnable === 1) {
+        assert.equal(wt.embeddedWTData.length, wt.numFrames, `${preset.name}: oscillator ${o}`);
+        assert.equal(wt.numFrames % 2048, 0);
+        assert.ok(wt.embeddedWTData.every((v: number) => Math.abs(v) <= 1.0001));
+        assert.equal(wt.relativePathToWT, undefined);
+      } else {
+        assert.equal(wt.relativePathToWT, 'S2 Tables/Default Shapes.wav');
+        assert.equal(wt.embeddedWTData, undefined);
+      }
+    }
     // Effects: one rack entry per enabled unit.
     const enabled = store.info.fx.filter((k) => store.plain(`${k}.on`) >= 0.5).length;
     assert.equal(data.FXRack0.FX.length, enabled, `${preset.name}: effect count`);
@@ -393,42 +400,16 @@ test('Serum export: values land in the right modules', async () => {
   assert.equal(data.tags[1], 'Mono');
 });
 
-test('Serum export: the arpeggiator is reported as not carried over', async () => {
+test('Serum export: the arpeggiator is switched on in Serum', async () => {
   const { store } = await makeStore();
   store.fromJSON(PRESETS.find((p) => p.name === 'Learn: Arpeggiator'));
-  assert.ok(store.core.serumExport().notes.some((n) => n.code === 'arp'));
+  const arp = store.core.serumExport();
+  assert.equal(unpackSerum(arp.preset).data.Arp0.plainParams.kParamEnabled, 1);
+  assert.ok(arp.notes.some((n) => n.code === 'arp'), 'its settings are reported');
   store.fromJSON(PRESETS.find((p) => p.name === 'Acid Line'));
-  assert.ok(!store.core.serumExport().notes.some((n) => n.code === 'arp'));
-});
-
-test('Serum export: wavetable WAV', async () => {
-  const { store } = await makeStore();
-  const wav = store.core.serumTableWav(store.info.tables.indexOf('PWM'));
-  const text = new TextDecoder('latin1').decode(wav.subarray(0, 120));
-  assert.ok(text.startsWith('RIFF'));
-  assert.ok(text.includes('<!>2048'), 'cycle length marker for wavetable synths');
-  const view = new DataView(wav.buffer);
-  assert.equal(view.getUint32(4, true), wav.length - 8);
-  const samples = new Float32Array(wav.buffer.slice(wav.length - 256 * 2048 * 4));
-  assert.ok(samples.every((v) => Math.abs(v) <= 1.0001));
-  assert.ok(samples.some((v) => Math.abs(v) > 0.9));
-});
-
-test('zip writer', () => {
-  assert.equal(crc32(new TextEncoder().encode('123456789')), 0xcbf43926);
-  const archive = zip([
-    { name: 'a.txt', data: 'hello' },
-    { name: 'Tables/seosynth/音.wav', data: Uint8Array.from([1, 2, 3, 4]) },
-  ]);
-  const view = new DataView(archive.buffer);
-  assert.equal(view.getUint32(0, true), 0x04034b50);
-  const end = archive.length - 22;
-  assert.equal(view.getUint32(end, true), 0x06054b50);
-  assert.equal(view.getUint16(end + 10, true), 2);
-  const dirStart = view.getUint32(end + 16, true);
-  assert.equal(view.getUint32(dirStart, true), 0x02014b50);
-  // Stored data is readable in place.
-  assert.equal(new TextDecoder().decode(archive.subarray(30 + 5, 30 + 5 + 5)), 'hello');
+  const plain = store.core.serumExport();
+  assert.equal(unpackSerum(plain.preset).data.Arp0.activeClip, -1);
+  assert.ok(!plain.notes.some((n) => n.code === 'arp'));
 });
 
 test('effect chain: stacking, lanes and the fork', async () => {

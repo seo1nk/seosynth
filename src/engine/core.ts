@@ -243,11 +243,10 @@ export class EngineCore {
   }
 
   /**
-   * The current patch as a Serum 2 preset.
-   * `notes` lists what could not be translated exactly ({ code, detail });
-   * `tables` are the wavetables the preset expects in Serum's Tables folder.
+   * The current patch as a Serum 2 preset, with its wavetables embedded.
+   * `notes` lists what could not be translated exactly ({ code, detail }).
    */
-  serumExport(): { preset: Uint8Array<ArrayBuffer>; notes: SerumNote[]; tables: { index: number; path: string }[] } {
+  serumExport(): { preset: Uint8Array<ArrayBuffer>; notes: SerumNote[] } {
     const preset = this.#blob(this.x.serum_export());
     const notes = this.#readString(this.x.serum_notes())
       .split('\n')
@@ -256,12 +255,7 @@ export class EngineCore {
         const [code, detail = ''] = line.split('\t');
         return { code, detail };
       });
-    const count = this.x.serum_tables();
-    const tables = Array.from(this.#bytes().subarray(0, count)).map((index) => ({
-      index,
-      path: this.#readString(this.x.serum_table_path(index)),
-    }));
-    return { preset, notes, tables };
+    return { preset, notes };
   }
 
   /**
@@ -273,11 +267,6 @@ export class EngineCore {
     const frames = this.x.table_raw(index);
     const bytes = this.#blob(frames * 2048 * 4);
     return new Float32Array(bytes.buffer, bytes.byteOffset, frames * 2048);
-  }
-
-  /** A wavetable of the bank as a WAV file Serum can load. */
-  serumTableWav(index: number): Uint8Array<ArrayBuffer> {
-    return this.#blob(this.x.serum_table_wav(index));
   }
 
   // --- audio (tests and offline rendering) -----------------------------------

@@ -8,6 +8,9 @@ pub enum Value {
     Num(f64),
     Str(String),
     List(Vec<Value>),
+    /// An array of single-precision floats, each written as a CBOR float32
+    /// (how Serum stores the samples of an embedded wavetable).
+    F32s(Vec<f32>),
     /// Key order does not matter here; writers sort the keys.
     Map(Vec<(String, Value)>),
 }
@@ -115,6 +118,14 @@ impl Value {
                     v.write_cbor(out);
                 }
             }
+            Value::F32s(items) => {
+                head(out, 4, items.len() as u64);
+                out.reserve(items.len() * 5);
+                for v in items {
+                    out.push(0xfa);
+                    out.extend_from_slice(&v.to_bits().to_be_bytes());
+                }
+            }
             Value::Map(pairs) => {
                 head(out, 5, pairs.len() as u64);
                 for (k, v) in Self::sorted(pairs) {
@@ -158,6 +169,10 @@ impl Value {
                     v.write_json(out);
                 }
                 out.push(']');
+            }
+            Value::F32s(items) => {
+                let items: Vec<Value> = items.iter().map(|v| Value::Num(*v as f64)).collect();
+                Value::List(items).write_json(out);
             }
             Value::Map(pairs) => {
                 out.push('{');
@@ -225,6 +240,7 @@ mod tests {
         assert_eq!(Value::Int(-100).to_cbor(), [0x38, 0x63]);
         assert_eq!(Value::Num(1.1).to_cbor(), [0xfb, 0x3f, 0xf1, 0x99, 0x99, 0x99, 0x99, 0x99, 0x9a]);
         assert_eq!(Value::Bool(true).to_cbor(), [0xf5]);
+        assert_eq!(Value::F32s(vec![1.5, -0.25]).to_cbor(), [0x82, 0xfa, 0x3f, 0xc0, 0, 0, 0xfa, 0xbe, 0x80, 0, 0]);
         assert_eq!(Value::from("IETF").to_cbor(), [0x64, 0x49, 0x45, 0x54, 0x46]);
         assert_eq!(Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]).to_cbor(), [0x83, 1, 2, 3]);
         // {"a": 1, "b": [2, 3]}, given out of order to check sorting.

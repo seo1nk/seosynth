@@ -340,25 +340,19 @@ const UI: Record<string, Pair> = {
     'Converts the current sound into a Serum 2 preset (.SerumPreset). seosynth and Serum are different synths, so it will not sound identical: slider positions, connections and the effect order are carried over as far as they can be.',
   ],
   'serum.caveat': [
-    'この機能はベータ版です。.SerumPreset は公開されていない形式で、コミュニティの解析結果をもとに書き出しています。Serum 2 本体で正しく開けるかは、まだ確認できていません。',
-    'This feature is in beta. The .SerumPreset format is not published; this export follows what the community has worked out, and opening it in Serum 2 itself has not been verified yet.',
+    'この機能はベータ版です。.SerumPreset は公開されていない形式で、コミュニティの解析結果と、Serum 2 で保存されたプリセットの中身をもとに書き出しています。',
+    'This feature is in beta. The .SerumPreset format is not published; this export follows what the community has worked out and what presets saved by Serum 2 contain.',
   ],
-  'beta': ['ベータ版', 'Beta'],
-  'beta.help': ['試験的な機能です。うまく動かないことがあります。', 'An experimental feature that may not work as expected.'],
-  'serum.step1': ['1. プリセット', '1. The preset'],
-  'serum.step2': ['2. ウェーブテーブル', '2. The wavetables'],
-  'serum.tables.help': [
-    'Serum はウェーブテーブルを自分のフォルダから読み込みます。下の WAV を「Serum 2 Presets」フォルダの中の Tables / seosynth フォルダ（なければ作成）に入れてください。',
-    'Serum loads wavetables from its own folder. Put the WAV files below into Tables / seosynth inside your "Serum 2 Presets" folder (create the folder if needed).',
+  'serum.save': ['プリセットをダウンロード', 'Download the preset'],
+  'serum.where': [
+    '{name} を Serum 2 のプリセットフォルダ（Serum 2 Presets/Presets/User など）に入れるか、Serum 2 のメニューから読み込みます。ウェーブテーブルはプリセットの中に入っているので、別に入れる必要はありません。',
+    'Put {name} into your Serum 2 preset folder (for example Serum 2 Presets/Presets/User), or load it from Serum 2\'s menu. The wavetables are inside the preset, so there is nothing else to install.',
   ],
-  'serum.tables.none': ['この音色はウェーブテーブルを使っていません。', 'This sound uses no wavetables.'],
-  'serum.zip': ['まとめてダウンロード（.zip）', 'Download everything (.zip)'],
-  'serum.download': ['ダウンロード', 'Download'],
   'serum.notes': ['変換メモ', 'Conversion notes'],
-  'serum.note.tables': ['ウェーブテーブルは別ファイルです。手順 2 のとおり Serum 側に置いてください。', 'Wavetables are separate files: install them as described in step 2.'],
+  'serum.notes.none': ['すべての設定を移し替えられました。', 'Everything was carried over.'],
   'serum.note.noise': [
-    'ノイズ（{detail}）は Serum の内蔵ノイズで代用しています。Serum 側で近いノイズを選び直してください。',
-    'The noise ({detail}) is replaced by one of Serum\'s stock noises. Pick the closest one in Serum.',
+    'ノイズ（{detail}）は Serum のホワイトノイズにしています。Serum 側で近いノイズを選び直してください。',
+    'The noise ({detail}) became Serum\'s white noise. Pick the closest noise in Serum.',
   ],
   'serum.note.filterType': ['{detail} は、近そうな Serum のフィルターを推定で指定しています。', '{detail}: the closest Serum filter type was guessed.'],
   'serum.note.warpApprox': ['{detail} は Serum の近いワープで代用しています。', '{detail} is approximated by the nearest Serum warp.'],
@@ -370,7 +364,10 @@ const UI: Record<string, Pair> = {
   'serum.note.bendRange': ['ベンドの幅は上方向だけを設定しています。', 'Bend range: only the upward range was set.'],
   'serum.note.masterPitch': ['全体のピッチは移し替えていません。', 'The overall pitch offset was not carried over.'],
   'serum.note.clip': ['クリップシーケンサーのフレーズは移し替えていません。', 'The clip sequencer\'s phrase was not carried over.'],
-  'serum.note.arp': ['アルペジエーターは移し替えていません。Serum 側でアルペジエーターをオンにしてください。', 'The arpeggiator was not carried over: switch on the arpeggiator in Serum.'],
+  'serum.note.arp': [
+    'Serum のアルペジエーターをオンにしていますが、速さ・順番・オクターブ・長さは移し替えていません。Serum 側で合わせてください。',
+    'Serum\'s arpeggiator is switched on, but its rate, order, octaves and gate were not carried over: set them in Serum.',
+  ],
   'serum.note.distApprox': ['ディストーションの {detail} は Downsample で代用しています。', 'Distortion {detail} is approximated by Downsample.'],
   'serum.note.delayLong': ['8 小節のディレイは Serum の最長（4 小節）にしています。', 'An 8-bar delay was shortened to Serum\'s longest (4 bars).'],
   'serum.note.split': [
@@ -382,10 +379,6 @@ const UI: Record<string, Pair> = {
     'Filter 2 settings are exported, but how it is connected (series or parallel, which source into which filter) is not: how Serum stores it is not known.',
   ],
   'serum.note.reverbDecay': ['Plate リバーブの長さは Serum ではサイズで決まるため、「長さ」は移し替えていません。', 'Plate reverb: Serum sets its length by size, so the decay was not carried over.'],
-  'serum.readme': [
-    'seosynth から書き出した Serum 2 用プリセットです。\n\n1. .SerumPreset ファイルを Serum 2 のプリセットフォルダ（Serum 2 Presets/Presets/User など）に入れるか、Serum 2 のメニューから読み込みます。\n2. Tables/seosynth フォルダの中の WAV を、Serum 2 Presets/Tables/seosynth に入れます（フォルダがなければ作成）。\n\nseosynth と Serum は別のシンセなので、同じ音にはなりません。',
-    'A Serum 2 preset exported from seosynth.\n\n1. Put the .SerumPreset file into your Serum 2 preset folder (for example Serum 2 Presets/Presets/User), or load it from Serum 2\'s menu.\n2. Copy the WAV files in Tables/seosynth into Serum 2 Presets/Tables/seosynth (create the folder if needed).\n\nseosynth and Serum are different synths, so the result will not sound identical.',
-  ],
 };
 
 // Nodes on the signal path: [name, what it does, longer explanation].

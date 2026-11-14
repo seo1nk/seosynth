@@ -438,45 +438,28 @@ fn set_blob(bytes: Vec<u8>) -> usize {
 }
 
 /// Start of the buffer holding the result of the last `serum_export` or
-/// `serum_table_wav` call (these can be larger than the IO buffer).
+/// `table_raw` call (these can be larger than the IO buffer).
 #[no_mangle]
 pub extern "C" fn blob_ptr() -> *const u8 {
     unsafe { (*addr_of_mut!(BLOB)).as_ptr() }
 }
 
+static mut SERUM_NOTES: String = String::new();
+
 /// Builds a Serum 2 `.SerumPreset` from the current patch. Returns its
 /// length; the bytes are at `blob_ptr()`.
 #[no_mangle]
 pub extern "C" fn serum_export() -> usize {
-    set_blob(crate::serum::pack(&synth().patch).bytes)
+    let export = synth().serum_export();
+    unsafe { *addr_of_mut!(SERUM_NOTES) = export.notes.join("\n") };
+    set_blob(export.bytes)
 }
 
-/// Notes about what the Serum export could not translate exactly, one per
-/// line as `code` or `code<TAB>detail`. Written to the IO buffer.
+/// Notes about what the last `serum_export` could not translate exactly,
+/// one per line as `code` or `code<TAB>detail`. Written to the IO buffer.
 #[no_mangle]
 pub extern "C" fn serum_notes() -> usize {
-    write_bytes(crate::serum::pack(&synth().patch).notes.join("\n").as_bytes())
-}
-
-/// Indices of the wavetables the exported preset refers to, one byte each,
-/// written to the IO buffer. Returns how many.
-#[no_mangle]
-pub extern "C" fn serum_tables() -> usize {
-    let tables: Vec<u8> = crate::serum::pack(&synth().patch).tables.iter().map(|t| *t as u8).collect();
-    write_bytes(&tables)
-}
-
-/// A wavetable (factory or user) as a WAV file for Serum. Returns its
-/// length; the bytes are at `blob_ptr()`.
-#[no_mangle]
-pub extern "C" fn serum_table_wav(table: usize) -> usize {
-    set_blob(crate::serum::table_wav(synth().bank_mut(), table))
-}
-
-/// Path of that file relative to Serum's Tables folder, in the IO buffer.
-#[no_mangle]
-pub extern "C" fn serum_table_path(table: usize) -> usize {
-    write_bytes(format!("{}/{}", crate::serum::TABLE_DIR, crate::serum::table_file_name(&synth().patch, table)).as_bytes())
+    write_bytes(unsafe { (*addr_of_mut!(SERUM_NOTES)).as_bytes() })
 }
 
 // --- self description ---------------------------------------------------------

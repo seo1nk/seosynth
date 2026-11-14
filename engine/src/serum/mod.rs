@@ -8,8 +8,8 @@
 //! The two synths are different instruments, so this is a best-effort
 //! translation of the patch, not a clone of the sound. Everything that could
 //! not be carried over is reported back as a note so the UI can tell the user.
-//! Serum loads wavetables from its own folder by path, so the tables a patch
-//! uses are exported separately as WAV files (`table_wav`).
+//! The wavetables a patch uses are embedded in the preset, as Serum itself
+//! does for tables made in its editor, so the export is one file.
 
 pub mod codec;
 pub mod value;
@@ -18,14 +18,16 @@ use crate::lfo::{LfoKind, LfoPoint};
 use crate::params::{self, defs, unit_key, DIVISIONS, FX_KEYS, NUM_ENV, NUM_FX, NUM_LFO, NUM_MACRO, NUM_OSC};
 use crate::patch::Patch;
 use crate::tables::TABLE_NAMES;
-use crate::wavetable::{Bank, FACTORY_TABLES, TABLE_SIZE, USER_TABLES};
+use crate::wavetable::{Bank, FACTORY_TABLES, TABLE_SIZE};
 use value::{empty, map, Value};
 
-/// Folder (inside Serum's Tables folder) the exported wavetables belong in.
-pub const TABLE_DIR: &str = "seosynth";
-/// Exported tables are pre-morphed to this many frames so they glide
+/// Embedded tables are pre-morphed to this many frames so they glide
 /// smoothly in Serum regardless of its interpolation setting.
 pub const TABLE_FRAMES: usize = 256;
+/// Serum 2's own init table (9 frames), which the oscillators that are off
+/// refer to, so nothing is embedded for them.
+const DEFAULT_TABLE: &str = "S2 Tables/Default Shapes.wav";
+const DEFAULT_TABLE_SAMPLES: i64 = 9 * 2048;
 
 const PRODUCT_VERSION: &str = "2.0.24";
 const FORMAT_VERSION: f64 = 9.0;
@@ -35,31 +37,28 @@ pub struct Export {
     pub bytes: Vec<u8>,
     /// What could not be translated exactly: `code` or `code\tdetail`.
     pub notes: Vec<String>,
-    /// The wavetables the preset refers to, as indices into the bank.
-    pub tables: Vec<usize>,
 }
 
-/// File name of a table of the bank. A user table is named after what is in
-/// it, so tables from different presets do not overwrite each other in
-/// Serum's folder.
-pub fn table_file_name(patch: &Patch, index: usize) -> String {
-    if index < FACTORY_TABLES {
-        return format!("{}.wav", TABLE_NAMES[index]);
-    }
-    let table = &patch.user_tables[(index - FACTORY_TABLES).min(USER_TABLES - 1)];
-    // FNV-1a over the points.
-    let hash = table.points().iter().fold(0x811c_9dc5u32, |h, p| (h ^ *p as u8 as u32).wrapping_mul(0x0100_0193));
-    format!("User {hash:08x}.wav")
-}
-
-/// A wavetable of the bank as a WAV file Serum can load.
-pub fn table_wav(bank: &mut Bank, index: usize) -> Vec<u8> {
+/// The samples of a table of the bank as they are embedded: frames of
+/// `TABLE_SIZE` samples, one for a single-cycle table and otherwise
+/// `TABLE_FRAMES` pre-morphed ones.
+pub fn table_samples(bank: &mut Bank, index: usize) -> Vec<f32> {
     let table = bank.get(index);
-    let mut samples = vec![0.0f32; TABLE_FRAMES * TABLE_SIZE];
+    let frames = if table.frames <= 1 { 1 } else { TABLE_FRAMES };
+    let mut samples = vec![0.0f32; frames * TABLE_SIZE];
     for (f, frame) in samples.chunks_mut(TABLE_SIZE).enumerate() {
-        table.render_cycle(f as f32 / (TABLE_FRAMES - 1) as f32, frame);
+        table.render_cycle(f as f32 / (frames - 1).max(1) as f32, frame);
     }
-    codec::wavetable_wav(&samples, TABLE_SIZE, 44_100)
+    samples
+}
+
+/// The name Serum shows for an embedded table.
+fn table_name(index: usize) -> String {
+    if index < FACTORY_TABLES {
+        TABLE_NAMES[index].to_string()
+    } else {
+        format!("User {}", index - FACTORY_TABLES + 1)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -68,7 +67,10 @@ pub fn table_wav(bank: &mut Bank, index: usize) -> Vec<u8> {
 
 struct Ctx<'a> {
     patch: &'a Patch,
+    bank: &'a mut Bank,
     notes: Vec<String>,
+    /// Tables rendered so far, so two oscillators on one table share the work.
+    rendered: Vec<(usize, Vec<f32>)>,
 }
 
 impl<'a> Ctx<'a> {
@@ -175,14 +177,10 @@ fn filter_type(c: &mut Ctx, name: &str, context: &str) -> &'static str {
 // Modules
 // ---------------------------------------------------------------------------
 
-fn oscillator(c: &mut Ctx, o: usize, tables: &mut Vec<usize>) -> Value {
+fn oscillator(c: &mut Ctx, o: usize) -> Value {
     let name = params::OSC_NAMES[o];
     let label = ["OSC A", "OSC B", "OSC C"][o];
     let k = |p: &str| format!("{name}.{p}");
-    let table = c.patch.table_index(o);
-    if c.on(&k("on")) && !tables.contains(&table) {
-        tables.push(table);
-    }
 
     let mut wt = vec![
         ("kParamTablePos", num(1.0 + c.v(&k("pos")) * 255.0)),
@@ -216,7 +214,32 @@ fn oscillator(c: &mut Ctx, o: usize, tables: &mut Vec<usize>) -> Value {
         wt.push(("kParamWarp", num(c.v(&k("warpAmt")))));
     }
 
-    let wt_key = format!("WTOsc{o}");
+    // An oscillator that is on carries its table; one that is off points at
+    // Serum's init table.
+    let mut wt_module = if c.on(&k("on")) {
+        let table = c.patch.table_index(o);
+        let samples = match c.rendered.iter().find(|(t, _)| *t == table) {
+            Some((_, s)) => s.clone(),
+            None => {
+                let s = table_samples(c.bank, table);
+                c.rendered.push((table, s.clone()));
+                s
+            }
+        };
+        map(vec![
+            ("numFrames", Value::Int(samples.len() as i64)),
+            ("embeddedWTData", Value::F32s(samples)),
+            ("interpolateAfterLoad", Value::Int(0)),
+            ("tableDisplayName", Value::from(table_name(table))),
+        ])
+    } else {
+        map(vec![("numFrames", Value::Int(DEFAULT_TABLE_SAMPLES)), ("relativePathToWT", Value::from(DEFAULT_TABLE))])
+    };
+    wt_module.set("flex", empty());
+    wt_module.set("numChannels", Value::Int(1));
+    wt_module.set("plainParams", plain(wt));
+    wt_module.set("sampleRate", Value::Int(44_100));
+
     let params = vec![
         ("kParamEnable", flag(c.on(&k("on")))),
         ("kParamVolume", num(c.v(&k("level")))),
@@ -233,17 +256,7 @@ fn oscillator(c: &mut Ctx, o: usize, tables: &mut Vec<usize>) -> Value {
     for engine in ["GranularOsc", "MultiSampleOsc", "SampleOsc", "SpectralOsc"] {
         m.set(&format!("{engine}{o}"), default_module());
     }
-    m.set(
-        &wt_key,
-        map(vec![
-            ("flex", empty()),
-            ("numChannels", Value::Int(1)),
-            ("numFrames", Value::Int((TABLE_FRAMES * TABLE_SIZE) as i64)),
-            ("plainParams", plain(wt)),
-            ("relativePathToWT", Value::from(format!("{TABLE_DIR}/{}", table_file_name(c.patch, table)))),
-            ("sampleRate", Value::Int(44_100)),
-        ]),
-    );
+    m.set(&format!("WTOsc{o}"), wt_module);
     m.set("plainParams", plain(params));
     m
 }
@@ -251,10 +264,10 @@ fn oscillator(c: &mut Ctx, o: usize, tables: &mut Vec<usize>) -> Value {
 
 fn noise(c: &mut Ctx) -> Value {
     let on = c.on("noise.on");
-    if on {
-        // Serum's noise oscillator plays samples from its library; the
-        // closest stock sample is chosen and the user is told to check it.
-        let kind = c.option("noise.type");
+    // Serum's noise oscillator plays a sample from its library or plain
+    // white noise; the other colours are reported.
+    let kind = c.option("noise.type");
+    if on && kind != "White" {
         c.note("noise", kind);
     }
     let params = if on {
@@ -266,18 +279,21 @@ fn noise(c: &mut Ctx) -> Value {
     } else {
         vec![]
     };
+    let mut osc = map(vec![
+        ("detuneFactor", Value::Num(0.475_821_847_841_306_8)),
+        ("numChannels", Value::Int(1)),
+        ("numFrames", Value::Int(78_241)),
+        ("sampleRate", Value::Int(44_100)),
+    ]);
+    if on {
+        osc.set("plainParams", plain(vec![("kParamNoiseType", Value::from("White"))]));
+    } else {
+        // As in Serum's init preset.
+        osc.set("plainParams", Value::from("default"));
+        osc.set("relativePathToNoiseSample", Value::from("Organics/AC hum1.wav"));
+    }
     map(vec![
-        (
-            "NoiseOsc3",
-            map(vec![
-                ("detuneFactor", Value::Num(0.475_821_847_841_306_8)),
-                ("numChannels", Value::Int(1)),
-                ("numFrames", Value::Int(78_241)),
-                ("plainParams", Value::from("default")),
-                ("relativePathToNoiseSample", Value::from(if on { "Analog/BrightWhite.wav" } else { "Organics/AC hum1.wav" })),
-                ("sampleRate", Value::Int(44_100)),
-            ]),
-        ),
+        ("NoiseOsc3", osc),
         ("plainParams", plain(params)),
     ])
 }
@@ -819,10 +835,10 @@ fn ui_list(count: usize, keys: &[&str]) -> Value {
     Value::List((0..count).map(|_| map(keys.iter().map(|k| (*k, Value::Num(0.0))).collect())).collect())
 }
 
-/// Builds the CBOR payload. Returns it with the notes and wavetables used.
-pub fn build(patch: &Patch) -> (Value, Vec<String>, Vec<usize>) {
-    let mut c = Ctx { patch, notes: Vec::new() };
-    let mut tables = Vec::new();
+/// Builds the CBOR payload. Returns it with the notes. The bank renders the
+/// wavetables to embed.
+pub fn build(patch: &Patch, bank: &mut Bank) -> (Value, Vec<String>) {
+    let mut c = Ctx { patch, bank, notes: Vec::new(), rendered: Vec::new() };
     let mut d = empty();
 
     // Parts of Serum this synth has no counterpart for stay at their defaults.
@@ -870,7 +886,7 @@ pub fn build(patch: &Patch) -> (Value, Vec<String>, Vec<usize>) {
 
     // Sources.
     for o in 0..NUM_OSC {
-        let osc = oscillator(&mut c, o, &mut tables);
+        let osc = oscillator(&mut c, o);
         d.set(&format!("Oscillator{o}"), osc);
     }
     let noise_module = noise(&mut c);
@@ -938,9 +954,11 @@ pub fn build(patch: &Patch) -> (Value, Vec<String>, Vec<usize>) {
     if c.v("master.pitch") != 0.0 {
         c.note("masterPitch", "");
     }
-    // Serum 2 has an arpeggiator of its own, but how a preset stores it has
-    // not been worked out yet.
-    if c.on("arp.on") {
+    // Serum 2's arpeggiator is switched on with its first pattern, as in
+    // presets saved by Serum; how its rate, order and range are stored is
+    // not known yet. The clip sequencer takes precedence over it, as here.
+    if c.on("arp.on") && !c.on("clip.on") {
+        d.set("Arp0", map(vec![("activeClip", Value::Int(0)), ("plainParams", plain(vec![("kParamEnabled", flag(true))]))]));
         c.note("arp", "");
     }
     if c.on("clip.on") {
@@ -978,9 +996,7 @@ pub fn build(patch: &Patch) -> (Value, Vec<String>, Vec<usize>) {
     for (k, v) in header_fields(patch) {
         d.set(k, v);
     }
-    // Wavetables always have to be installed, so that note comes first.
-    c.notes.insert(0, "tables".to_string());
-    (d, c.notes, tables)
+    (d, c.notes)
 }
 
 fn header_fields(patch: &Patch) -> Vec<(&'static str, Value)> {
@@ -1001,8 +1017,8 @@ fn header_fields(patch: &Patch) -> Vec<(&'static str, Value)> {
 }
 
 /// Assembles the file: magic, metadata JSON, then the compressed payload.
-pub fn pack(patch: &Patch) -> Export {
-    let (data, notes, tables) = build(patch);
+pub fn pack(patch: &Patch, bank: &mut Bank) -> Export {
+    let (data, notes) = build(patch, bank);
     let cbor = data.to_cbor();
     let frame = codec::zstd_store(&cbor);
 
@@ -1017,7 +1033,7 @@ pub fn pack(patch: &Patch) -> Export {
     bytes.extend_from_slice(&(cbor.len() as u32).to_le_bytes());
     bytes.extend_from_slice(&2u32.to_le_bytes()); // payload encoding: zstd
     bytes.extend_from_slice(&frame);
-    Export { bytes, notes, tables }
+    Export { bytes, notes }
 }
 
 #[cfg(test)]
@@ -1038,13 +1054,21 @@ mod tests {
         }
     }
 
+    fn export(p: &Patch) -> (Value, Vec<String>) {
+        let mut bank = Bank::new();
+        for (slot, table) in p.user_tables.iter().enumerate() {
+            bank.set_user(slot, table);
+        }
+        build(p, &mut bank)
+    }
+
     fn set(p: &mut Patch, key: &str, plain: f32) {
         p.set_plain(index_of_key(key).unwrap(), plain);
     }
 
     #[test]
     fn container_layout() {
-        let e = pack(&Patch::init());
+        let e = pack(&Patch::init(), &mut Bank::new());
         let b = &e.bytes;
         assert_eq!(&b[..9], b"XferJson\0");
         let json_len = u64::from_le_bytes(b[9..17].try_into().unwrap()) as usize;
@@ -1058,13 +1082,13 @@ mod tests {
         let frame = &b[at + 8..];
         assert_eq!(&frame[..4], &[0x28, 0xb5, 0x2f, 0xfd]);
         assert!(json.contains(&codec::md5_hex(frame)));
-        let (data, _, _) = build(&Patch::init());
+        let (data, _) = export(&Patch::init());
         assert_eq!(data.to_cbor().len(), cbor_len);
     }
 
     #[test]
     fn has_every_module_serum_expects() {
-        let (data, _, _) = build(&Patch::init());
+        let (data, _) = export(&Patch::init());
         let Value::Map(pairs) = &data else { panic!() };
         // A Serum 2 init preset has exactly these 175 top-level entries.
         assert_eq!(pairs.len(), 175);
@@ -1095,7 +1119,7 @@ mod tests {
         set(&mut p, "sub.on", 1.0);
         set(&mut p, "sub.shape", 3.0);
         set(&mut p, "master.mono", 1.0);
-        let (d, _, tables) = build(&p);
+        let (d, _) = export(&p);
         let near = |v: &Value, want: f64| assert!((number(v) - want).abs() < 1e-3 * want.abs().max(1.0), "{v:?} vs {want}");
 
         near(plain_of(&d, &["VoiceFilter0", "plainParams", "kParamFreq"]), (1000.0f64 / 8.0).ln() / (22050.0f64 / 8.0).ln());
@@ -1106,9 +1130,16 @@ mod tests {
         near(plain_of(&d, &["Oscillator0", "plainParams", "kParamUnison"]), 7.0);
         assert_eq!(plain_of(&d, &["Oscillator0", "WTOsc0", "plainParams", "kParamWarpMenu"]), &Value::from("kSync"));
         near(plain_of(&d, &["Oscillator0", "WTOsc0", "plainParams", "kParamWarp"]), 0.25);
-        assert_eq!(plain_of(&d, &["Oscillator0", "WTOsc0", "relativePathToWT"]), &Value::from("seosynth/PWM.wav"));
-        assert_eq!(plain_of(&d, &["Oscillator0", "WTOsc0", "numFrames"]), &Value::Int(524_288));
-        assert_eq!(tables, vec![3]);
+        // The table is embedded, 256 frames of 2048 samples.
+        let wt = plain_of(&d, &["Oscillator0", "WTOsc0"]);
+        assert_eq!(wt.get("tableDisplayName"), Some(&Value::from("PWM")));
+        assert_eq!(wt.get("numFrames"), Some(&Value::Int(524_288)));
+        assert!(matches!(wt.get("embeddedWTData"), Some(Value::F32s(s)) if s.len() == 524_288));
+        assert!(wt.get("relativePathToWT").is_none());
+        // An oscillator that is off points at Serum's init table instead.
+        let off = plain_of(&d, &["Oscillator2", "WTOsc2"]);
+        assert_eq!(off.get("relativePathToWT"), Some(&Value::from(DEFAULT_TABLE)));
+        assert!(off.get("embeddedWTData").is_none());
         near(plain_of(&d, &["Env0", "plainParams", "kParamAttack"]), 0.25);
         near(plain_of(&d, &["Env0", "plainParams", "kParamCurve2"]), 66.6);
         // 1/2 note: step 6 of 14 on the synced rate knob.
@@ -1124,7 +1155,7 @@ mod tests {
 
     #[test]
     fn default_lfo_shape_is_a_triangle_with_serum_orientation() {
-        let (d, _, _) = build(&Patch::init());
+        let (d, _) = export(&Patch::init());
         // Serum stores y top-down: a triangle is 1, 0, 1.
         assert_eq!(plain_of(&d, &["LFO0", "curveData", "yVals"]), &floats(&[1.0, 0.0, 1.0]));
         assert_eq!(plain_of(&d, &["LFO0", "curveData", "xVals"]), &floats(&[0.0, 0.5, 1.0]));
@@ -1138,7 +1169,7 @@ mod tests {
         p.slots[0] = ModSlot { src: src::LFO1 as u8, dst: cutoff, amount: 0.5, bipolar: true };
         p.slots[1] = ModSlot { src: src::ENV2 as u8, dst: osc_idx(1, osc::POS) as u16, amount: -1.0, bipolar: false };
         p.slots[2] = ModSlot { src: src::MACRO1 as u8, dst: lfo_idx(0, crate::params::lfo::RATE) as u16, amount: 0.3, bipolar: false };
-        let (d, notes, _) = build(&p);
+        let (d, notes) = export(&p);
         let s0 = d.get("ModSlot0").unwrap();
         assert_eq!(s0.get("source"), Some(&Value::List(vec![Value::Int(6), Value::Int(0)])));
         assert_eq!(s0.get("destModuleTypeString"), Some(&Value::from("VoiceFilter")));
@@ -1167,7 +1198,7 @@ mod tests {
         let mut order = crate::patch::DEFAULT_FX_ORDER;
         order[..8].copy_from_slice(&[7, 1, 0, 2, 3, 4, 5, 6]);
         p.fx_order = order;
-        let (d, _, _) = build(&p);
+        let (d, _) = export(&p);
         let Some(Value::List(rack)) = d.get("FXRack0").and_then(|r| r.get("FX")) else { panic!() };
         let kinds: Vec<i64> = rack.iter().map(|e| number(e.get("type").unwrap()) as i64).collect();
         assert_eq!(kinds, vec![6, 0, 4], "reverb, distortion, delay");
@@ -1186,7 +1217,7 @@ mod tests {
         set(&mut p, "dist2.drive", 0.9);
         set(&mut p, "reverb.on", 1.0);
         set(&mut p, "delay.on", 1.0);
-        let (d, notes, _) = build(&p);
+        let (d, notes) = export(&p);
         assert!(!notes.iter().any(|n| n.starts_with("split")));
         let kinds = |d: &Value| -> Vec<i64> {
             let Some(Value::List(rack)) = d.get("FXRack0").and_then(|r| r.get("FX")) else { panic!() };
@@ -1200,47 +1231,69 @@ mod tests {
         // where the reverb was, and the delay follows it.
         p.fx_lane[7] = crate::patch::lane::A;
         p.fx_lane[11] = crate::patch::lane::B;
-        let (d, notes, _) = build(&p);
+        let (d, notes) = export(&p);
         assert!(notes.iter().any(|n| n.starts_with("split")));
         assert_eq!(kinds(&d), vec![0, 4, 6, 0]);
         p.fx_lane[1] = crate::patch::lane::B;
-        assert_eq!(kinds(&build(&p).0), vec![6, 0, 0, 4], "reverb | both distortions, then the delay");
+        assert_eq!(kinds(&export(&p).0), vec![6, 0, 0, 4], "reverb | both distortions, then the delay");
     }
 
     #[test]
-    fn user_tables_are_exported_under_a_name_of_their_own() {
+    fn user_tables_are_embedded() {
         let mut p = Patch::init();
         set(&mut p, "oscA.userTable", 2.0);
+        set(&mut p, "oscB.on", 1.0);
+        set(&mut p, "oscB.userTable", 2.0);
         let saw: Vec<i8> = (0..crate::wavetable::USER_POINTS).map(|i| (i as i32 * 2 - 127) as i8).collect();
         p.user_tables[1] = crate::wavetable::UserTable::new(&saw).unwrap();
-        let (d, _, tables) = build(&p);
-        assert_eq!(tables, vec![FACTORY_TABLES + 1]);
-        let name = table_file_name(&p, FACTORY_TABLES + 1);
-        assert!(name.starts_with("User ") && name.ends_with(".wav") && name.len() == 17, "{name}");
-        assert_eq!(plain_of(&d, &["Oscillator0", "WTOsc0", "relativePathToWT"]), &Value::from(format!("seosynth/{name}")));
-        // Another drawing gets another name.
-        assert_ne!(table_file_name(&Patch::init(), FACTORY_TABLES + 1), name);
-        // The WAV carries the drawn shape: a rising saw.
-        let mut bank = Bank::new();
-        bank.set_user(1, &p.user_tables[1]);
-        let wav = table_wav(&mut bank, FACTORY_TABLES + 1);
-        let data = wav.windows(4).position(|w| w == b"data").unwrap() + 8;
-        let sample = |i: usize| f32::from_le_bytes(wav[data + i * 4..data + i * 4 + 4].try_into().unwrap());
-        assert!(sample(TABLE_SIZE / 4) < -0.3 && sample(3 * TABLE_SIZE / 4) > 0.3);
+        let (d, _) = export(&p);
+        let wt = plain_of(&d, &["Oscillator0", "WTOsc0"]);
+        assert_eq!(wt.get("tableDisplayName"), Some(&Value::from("User 2")));
+        // A single drawn cycle is embedded as one frame: a rising saw.
+        let Some(Value::F32s(samples)) = wt.get("embeddedWTData") else { panic!() };
+        assert_eq!(samples.len(), TABLE_SIZE);
+        assert!(samples[TABLE_SIZE / 4] < -0.3 && samples[3 * TABLE_SIZE / 4] > 0.3);
+        // Both oscillators carry it, as Serum stores a table per oscillator.
+        assert_eq!(plain_of(&d, &["Oscillator1", "WTOsc1", "embeddedWTData"]), &Value::F32s(samples.clone()));
+    }
+
+    #[test]
+    fn noise_and_arpeggiator_are_written_as_serum_saves_them() {
+        let mut p = Patch::init();
+        set(&mut p, "noise.on", 1.0);
+        let (d, notes) = export(&p);
+        let noise = plain_of(&d, &["Oscillator3", "NoiseOsc3"]);
+        assert_eq!(plain_of(noise, &["plainParams", "kParamNoiseType"]), &Value::from("White"));
+        assert!(noise.get("relativePathToNoiseSample").is_none());
+        assert!(!notes.iter().any(|n| n.starts_with("noise")), "white noise is exact");
+        set(&mut p, "noise.type", 1.0);
+        assert!(export(&p).1.iter().any(|n| n == "noise\tPink"));
+
+        assert_eq!(plain_of(&d, &["Arp0", "activeClip"]), &Value::Int(-1), "off by default");
+        set(&mut p, "arp.on", 1.0);
+        let (d, notes) = export(&p);
+        assert_eq!(plain_of(&d, &["Arp0", "activeClip"]), &Value::Int(0));
+        assert_eq!(plain_of(&d, &["Arp0", "plainParams", "kParamEnabled"]), &flag(true));
+        assert!(notes.iter().any(|n| n == "arp"), "its settings are reported");
+        // The clip sequencer wins over the arpeggiator, so Serum's stays off.
+        set(&mut p, "clip.on", 1.0);
+        let (d, notes) = export(&p);
+        assert_eq!(plain_of(&d, &["Arp0", "activeClip"]), &Value::Int(-1));
+        assert!(!notes.iter().any(|n| n == "arp") && notes.iter().any(|n| n == "clip"));
     }
 
     #[test]
     fn oscillator_c_and_filter_2_are_exported() {
         let near = |v: &Value, want: f64| assert!((number(v) - want).abs() < 1e-3 * want.abs().max(1.0), "{v:?} vs {want}");
         let mut p = Patch::init();
-        let (d, notes, _) = build(&p);
+        let (d, notes) = export(&p);
         assert_eq!(plain_of(&d, &["Oscillator2", "plainParams", "kParamEnable"]), &flag(false), "oscillator C is off by default");
         assert!(!notes.iter().any(|n| n.starts_with("filter2")));
         set(&mut p, "oscC.on", 1.0);
         set(&mut p, "oscC.oct", -1.0);
         set(&mut p, "filter2.on", 1.0);
         set(&mut p, "filter2.cutoff", 1000.0);
-        let (d, notes, _) = build(&p);
+        let (d, notes) = export(&p);
         near(plain_of(&d, &["Oscillator2", "plainParams", "kParamOctave"]), -1.0);
         assert_eq!(plain_of(&d, &["VoiceFilter1", "plainParams", "kParamEnable"]), &flag(true));
         near(plain_of(&d, &["VoiceFilter1", "plainParams", "kParamFreq"]), (1000.0f64 / 8.0).ln() / (22050.0f64 / 8.0).ln());
@@ -1263,12 +1316,11 @@ mod tests {
     }
 
     #[test]
-    fn table_wav_has_256_cycles() {
+    fn tables_with_several_frames_are_pre_morphed_to_256() {
         let mut bank = Bank::new();
-        let wav = table_wav(&mut bank, 0);
-        let data = wav.windows(4).position(|w| w == b"data").unwrap();
-        let len = u32::from_le_bytes(wav[data + 4..data + 8].try_into().unwrap()) as usize;
-        assert_eq!(len, TABLE_FRAMES * TABLE_SIZE * 4);
-        assert_eq!(table_file_name(&Patch::init(), 0), "Basic Shapes.wav");
+        let samples = table_samples(&mut bank, 0);
+        assert_eq!(samples.len(), TABLE_FRAMES * TABLE_SIZE);
+        assert!(samples.iter().all(|v| v.abs() <= 1.0001) && samples.iter().any(|v| v.abs() > 0.9));
+        assert_eq!(table_name(0), "Basic Shapes");
     }
 }

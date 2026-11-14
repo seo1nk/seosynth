@@ -1641,7 +1641,6 @@ input[type='range'] {
 .muted {
   color: var(--muted);
 }
-.file-list,
 .note-list {
   margin: 0;
   padding: 0;
@@ -1649,21 +1648,6 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-.file-list li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 6px 6px 14px;
-  border-radius: 12px;
-  border: 1.5px solid var(--rule);
-}
-.file-list code {
-  font-family: inherit;
-  font-weight: 700;
-  font-size: 0.8125rem;
-  word-break: break-all;
 }
 .note-list li {
   padding-left: 16px;

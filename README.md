@@ -46,16 +46,17 @@ Rust で書いたシンセエンジンを WebAssembly にして、ブラウザ�
 
 - **リンクで共有**：音色の設定はすべて URL の `#p=…` の中に入ります。サーバーには何も保存しません。アドレスバーの URL は編集のたびに更新されるので、そのままコピーしても共有できます
 - **ファイル**：読みやすい JSON（`.seosynth.json`）で保存・読み込み
-- **Serum 2 用の書き出し（ベータ版）**：`.SerumPreset` と、必要なウェーブテーブルの WAV を書き出します（[下記の注意](#serum-2-への書き出しベータ版)を読んでください）
+- **Serum 2 用の書き出し（ベータ版）**：ウェーブテーブルを埋め込んだ `.SerumPreset` を 1 つ書き出します（[下記の注意](#serum-2-への書き出しベータ版)を読んでください）
 
 ### Serum 2 への書き出し（ベータ版）
 
 - `.SerumPreset` は **公開されていない形式** です。コミュニティによる解析（下記）をもとに、ヘッダー＋JSON メタデータ＋Zstandard 圧縮した CBOR という構造で書き出しています
-- 書き出したファイルは、別実装の zstd／CBOR デコーダーで読み戻し、Serum 2 の初期プリセットとモジュール構成が一致することを確認しています。Serum 2 本体でも読み込み、おおむね意図どおりに鳴ることを確認しました。うまく読み込めない音色があれば Issue で教えてください
+- 書き出したファイルは、別実装の zstd／CBOR デコーダーで読み戻し、Serum 2 の初期プリセットや、Serum 2 で保存された市販プリセットとモジュール構成が一致することを確認しています。Serum 2 本体でも読み込み、おおむね意図どおりに鳴ることを確認しました。うまく読み込めない音色があれば Issue で教えてください
 - seosynth と Serum は別のシンセなので、同じ音にはなりません。スライダーの位置、つながり、エフェクトの順番を移し替えるものです。移し替えられなかった項目は、書き出しダイアログの「変換メモ」に表示されます
 - 重ねたエフェクトは、同じ種類のモジュールを並べて書き出します。分岐は Serum 側の配線の書き方が確認できていないため、1 本に並べ直して書き出します
-- アルペジエーターとクリップシーケンサーは、Serum 側の書き方が確認できていないため移し替えません
-- Serum はウェーブテーブルを自分のフォルダから読み込むため、テーブルは WAV として別に書き出します。`Serum 2 Presets/Tables/seosynth/` に置いてください（ZIP にまとめてダウンロードできます）
+- アルペジエーターは Serum 側でオンにしますが、速さ・順番・オクターブなどの設定は書き方が確認できていないため移し替えません。クリップシーケンサーのフレーズも移し替えません
+- ウェーブテーブルは、Serum が自分のエディターで作ったテーブルを保存するのと同じ形でプリセットに埋め込みます（256 フレームに展開済み）。そのためファイルは 1 つで済みますが、使うオシレーター 1 つにつき約 2.6 MB になります
+- ノイズはホワイトノイズのときだけそのまま移し替えます。ほかの色のノイズはホワイトノイズにして、変換メモで知らせます
 
 形式の調査で参考にしたもの：
 
@@ -203,7 +204,7 @@ seosynth is a wavetable synthesizer for the browser. The DSP engine is dependenc
 - **Wavetables of your own.** Draw one cycle of the wave with the pointer and hear it change as you draw; add frames to make it morph. Or choose an audio file: its pitch is detected and its waveforms become the frames, all inside the browser. These tables travel in the share link too.
 - **Synth features** modelled on Serum's layout: three wavetable oscillators (22 generated tables plus two of your own, unison, 13 warp modes), sub, noise, two 19-type filters in series or parallel, 4 envelopes, 10 LFOs with drawable shapes, 8 macros, up to 64 connections and ten kinds of effect that can be reordered, stacked and run in parallel. An arpeggiator plays held keys in time with the tempo (six orders, note length, up to four octaves, gate, swing), and a clip sequencer loops a phrase drawn in a piano roll (1 to 8 bars) while a key is held, transposed to that key. A "Keys play" switch above the keyboard picks notes, arpeggio or clip, and their settings open in a drawer above the keys. Japanese and English, light and dark.
 - **Sharing.** The whole patch is encoded into the URL fragment, so a link is the preset. Presets can also be saved as JSON.
-- **Serum 2 export (beta).** Writes a `.SerumPreset` plus the wavetables as WAV. The format is unpublished and the export follows community reverse-engineering; files round-trip through independent decoders, match the structure of a real init preset, and load in Serum 2 sounding broadly as intended. It is a translation of settings, not a clone of the sound; the arpeggiator is not carried over yet.
+- **Serum 2 export (beta).** Writes one `.SerumPreset` with the wavetables embedded, as Serum stores tables made in its own editor. The format is unpublished and the export follows community reverse-engineering; files round-trip through independent decoders, match the structure of a real init preset and of commercial presets saved by Serum 2, and load in Serum 2 sounding broadly as intended. It is a translation of settings, not a clone of the sound; the arpeggiator is switched on but its settings are not carried over yet.
 
 **Architecture.** Everything runs in the browser; there is no server-side code. The Rust engine exposes plain `extern "C"` functions and describes itself as JSON (parameters, options, buffer layouts), so the UI holds no parameter tables of its own. Two instances run: one in the AudioWorklet makes the sound, one on the main thread holds the authoritative patch and draws previews. Keys pass through the clip sequencer or the arpeggiator (when on) to the voices. Each voice runs oscillators A, B and C, sub and noise into two filters (in series, or in parallel with each source choosing) and the amp; up to 16 voices feed a chain of 30 effect units (ten kinds, three copies each) with one optional fork into two lanes. All 491 parameters carry stable ids, so share links and files keep working as the synth grows. The engine records 46 signal taps and telemetry that drive the board's glowing lines, the scopes and the moving dots on sliders. The UI is plain DOM in TypeScript, compiled file by file to ES modules; a `Store` is the single entry point for edits and keeps undo history as patch snapshots. Overlays use the platform: `<dialog>` with `closedby="any"` (and a fallback), the Popover API for menus, settings bubbles, notifications and the guide, and `@starting-style` for short fades that respect reduced motion. Text sizes are in rem with the root size left to the browser, so the system text size applies. A Content Security Policy limits loads to the site itself and Google Fonts, and Trusted Types are enforced since no HTML is ever built from strings. The piano roll (`src/pianoroll/`) is a self-contained module meant to be reused elsewhere: notes carry stable ids and every edit leaves it as a list of operations (insert, delete, set fields, change length) that can be applied, inverted and diffed, and that skip cleanly when their note is gone, so they can be shared between collaborators.
 

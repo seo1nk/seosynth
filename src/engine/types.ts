@@ -192,9 +192,6 @@ export interface EngineExports {
   blob_ptr(): number;
   serum_export(): number;
   serum_notes(): number;
-  serum_tables(): number;
-  serum_table_wav(table: number): number;
-  serum_table_path(table: number): number;
   describe(): number;
 }
 

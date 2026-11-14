@@ -6,7 +6,6 @@ import { Slider } from './controls.ts';
 import { Meter } from './displays.ts';
 import { PRESETS, CATEGORIES, presetTitle } from '../presets.ts';
 import { shareUrl } from '../share.ts';
-import { zip } from '../zip.ts';
 import { savedTheme } from '../theme.ts';
 import type { App, DialogOptions, PopoverOptions, Toaster } from '../app.ts';
 import type { Child } from './dom.ts';
@@ -544,24 +543,9 @@ function openShare(app: App): void {
 export function openSerumExport(app: App): void {
   const { core, store, i18n } = app;
   const t = i18n.t;
-  const { preset, notes, tables } = core.serumExport();
-  const base = safeName(store.getName());
-  const fileName = (path: string) => path.split('/').pop() ?? path;
-
-  const tableList = tables.length
-    ? h(
-        'ul',
-        { class: 'file-list' },
-        tables.map((tb) =>
-          h(
-            'li',
-            {},
-            h('code', {}, `Tables/${tb.path}`),
-            h('button', { type: 'button', class: 'btn small', onclick: () => download(fileName(tb.path), core.serumTableWav(tb.index), 'audio/wav') }, t('serum.download')),
-          ),
-        ),
-      )
-    : h('p', { class: 'muted' }, t('serum.tables.none'));
+  // The wavetables are embedded, so the preset is the only file.
+  const { preset, notes } = core.serumExport();
+  const name = `${safeName(store.getName())}.SerumPreset`;
 
   const noteText = (n: SerumNote) => {
     const key = `serum.note.${n.code}`;
@@ -569,13 +553,8 @@ export function openSerumExport(app: App): void {
     return text === key ? `${n.code} ${n.detail}`.trim() : text;
   };
 
-  const downloadZip = () => {
-    const files = [
-      { name: `${base}.SerumPreset`, data: preset },
-      ...tables.map((tb) => ({ name: `Tables/${tb.path}`, data: core.serumTableWav(tb.index) })),
-      { name: 'README.txt', data: `${t('serum.readme')}\n\n${notes.map((n) => `- ${noteText(n)}`).join('\n')}\n` },
-    ];
-    download(`${base} (Serum 2).zip`, zip(files), 'application/zip');
+  const save = () => {
+    download(name, preset, 'application/octet-stream');
     // Said inside the dialog: a message behind it would not be seen.
     saved.textContent = t('file.exported');
   };
@@ -589,23 +568,12 @@ export function openSerumExport(app: App): void {
       { class: 'serum-export' },
       h('p', {}, t('serum.intro')),
       h('p', { class: 'caveat' }, t('serum.caveat')),
-      h('div', { class: 'dialog-actions start' }, h('button', { type: 'button', class: 'btn primary', onclick: downloadZip }, t('serum.zip')), saved),
-      h('h3', {}, t('serum.step1')),
-      h(
-        'ul',
-        { class: 'file-list' },
-        h(
-          'li',
-          {},
-          h('code', {}, `${base}.SerumPreset`),
-          h('button', { type: 'button', class: 'btn small', onclick: () => download(`${base}.SerumPreset`, preset, 'application/octet-stream') }, t('serum.download')),
-        ),
-      ),
-      h('h3', {}, t('serum.step2')),
-      h('p', { class: 'muted' }, t('serum.tables.help')),
-      tableList,
+      h('div', { class: 'dialog-actions start' }, h('button', { type: 'button', class: 'btn primary', onclick: save }, t('serum.save')), saved),
+      h('p', { class: 'muted' }, t('serum.where', { name })),
       h('h3', {}, t('serum.notes')),
-      h('ul', { class: 'note-list' }, notes.map((n) => h('li', {}, noteText(n)))),
+      notes.length
+        ? h('ul', { class: 'note-list' }, notes.map((n) => h('li', {}, noteText(n))))
+        : h('p', { class: 'muted' }, t('serum.notes.none')),
     ),
     { wide: true },
   );
