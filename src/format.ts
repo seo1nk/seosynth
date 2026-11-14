@@ -54,6 +54,8 @@ export function formatValue(p: ParamInfo, plain: number, label: (key: string) =>
       return `${trim(v.toFixed(1))}:1`;
     case 'bpm':
       return `${Math.round(v)}`;
+    case 'note':
+      return noteName(Math.round(v));
     default:
       return p.curve === 'int' ? String(Math.round(v)) : trim(v.toFixed(2));
   }

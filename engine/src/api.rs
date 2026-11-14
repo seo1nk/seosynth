@@ -9,6 +9,7 @@
 //! that makes sound, and one on the main thread that the UI uses as the
 //! source of truth for the patch and for drawing previews.
 
+use crate::clip::{self, Clip};
 use crate::filter::{Filter, FilterType};
 use crate::lfo::LfoPoint;
 use crate::params::{self, defs, Curve, NUM_LFO, NUM_PARAMS, NUM_SLOTS, NUM_UNITS};
@@ -116,6 +117,17 @@ pub extern "C" fn note_on(note: u32, velocity: f32) {
 #[no_mangle]
 pub extern "C" fn note_off(note: u32) {
     synth().note_off(note.min(127) as u8);
+}
+
+/// A note played straight on the voices, past the arpeggiator and the clip.
+#[no_mangle]
+pub extern "C" fn audition_on(note: u32, velocity: f32) {
+    synth().audition_on(note.min(127) as u8, velocity);
+}
+
+#[no_mangle]
+pub extern "C" fn audition_off(note: u32) {
+    synth().audition_off(note.min(127) as u8);
 }
 
 #[no_mangle]
@@ -278,6 +290,33 @@ pub extern "C" fn user_table_set(slot: usize, frames: usize) -> u32 {
 pub extern "C" fn user_table_get(slot: usize) -> usize {
     let bytes: Vec<u8> = synth().patch.user_tables[slot.min(USER_TABLES - 1)].points().iter().map(|p| *p as u8).collect();
     write_bytes(&bytes)
+}
+
+// --- clip sequencer -----------------------------------------------------------
+
+/// Replaces the clip with one read from the IO buffer in `Clip::to_raw`
+/// form (`len` bytes). Returns 1 if it was a valid clip.
+#[no_mangle]
+pub extern "C" fn clip_set(len: usize) -> u32 {
+    match Clip::from_raw(&io()[..len.min(IO_CAP)]) {
+        Some(clip) => {
+            synth().set_clip(clip);
+            1
+        }
+        None => 0,
+    }
+}
+
+/// Writes the clip to the IO buffer in `Clip::to_raw` form; returns its size.
+#[no_mangle]
+pub extern "C" fn clip_get() -> usize {
+    write_bytes(&synth().patch.clip.to_raw())
+}
+
+/// Writes the clip a new patch starts with, in the same form.
+#[no_mangle]
+pub extern "C" fn clip_default() -> usize {
+    write_bytes(&Clip::default().to_raw())
 }
 
 // --- effect chain -------------------------------------------------------------
@@ -520,8 +559,9 @@ pub fn describe_json() -> String {
         }
         o.push_str(&format!("{b}"));
     }
+    o.push_str(&format!("],\"clip\":{{\"ppq\":{},\"minLength\":{},\"maxLength\":{},\"maxNotes\":{}}}", clip::PPQ, clip::MIN_LENGTH, clip::MAX_LENGTH, clip::MAX_NOTES));
     o.push_str(&format!(
-        "],\"numSlots\":{},\"numVoices\":{},\"block\":{},\"maxLfoPoints\":{}",
+        ",\"numSlots\":{},\"numVoices\":{},\"block\":{},\"maxLfoPoints\":{}",
         NUM_SLOTS,
         MAX_VOICES,
         BLOCK,
@@ -539,7 +579,7 @@ pub fn describe_json() -> String {
         tap::OUT
     ));
     o.push_str(&format!(
-        ",\"tele\":{{\"len\":{},\"voices\":{},\"peakL\":{},\"peakR\":{},\"note\":{},\"pitch\":{},\"tapPos\":{},\"gate\":{},\"compReduction\":{},\"envPos\":{},\"envVal\":{},\"lfoPhase\":{},\"lfoVal\":{},\"sources\":{},\"params\":{}}}",
+        ",\"tele\":{{\"len\":{},\"voices\":{},\"peakL\":{},\"peakR\":{},\"note\":{},\"pitch\":{},\"tapPos\":{},\"gate\":{},\"clipPos\":{},\"compReduction\":{},\"envPos\":{},\"envVal\":{},\"lfoPhase\":{},\"lfoVal\":{},\"sources\":{},\"params\":{}}}",
         tele::LEN,
         tele::VOICES,
         tele::PEAK_L,
@@ -548,6 +588,7 @@ pub fn describe_json() -> String {
         tele::PITCH,
         tele::TAP_POS,
         tele::GATE,
+        tele::CLIP_POS,
         tele::COMP_REDUCTION,
         tele::ENV_POS,
         tele::ENV_VAL,

@@ -5,7 +5,7 @@
 // thread, and tells the widgets that display it.
 
 import type { EngineCore } from './engine/core.ts';
-import type { AudioMessage, EngineInfo, FxChain, LfoPoint, ParamInfo, Slot } from './engine/types.ts';
+import type { AudioMessage, ClipData, EngineInfo, FxChain, LfoPoint, ParamInfo, Slot } from './engine/types.ts';
 import type { PatchJSON } from './patch-json.ts';
 
 const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
@@ -28,6 +28,8 @@ export interface StoreEvents {
   fx: [];
   /** A user wavetable changed. */
   table: [slot: number];
+  /** The clip sequencer's notes changed. */
+  clip: [];
   /** The patch name changed. */
   name: [];
   /** An edit was completed (a good moment to update the share URL). */
@@ -205,6 +207,17 @@ export class Store {
     }
   }
 
+  getClip(): ClipData {
+    return this.core.getClip();
+  }
+
+  setClip(clip: ClipData): boolean {
+    if (!this.core.setClip(clip)) return false;
+    this.#sync();
+    this.emit('clip');
+    return true;
+  }
+
   getName(): string {
     return this.core.getName();
   }
@@ -225,6 +238,7 @@ export class Store {
     this.emit('slots');
     this.emit('fx');
     for (let slot = 0; slot < this.info.userTables; slot++) this.emit('table', slot);
+    this.emit('clip');
     this.emit('name');
   }
 
@@ -297,6 +311,10 @@ export class Store {
       if (!untouched) tables[slot + 1] = Array.from({ length: points.length / per }, (_, f) => points.slice(f * per, (f + 1) * per));
     }
     if (Object.keys(tables).length) out.userTables = tables;
+    const clip = c.getClip();
+    if (JSON.stringify(clip) !== JSON.stringify(c.defaultClip())) {
+      out.clip = { length: clip.length, notes: clip.notes.map((n) => [n.pitch, n.start, n.length, n.velocity]) };
+    }
     return out;
   }
 
@@ -369,6 +387,13 @@ export class Store {
       const flat = Array.isArray(frames) ? frames.flat() : [];
       const ok = flat.length > 0 && flat.every((v) => Number.isInteger(v) && v >= -128 && v <= 127);
       if (!ok || !c.setUserTable(Number(key) - 1, Int8Array.from(flat))) warnings.push(`skipped wavetable: ${key}`);
+    }
+    if (obj.clip) {
+      const notes = Array.isArray(obj.clip.notes) ? obj.clip.notes : [];
+      const ok = notes.every((n) => Array.isArray(n) && n.length === 4 && n.every((v) => Number.isInteger(v) && v >= 0));
+      if (!ok || !c.setClip({ length: Number(obj.clip.length), notes: notes.map(([pitch, start, length, velocity]) => ({ pitch, start, length, velocity })) })) {
+        warnings.push('skipped clip');
+      }
     }
     c.setName(typeof obj.name === 'string' ? obj.name : 'Untitled');
     this.#reloaded();

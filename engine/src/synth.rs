@@ -2,11 +2,12 @@
 //! and the signal taps / telemetry the UI draws from.
 
 use crate::arp::{Arp, ArpEvent, ArpMode, ArpSettings};
+use crate::clip::{ClipEvent, ClipPlayer, ClipSettings};
 use crate::fx::{self, Ctx, FxChain};
 use crate::lfo::{self, sanitize_points, LfoMode, LfoPoint, LFO_TABLE};
 use crate::osc::{warp_phase, Warp};
 use crate::params::{
-    self, arp, defs, master, osc, osc_idx, src, ARP_BASE, F_GLOBAL, F_MOD, F_SMOOTH, NUM_ENV, NUM_LFO,
+    self, arp, clip, defs, master, osc, osc_idx, src, ARP_BASE, CLIP_BASE, F_GLOBAL, F_MOD, F_SMOOTH, NUM_ENV, NUM_LFO,
     NUM_OSC, NUM_PARAMS, NUM_SLOTS,
 };
 use crate::patch::{ModSlot, Patch};
@@ -48,7 +49,9 @@ pub mod tele {
     pub const TAP_POS: usize = 5;
     pub const GATE: usize = 6;
     pub const COMP_REDUCTION: usize = 7;
-    pub const ENV_POS: usize = 8;
+    /// Where the clip sequencer is, in ticks (-1 while it is not playing).
+    pub const CLIP_POS: usize = 8;
+    pub const ENV_POS: usize = 9;
     pub const ENV_VAL: usize = ENV_POS + NUM_ENV;
     pub const LFO_PHASE: usize = ENV_VAL + NUM_ENV;
     pub const LFO_VAL: usize = LFO_PHASE + NUM_LFO;
@@ -78,8 +81,9 @@ pub struct Synth {
     global_slots: Vec<ActiveSlot>,
     fx: FxChain,
     arp: Arp,
-    /// Whether the arpeggiator was on during the last block.
-    arp_was_on: bool,
+    clip: ClipPlayer,
+    /// What turned the keys into notes during the last block.
+    player: Player,
     /// Notes the voices are playing and have not been told to stop: the
     /// keys, or the arpeggiator's notes while it is on.
     held: Vec<u8>,
@@ -96,6 +100,15 @@ pub struct Synth {
     pub taps: Vec<f32>,
     tap_pos: usize,
     pub telemetry: Vec<f32>,
+}
+
+/// What turns the keys into notes.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Player {
+    /// The keys play the voices directly.
+    Keys,
+    Arp,
+    Clip,
 }
 
 #[inline]
@@ -137,7 +150,8 @@ impl Synth {
             global_slots: Vec::with_capacity(NUM_SLOTS),
             fx: FxChain::new(sr),
             arp: Arp::new(),
-            arp_was_on: false,
+            clip: ClipPlayer::new(),
+            player: Player::Keys,
             held: Vec::with_capacity(32),
             age: 0,
             last_pitch: None,
@@ -297,6 +311,10 @@ impl Synth {
         }
     }
 
+    pub fn set_clip(&mut self, clip: crate::clip::Clip) {
+        self.patch.clip = clip;
+    }
+
     pub fn set_fx_chain(&mut self, order: &[u8], lanes: &[u8]) -> bool {
         self.patch.set_fx_chain(order, lanes)
     }
@@ -316,11 +334,20 @@ impl Synth {
 
     // --- performance input ---------------------------------------------------
 
-    fn arp_on(&self) -> bool {
-        self.patch.values[ARP_BASE + arp::ON] >= 0.5
+    /// What the patch asks to turn the keys into notes: the clip sequencer
+    /// if it is on, else the arpeggiator if that is on, else the keys alone.
+    fn wanted_player(&self) -> Player {
+        if self.patch.values[CLIP_BASE + clip::ON] >= 0.5 {
+            Player::Clip
+        } else if self.patch.values[ARP_BASE + arp::ON] >= 0.5 {
+            Player::Arp
+        } else {
+            Player::Keys
+        }
     }
 
-    /// A key goes down. With the arpeggiator on, it joins the pattern.
+    /// A key goes down. With the arpeggiator or the clip on, it only tells
+    /// them which keys are held; they play the notes.
     pub fn note_on(&mut self, note: u8, velocity: f32) {
         let note = note.min(127);
         let velocity = velocity.max(0.0).min(1.0);
@@ -328,8 +355,10 @@ impl Synth {
             self.note_off(note);
             return;
         }
+        // Both always know the keys, so either can take over at any time.
         self.arp.press(note, velocity);
-        if !self.arp_on() {
+        self.clip.press(note);
+        if self.player == Player::Keys && self.wanted_player() == Player::Keys {
             self.voice_on(note, velocity);
         }
     }
@@ -337,9 +366,20 @@ impl Synth {
     /// A key comes up.
     pub fn note_off(&mut self, note: u8) {
         self.arp.release(note);
-        if !self.arp_on() {
+        self.clip.release(note);
+        if self.player == Player::Keys {
             self.voice_off(note);
         }
+    }
+
+    /// Plays a note straight on the voices, past the arpeggiator and the
+    /// clip (to hear a note while editing them).
+    pub fn audition_on(&mut self, note: u8, velocity: f32) {
+        self.voice_on(note.min(127), velocity.max(0.01).min(1.0));
+    }
+
+    pub fn audition_off(&mut self, note: u8) {
+        self.voice_off(note.min(127));
     }
 
     fn voice_on(&mut self, note: u8, velocity: f32) {
@@ -421,6 +461,9 @@ impl Synth {
         self.arp.clear_keys();
         self.arp.stop();
         self.arp.events.clear();
+        self.clip.clear_keys();
+        self.clip.stop();
+        self.clip.events.clear();
         self.held.clear();
         for v in self.voices.iter_mut() {
             if v.active && v.gate {
@@ -434,6 +477,9 @@ impl Synth {
         self.arp.clear_keys();
         self.arp.stop();
         self.arp.events.clear();
+        self.clip.clear_keys();
+        self.clip.stop();
+        self.clip.events.clear();
         self.held.clear();
         for v in self.voices.iter_mut() {
             v.kill();
@@ -498,7 +544,7 @@ impl Synth {
             }
         }
         let bpm = plain(&self.smoothed, master::BPM);
-        self.run_arp(n, bpm);
+        self.run_players(n, bpm);
 
         // Free-running LFO clocks.
         let mut free_params = [None; NUM_LFO];
@@ -632,41 +678,77 @@ impl Synth {
         peak
     }
 
-    /// Switches the arpeggiator in or out and lets it play this block.
-    fn run_arp(&mut self, n: usize, bpm: f32) {
-        let on = self.arp_on();
-        if on != self.arp_was_on {
-            self.arp_was_on = on;
-            let keys: Vec<(u8, f32)> = self.arp.keys().collect();
-            if on {
-                // The keys held stop sounding as a chord and become the pattern.
-                for &(note, _) in keys.iter() {
-                    self.voice_off(note);
+    /// Hands the keys to whatever should play them now (the keys alone,
+    /// the arpeggiator or the clip) and lets it play this block.
+    fn run_players(&mut self, n: usize, bpm: f32) {
+        let want = self.wanted_player();
+        if want != self.player {
+            // The keys held (the arpeggiator keeps them with their velocity).
+            let mut keys = [(0u8, 0.0f32); 32];
+            let mut count = 0;
+            for k in self.arp.keys().take(keys.len()) {
+                keys[count] = k;
+                count += 1;
+            }
+            // What played so far lets go...
+            match self.player {
+                Player::Keys => {
+                    for &(note, _) in keys[..count].iter() {
+                        self.voice_off(note);
+                    }
                 }
-            } else {
-                // The pattern stops; the keys still held sound as played.
-                self.arp.stop();
-                self.carry_out_arp();
-                for &(note, vel) in keys.iter() {
+                Player::Arp => {
+                    self.arp.stop();
+                    self.carry_out_arp();
+                }
+                Player::Clip => {
+                    self.clip.stop();
+                    self.carry_out_clip();
+                }
+            }
+            // ...and without a player, the keys still held sound as played.
+            if want == Player::Keys {
+                for &(note, vel) in keys[..count].iter() {
                     self.voice_on(note, vel);
                 }
             }
+            self.player = want;
         }
-        if !on {
-            return;
+        match self.player {
+            Player::Keys => {}
+            Player::Arp => {
+                let p = |k: usize| plain(&self.smoothed, ARP_BASE + k);
+                let settings = ArpSettings {
+                    mode: ArpMode::from_index(p(arp::MODE) as usize),
+                    div: p(arp::DIV) as usize,
+                    octaves: p(arp::OCTAVES) as u8,
+                    gate: p(arp::GATE),
+                    swing: p(arp::SWING),
+                    bpm,
+                    sr: self.sr,
+                };
+                self.arp.advance(n, &settings);
+                self.carry_out_arp();
+            }
+            Player::Clip => {
+                let p = |k: usize| plain(&self.smoothed, CLIP_BASE + k);
+                let settings = ClipSettings { root: p(clip::ROOT) as u8, looped: p(clip::LOOP) >= 0.5, bpm, sr: self.sr };
+                self.clip.advance(n, &self.patch.clip, &settings);
+                self.carry_out_clip();
+            }
         }
-        let p = |k: usize| plain(&self.smoothed, ARP_BASE + k);
-        let settings = ArpSettings {
-            mode: ArpMode::from_index(p(arp::MODE) as usize),
-            div: p(arp::DIV) as usize,
-            octaves: p(arp::OCTAVES) as u8,
-            gate: p(arp::GATE),
-            swing: p(arp::SWING),
-            bpm,
-            sr: self.sr,
-        };
-        self.arp.advance(n, &settings);
-        self.carry_out_arp();
+    }
+
+    fn carry_out_clip(&mut self) {
+        let events = std::mem::take(&mut self.clip.events);
+        for e in events.iter() {
+            match *e {
+                ClipEvent::On(note, vel) => self.voice_on(note, vel),
+                ClipEvent::Off(note) => self.voice_off(note),
+            }
+        }
+        self.clip.events = events;
+        self.clip.events.clear();
     }
 
     fn carry_out_arp(&mut self) {
@@ -689,6 +771,10 @@ impl Synth {
         t[tele::PEAK_L] = peak.0;
         t[tele::PEAK_R] = peak.1;
         t[tele::TAP_POS] = self.tap_pos as f32;
+        t[tele::CLIP_POS] = match (self.player, self.clip.position()) {
+            (Player::Clip, Some(pos)) => pos as f32,
+            _ => -1.0,
+        };
         match newest {
             Some(v) => {
                 t[tele::NOTE] = v.note as f32;
@@ -1283,5 +1369,42 @@ mod tests {
         arp_notes(&mut s, 6);
         let gated = s.voices.iter().filter(|v| v.active && v.gate).count();
         assert_eq!(gated, 1);
+    }
+
+    #[test]
+    fn the_clip_plays_while_a_key_is_held_transposed_by_it() {
+        let mut s = Synth::new(48_000.0);
+        s.patch.set_plain(CLIP_BASE + clip::ON, 1.0);
+        s.snap();
+        // The default clip: root, octave, root, fifth in eighths (12000
+        // samples at 120 bpm); `arp_notes` looks every 6000 samples.
+        s.note_on(62, 0.8);
+        let notes = arp_notes(&mut s, 8);
+        assert_eq!(notes[0], 62.0);
+        assert_eq!(notes[2], 74.0);
+        assert_eq!(notes[6], 69.0);
+        assert!(s.telemetry[tele::CLIP_POS] > 0.0);
+        s.note_off(62);
+        render(&mut s, 0.5);
+        assert_eq!(s.active_voices(), 0);
+        assert_eq!(s.telemetry[tele::CLIP_POS], -1.0);
+    }
+
+    #[test]
+    fn the_clip_takes_over_from_the_arpeggiator_and_hands_back() {
+        let mut s = Synth::new(48_000.0);
+        s.patch.set_plain(ARP_BASE + arp::ON, 1.0);
+        s.snap();
+        s.note_on(60, 0.8);
+        s.note_on(64, 0.8);
+        assert_eq!(arp_notes(&mut s, 2), [60.0, 64.0]);
+        s.set_param(CLIP_BASE + clip::ON, 1.0);
+        // The clip follows the last key pressed: 64 plays it a third up.
+        assert_eq!(arp_notes(&mut s, 1), [64.0]);
+        s.set_param(CLIP_BASE + clip::ON, 0.0);
+        s.set_param(ARP_BASE + arp::ON, 0.0);
+        render(&mut s, 0.5);
+        // Back to the keys alone: the chord held sounds.
+        assert_eq!(s.voices.iter().filter(|v| v.active && v.gate).count(), 2);
     }
 }

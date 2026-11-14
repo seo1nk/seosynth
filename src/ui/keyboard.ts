@@ -5,7 +5,9 @@
 import { h, clamp } from './dom.ts';
 import { noteName } from '../format.ts';
 import { Segmented, Select, Slider, Stepper, Switch } from './controls.ts';
-import type { App } from '../app.ts';
+import { ClipPanel } from './clip-panel.ts';
+import type { ClipPanel as ClipPanelApi } from './clip-panel.ts';
+import type { App, Scope } from '../app.ts';
 
 const LOW = 36; // C2
 const KEYS = 49; // four octaves and a top C
@@ -36,6 +38,13 @@ interface DemoState {
   sounding: number[];
 }
 
+/** How the keys play: as they are, through the arpeggiator, or as the clip. */
+const MODES = ['keys', 'arp', 'clip'] as const;
+export type Mode = (typeof MODES)[number];
+
+/** Where the mod wheel was left (kept when the page is rebuilt). */
+let modWheel = 0;
+
 const PHRASES: Record<string, Phrase> = {
   arp: { root: 48, steps: [0, 12, 7, 12, 3, 12, 7, 10, 0, 12, 8, 12, 3, 12, 8, 10], div: 2, gate: 0.6 },
   bass: { root: 36, steps: [0, null, 0, 12, null, 0, 3, null, 0, null, 10, 12, null, 0, 7, 5], div: 4, gate: 0.7 },
@@ -63,10 +72,15 @@ export class Keyboard {
   readonly sustained = new Set<number>();
   /** Something was played since the page opened (the guide checks this). */
   played = false;
-  /** The key lit for the note the arpeggiator is playing. */
-  arpLit: HTMLElement | null = null;
-  /** The arpeggiator has been switched on here before (its tip is shown once). */
-  arpTold = false;
+  /** The key lit for the note the arpeggiator or the clip is playing. */
+  lit: HTMLElement | null = null;
+  /** Modes whose tip was shown already (once each). */
+  readonly told = new Set<Mode>();
+  /** The drawer with the settings of the arpeggiator or the clip is open. */
+  drawerOpen = false;
+  renderDrawer: () => void = () => {};
+  /** The clip editor, while it is open. */
+  clipPanel: ClipPanelApi | null = null;
   readonly el: HTMLElement;
   midiBtn!: HTMLButtonElement;
   shiftOctave!: (d: number) => void;
@@ -78,7 +92,7 @@ export class Keyboard {
     this.app = app;
     this.el = this.#build();
     this.#bindComputerKeys();
-    app.onFrame((live) => this.#lightArp(live.gate ? live.note : -1));
+    app.onFrame((live) => this.#lightPlayed(live.gate ? live.note : -1));
   }
 
   // --- notes ------------------------------------------------------------------
@@ -149,8 +163,10 @@ export class Keyboard {
   // --- on-screen piano ----------------------------------------------------------
 
   #build(): HTMLElement {
-    const { i18n } = this.app;
-    const piano = h('div', { class: 'piano', role: 'group', 'aria-label': 'Keyboard' });
+    const app = this.app;
+    const { store, i18n } = app;
+    const t = i18n.t;
+    const piano = h('div', { class: 'piano', role: 'group', 'aria-label': t('kb.piano') });
     const whites: HTMLElement[] = [];
     for (let k = 0; k < KEYS; k++) {
       const note = LOW + k;
@@ -197,7 +213,8 @@ export class Keyboard {
     piano.addEventListener('pointerup', up);
     piano.addEventListener('pointercancel', up);
 
-    const octLabel = h('output', { class: 'kb-octave' }, 'C3');
+    // --- octave -------------------------------------------------------------------
+    const octLabel = h('output', { class: 'kb-octave', 'aria-live': 'polite' }, 'C3');
     const shift = (d: number) => {
       this.allOff();
       this.octave = clamp(this.octave + d, -2, 3);
@@ -208,54 +225,44 @@ export class Keyboard {
       }
     };
     this.shiftOctave = shift;
+    const octave = h(
+      'div',
+      { class: 'kb-group kb-octaves', role: 'group', 'aria-label': t('kb.octave') },
+      h('span', { class: 'ctl-label' }, t('kb.octave')),
+      h('button', { type: 'button', class: 'step', 'aria-label': t('kb.octave.down'), title: `${t('kb.octave.down')} ( [ )`, onclick: () => shift(-1) }, '‹'),
+      octLabel,
+      h('button', { type: 'button', class: 'step', 'aria-label': t('kb.octave.up'), title: `${t('kb.octave.up')} ( ] )`, onclick: () => shift(1) }, '›'),
+    );
 
+    // --- hold, MIDI, how the instrument answers -----------------------------------------
     const holdBtn = h(
       'button',
       {
         type: 'button',
         class: 'chip-toggle',
         'aria-pressed': 'false',
-        title: i18n.t('kb.hold.help'),
+        title: t('kb.hold.help'),
         onclick: () => {
           this.hold = !this.hold;
           holdBtn.setAttribute('aria-pressed', String(this.hold));
           if (!this.hold) this.allOff();
         },
       },
-      i18n.t('btn.hold'),
+      t('btn.hold'),
     );
-    const arp = this.#arpControls();
-    this.midiBtn = h('button', { type: 'button', class: 'chip-toggle', 'aria-pressed': 'false', onclick: () => this.#connectMidi() }, i18n.t('kb.midi'));
-    const bend = h('input', {
-      type: 'range',
-      class: 'bend',
-      min: -100,
-      max: 100,
-      value: 0,
-      'aria-label': i18n.sourceName('pitchBend'),
-      oninput: () => this.app.audio.post(['bend', Number(bend.value) / 100]),
-    });
-    const spring = () => {
-      bend.value = '0';
-      this.app.audio.post(['bend', 0]);
-    };
-    bend.addEventListener('pointerup', spring);
-    bend.addEventListener('keyup', spring);
-
-    // How the instrument answers the keys: these belong with the keyboard.
-    const settings = h(
+    this.midiBtn = h('button', { type: 'button', class: 'chip-toggle', 'aria-pressed': 'false', title: t('kb.midi.help'), onclick: () => this.#connectMidi() }, t('kb.midi'));
+    const settings: HTMLButtonElement = h(
       'button',
       {
         type: 'button',
         class: 'chip-toggle',
         'aria-haspopup': 'true',
         onclick: () => {
-          const app = this.app;
           const [content, scope] = app.inScope(() =>
             h(
               'div',
               { class: 'menu play-settings' },
-              h('div', { class: 'menu-title' }, i18n.t('kb.settings')),
+              h('div', { class: 'menu-title' }, t('kb.settings')),
               Switch(app, 'master.mono'),
               Switch(app, 'master.legato'),
               Slider(app, 'master.porta'),
@@ -267,7 +274,78 @@ export class Keyboard {
           app.popover(settings, content, { onClose: () => scope.dispose() });
         },
       },
-      i18n.t('kb.settings'),
+      t('kb.settings'),
+    );
+
+    // --- how the keys play: as they are, broken into an arpeggio, or the clip ----------
+    const modeBtns = MODES.map((m) =>
+      h('button', { type: 'button', 'aria-pressed': 'false', title: t(`kb.mode.${m}.help`), onclick: () => this.setMode(m) }, t(`kb.mode.${m}`)),
+    );
+    const modeGroup = h('div', { class: 'segmented kb-mode', role: 'group', 'aria-label': t('kb.mode') }, modeBtns);
+    const drawerBtn = h('button', { type: 'button', class: 'chip-toggle kb-drawer-btn', 'aria-expanded': 'false', onclick: () => this.openDrawer(!this.drawerOpen) });
+    const drawer = h('div', { class: 'kb-drawer', id: 'kb-drawer', hidden: true });
+    drawerBtn.setAttribute('aria-controls', 'kb-drawer');
+    let drawerScope: Scope | null = null;
+    let shown: Mode | null = null;
+    this.renderDrawer = () => {
+      const mode = this.mode();
+      modeBtns.forEach((b, k) => b.setAttribute('aria-pressed', String(MODES[k] === mode)));
+      const open = this.drawerOpen && mode !== 'keys';
+      drawerBtn.hidden = mode === 'keys';
+      drawerBtn.setAttribute('aria-expanded', String(open));
+      const what = mode === 'clip' ? 'clip' : 'arp';
+      drawerBtn.replaceChildren(
+        h('span', { class: 'long' }, t(`kb.drawer.${what}`)),
+        h('span', { class: 'short' }, t(`kb.drawer.${what}.short`)),
+        ` ${open ? '▴' : '▾'}`,
+      );
+      drawerBtn.setAttribute('aria-label', t(`kb.drawer.${what}`));
+      drawer.hidden = !open;
+      const want = open ? mode : null;
+      if (want === shown) return;
+      drawerScope?.dispose();
+      drawerScope = null;
+      this.clipPanel = null;
+      shown = want;
+      if (!want) {
+        drawer.replaceChildren();
+        return;
+      }
+      const [content, scope] = app.inScope(() => {
+        if (want === 'arp') return this.#arpSettings();
+        this.clipPanel = ClipPanel(app);
+        return this.clipPanel.el;
+      });
+      drawerScope = scope;
+      drawer.replaceChildren(content);
+    };
+    app.watch(store.idx('arp.on'), () => this.renderDrawer());
+    app.watch(store.idx('clip.on'), () => this.renderDrawer());
+    app.onDispose(() => drawerScope?.dispose());
+    this.renderDrawer();
+
+    // --- wheels: pitch bend (springs back) and modulation -------------------------------
+    const wheel = (label: string, min: number, value: number, send: (v: number) => void, spring: boolean) => {
+      const input = h('input', { type: 'range', class: 'wheel', min, max: 100, value, 'aria-label': label, 'aria-orientation': 'vertical', oninput: () => send(Number(input.value)) });
+      if (spring) {
+        const back = () => {
+          input.value = '0';
+          send(0);
+        };
+        input.addEventListener('pointerup', back);
+        input.addEventListener('pointercancel', back);
+        input.addEventListener('keyup', back);
+      }
+      return h('label', { class: 'wheel-wrap', title: label }, input, h('span', {}, label));
+    };
+    const wheels = h(
+      'div',
+      { class: 'wheels' },
+      wheel(t('kb.wheel.bend'), -100, 0, (v) => app.audio.post(['bend', v / 100]), true),
+      wheel(t('kb.wheel.mod'), 0, modWheel, (v) => {
+        modWheel = v;
+        app.audio.post(['wheel', v / 100]);
+      }, false),
     );
 
     return h(
@@ -275,90 +353,68 @@ export class Keyboard {
       { class: 'keyboard' },
       h(
         'div',
-        { class: 'kb-side' },
-        h(
-          'div',
-          { class: 'kb-row' },
-          h('span', { class: 'ctl-label' }, i18n.t('kb.octave')),
-          h('button', { type: 'button', class: 'step', 'aria-label': i18n.t('kb.octave.down'), onclick: () => shift(-1) }, '‹'),
-          octLabel,
-          h('button', { type: 'button', class: 'step', 'aria-label': i18n.t('kb.octave.up'), onclick: () => shift(1) }, '›'),
-          arp,
-        ),
-        h('div', { class: 'kb-row' }, holdBtn, this.midiBtn, settings),
-        h('label', { class: 'kb-row' }, h('span', { class: 'ctl-label' }, i18n.sourceName('pitchBend')), bend),
+        { class: 'kb-bar' },
+        h('div', { class: 'kb-group' }, h('span', { class: 'ctl-label' }, t('kb.mode')), modeGroup, drawerBtn),
+        h('div', { class: 'kb-group' }, holdBtn, octave),
+        h('div', { class: 'kb-group kb-end' }, this.midiBtn, settings),
       ),
-      piano,
+      drawer,
+      h('div', { class: 'kb-play' }, wheels, piano),
     );
   }
 
-  // --- arpeggiator --------------------------------------------------------------
+  // --- how the keys play -----------------------------------------------------------
 
-  /** The arpeggiator's switch, and a button for its settings beside it. */
-  #arpControls(): HTMLElement {
+  mode(): Mode {
+    const { store } = this.app;
+    return store.plain('clip.on') >= 0.5 ? 'clip' : store.plain('arp.on') >= 0.5 ? 'arp' : 'keys';
+  }
+
+  /** Plays the keys as they are, through the arpeggiator, or as the clip.
+   * Choosing the arpeggiator or the clip opens its settings. */
+  setMode(mode: Mode): void {
+    const { store, i18n } = this.app;
+    if (mode === this.mode()) {
+      if (mode !== 'keys') this.openDrawer(true);
+      return;
+    }
+    store.set(store.idx('arp.on'), mode === 'arp' ? 1 : 0);
+    store.set(store.idx('clip.on'), mode === 'clip' ? 1 : 0);
+    store.commit();
+    if (mode !== 'keys') {
+      this.openDrawer(true);
+      if (!this.told.has(mode)) {
+        this.told.add(mode);
+        this.app.toast(i18n.t(`kb.${mode}.tip`), 6000);
+      }
+    }
+  }
+
+  openDrawer(open: boolean): void {
+    this.drawerOpen = open;
+    this.renderDrawer();
+  }
+
+  /** The arpeggiator's settings, laid out in the drawer. */
+  #arpSettings(): HTMLElement {
     const app = this.app;
-    const { store, i18n } = app;
-    const on = store.idx('arp.on');
-    const toggle = h(
-      'button',
-      {
-        type: 'button',
-        class: 'chip-toggle',
-        'aria-pressed': 'false',
-        title: i18n.t('kb.arp.help'),
-        onclick: () => {
-          const next = store.get(on) < 0.5;
-          store.set(on, next ? 1 : 0);
-          store.commit();
-          if (next && !this.arpTold) {
-            this.arpTold = true;
-            app.toast(i18n.t('kb.arp.tip'));
-          }
-        },
-      },
-      i18n.t('kb.arp'),
+    return h(
+      'div',
+      { class: 'arp-settings' },
+      Segmented(app, 'arp.mode', { class: 'wrap' }),
+      h('div', { class: 'arp-col' }, Select(app, 'arp.div', { arrows: true }), Stepper(app, 'arp.octaves')),
+      h('div', { class: 'arp-col' }, Slider(app, 'arp.gate'), Slider(app, 'arp.swing')),
+      h('div', { class: 'arp-col' }, Slider(app, 'master.bpm'), h('p', { class: 'editor-note' }, app.i18n.t('kb.arp.hold'))),
     );
-    app.watch(on, (v) => toggle.setAttribute('aria-pressed', String(v >= 0.5)));
-    const more: HTMLButtonElement = h(
-      'button',
-      {
-        type: 'button',
-        class: 'chip-more',
-        'aria-haspopup': 'true',
-        'aria-label': i18n.t('kb.arp.settings'),
-        title: i18n.t('kb.arp.settings'),
-        onclick: () => {
-          const [content, scope] = app.inScope(() =>
-            h(
-              'div',
-              { class: 'menu play-settings arp-settings' },
-              h('div', { class: 'menu-title' }, i18n.nodeName('arp')),
-              h('p', { class: 'menu-note' }, i18n.nodeRole('arp')),
-              Switch(app, 'arp.on'),
-              Segmented(app, 'arp.mode', { class: 'wrap' }),
-              Select(app, 'arp.div', { arrows: true }),
-              Stepper(app, 'arp.octaves'),
-              Slider(app, 'arp.gate'),
-              Slider(app, 'arp.swing'),
-              Slider(app, 'master.bpm'),
-            ),
-          );
-          app.popover(more, content, { onClose: () => scope.dispose() });
-        },
-      },
-      '▾',
-    );
-    return h('span', { class: 'chip-split' }, toggle, more);
   }
 
-  /** Lights the key of the note the arpeggiator is playing (-1: none). */
-  #lightArp(note: number): void {
-    const arpOn = this.app.store.plain('arp.on') >= 0.5;
-    const el = arpOn && note >= 0 ? (this.keyEls.get(note - this.octave * 12) ?? null) : null;
-    if (el === this.arpLit) return;
-    this.arpLit?.classList.remove('arp');
+  /** Lights the key of the note the arpeggiator or the clip is playing (-1: none). */
+  #lightPlayed(note: number): void {
+    const el = this.mode() !== 'keys' && note >= 0 ? (this.keyEls.get(note - this.octave * 12) ?? null) : null;
+    if (el === this.lit) return;
+    this.lit?.classList.remove('arp');
     el?.classList.add('arp');
-    this.arpLit = el;
+    this.lit = el;
   }
 
   #bindComputerKeys() {
@@ -458,9 +514,13 @@ export class Keyboard {
     this.app.onDemo?.(true);
     const tick = () => {
       if (this.demo !== state) return;
-      // With the arpeggiator on, chords are held for it to play.
-      const name = this.app.store.plain('arp.on') >= 0.5 ? 'chords' : this.app.demoPhrase?.() ?? 'arp';
-      const phrase = PHRASES[name] ?? PHRASES.arp;
+      // The arpeggiator gets chords to play; the clip its root note, held.
+      const mode = this.mode();
+      const root = Math.round(this.app.store.plain('clip.root'));
+      const phrase =
+        mode === 'clip'
+          ? { root, steps: [0, ...Array<null>(15).fill(null)], div: 1, gate: 15.9 }
+          : (PHRASES[mode === 'arp' ? 'chords' : (this.app.demoPhrase?.() ?? 'arp')] ?? PHRASES.arp);
       const bpm = this.app.store.plain('master.bpm');
       const stepMs = 60000 / bpm / phrase.div;
       const entry = phrase.steps[state.step % phrase.steps.length];

@@ -23,12 +23,16 @@
 //!               the point before it (wrapping, the first from 0). Drawn and
 //!               recorded waves change smoothly, so the differences are small
 //!               and a share link compresses well (see web share.ts)
+//!   9 clip      varint length in ticks, then per note (in order of start):
+//!               varint start (as the difference to the note before),
+//!               pitch u8, varint length, velocity u8
 //! ```
 //!
 //! Only values that differ from the defaults are written. Unknown sections
 //! and unknown parameter ids are skipped, so old builds can open newer
 //! patches and vice versa.
 
+use crate::clip::{Clip, ClipNote};
 use crate::lfo::{default_points, sanitize_points, LfoPoint};
 use crate::params::{self, defs, osc, osc_idx, unit_on, NUM_FX, NUM_LFO, NUM_OSC, NUM_PARAMS, NUM_SLOTS, NUM_UNITS};
 use crate::wavetable::{UserTable, FACTORY_TABLES, USER_TABLES};
@@ -71,6 +75,8 @@ pub struct Patch {
     pub fx_lane: [u8; NUM_UNITS],
     /// Wavetables drawn or imported by the user.
     pub user_tables: [UserTable; USER_TABLES],
+    /// The pattern the clip sequencer plays.
+    pub clip: Clip,
 }
 
 /// Where a unit sits relative to the fork in the effect chain.
@@ -162,6 +168,7 @@ impl Patch {
             fx_order: DEFAULT_FX_ORDER,
             fx_lane: [lane::MAIN; NUM_UNITS],
             user_tables: Default::default(),
+            clip: Clip::default(),
         }
     }
 
@@ -307,6 +314,20 @@ impl Patch {
             }
             section(&mut out, 8, &buf);
         }
+
+        if self.clip != Clip::default() {
+            buf.clear();
+            varint(&mut buf, self.clip.length);
+            let mut prev = 0;
+            for n in &self.clip.notes {
+                varint(&mut buf, n.start - prev);
+                prev = n.start;
+                buf.push(n.pitch);
+                varint(&mut buf, n.length);
+                buf.push(n.velocity);
+            }
+            section(&mut out, 9, &buf);
+        }
         out
     }
 
@@ -410,6 +431,21 @@ impl Patch {
                         patch.user_tables[slot] = table;
                     }
                 }
+                9 => {
+                    let length = s.varint()?;
+                    let mut notes = Vec::new();
+                    let mut start = 0u32;
+                    while !s.done() && notes.len() < crate::clip::MAX_NOTES {
+                        start = start.saturating_add(s.varint()?);
+                        let pitch = s.u8()?;
+                        let len = s.varint()?;
+                        let velocity = s.u8()?;
+                        notes.push(ClipNote { pitch, start, length: len, velocity });
+                    }
+                    if let Some(clip) = Clip::new(length, &notes) {
+                        patch.clip = clip;
+                    }
+                }
                 _ => {} // unknown section from a newer version: skip
             }
         }
@@ -510,6 +546,15 @@ mod tests {
         p.set_plain(osc_idx(1, osc::USER), 2.0);
         let ramp: Vec<i8> = (0..2 * crate::wavetable::USER_POINTS).map(|i| (i as i32 - 128) as i8).collect();
         p.user_tables[1] = UserTable::new(&ramp).unwrap();
+        p.clip = Clip::new(
+            crate::clip::PPQ * 8,
+            &[
+                ClipNote { pitch: 48, start: 0, length: 90, velocity: 127 },
+                ClipNote { pitch: 55, start: 0, length: 40, velocity: 1 },
+                ClipNote { pitch: 72, start: 700, length: 68, velocity: 64 },
+            ],
+        )
+        .unwrap();
         p
     }
 
@@ -531,6 +576,8 @@ mod tests {
         assert_eq!(q.user_tables, p.user_tables);
         assert_eq!(q.user_tables[1].frames(), 2);
         assert_eq!(q.user_tables[0], UserTable::default());
+        assert_eq!(q.clip, p.clip);
+        assert_eq!(Patch::from_bytes(&Patch::init().to_bytes()).unwrap().clip, Clip::default());
         assert_eq!(q.table_index(0), 0);
         assert_eq!(q.table_index(1), FACTORY_TABLES + 1);
         for i in 0..NUM_PARAMS {

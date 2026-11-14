@@ -56,6 +56,8 @@ export interface TeleLayout {
   pitch: number;
   tapPos: number;
   gate: number;
+  /** Where the clip sequencer is, in ticks; -1 while it is not playing. */
+  clipPos: number;
   compReduction: number;
   envPos: number;
   envVal: number;
@@ -80,6 +82,8 @@ export interface EngineInfo {
   userPoints: number;
   userMaxFrames: number;
   divisionBeats: number[];
+  /** The clip sequencer: ticks per quarter note and the limits of a clip. */
+  clip: { ppq: number; minLength: number; maxLength: number; maxNotes: number };
   numSlots: number;
   numVoices: number;
   block: number;
@@ -101,6 +105,21 @@ export interface LfoPoint {
   x: number;
   y: number;
   curve: number;
+}
+
+/** A note of the clip sequencer. Times are in ticks (`info.clip.ppq` to a
+ * quarter note); pitch and velocity are MIDI values. */
+export interface ClipNote {
+  pitch: number;
+  start: number;
+  length: number;
+  velocity: number;
+}
+
+/** The clip as the engine keeps it. */
+export interface ClipData {
+  length: number;
+  notes: ClipNote[];
 }
 
 /** The effect chain: unit indices in processing order, and the lane of each unit. */
@@ -127,6 +146,8 @@ export interface EngineExports {
   telemetry_ptr(): number;
   note_on(note: number, velocity: number): void;
   note_off(note: number): void;
+  audition_on(note: number, velocity: number): void;
+  audition_off(note: number): void;
   all_notes_off(): void;
   panic_stop(): void;
   pitch_bend(v: number): void;
@@ -148,6 +169,9 @@ export interface EngineExports {
   table_offer_ready(): void;
   user_table_set(slot: number, frames: number): number;
   user_table_get(slot: number): number;
+  clip_set(len: number): number;
+  clip_get(): number;
+  clip_default(): number;
   fx_chain_set(): number;
   fx_chain_get(): number;
   name_set(len: number): void;
@@ -175,6 +199,9 @@ export type AudioMessage =
   | ['param', number, number]
   | ['on', number, number]
   | ['off', number]
+  /** A note straight on the voices, past the arpeggiator and the clip. */
+  | ['hear', number, number]
+  | ['unhear', number]
   | ['patch', Uint8Array]
   | ['bend', number]
   | ['wheel', number]

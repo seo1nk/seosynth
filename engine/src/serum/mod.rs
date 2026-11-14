@@ -948,6 +948,9 @@ pub fn build(patch: &Patch) -> (Value, Vec<String>, Vec<usize>) {
     if c.on("arp.on") {
         c.note("arp", "");
     }
+    if c.on("clip.on") {
+        c.note("clip", "");
+    }
     d.set("Global0", module(global));
 
     mod_slots(&mut c, &mut d);

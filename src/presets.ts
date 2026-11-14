@@ -74,8 +74,8 @@ export const PRESETS: Preset[] = [
     cat: 'learn',
     demo: 'chords',
     note: [
-      '和音を押さえたままにすると、1 音ずつ順番に鳴ります。鍵盤の横の「アルペジオ ▾」で順番やオクターブを変えてみましょう。',
-      'Hold a chord and its notes play one by one. Try another order or more octaves under "Arpeggio ▾" next to the keyboard.',
+      '和音を押さえたままにすると、1 音ずつ順番に鳴ります。鍵盤の上の「アルペジオの設定」で順番やオクターブを変えてみましょう。',
+      'Hold a chord and its notes play one by one. Try another order or more octaves under "Arpeggio settings" above the keyboard.',
     ],
     params: {
       'arp.on': true, 'arp.octaves': 2, 'arp.gate': 0.45,
@@ -86,6 +86,25 @@ export const PRESETS: Preset[] = [
       'delay.on': true, 'delay.mode': 'PingPong', 'delay.mix': 0.2, 'delay.divL': '1/8.', 'reverb.on': true, 'reverb.mix': 0.2,
     },
     mods: [mod('env2', 'filter.cutoff', 0.35)],
+  },
+  {
+    name: 'Learn: Clip Sequencer',
+    ja: '学ぶ：クリップシーケンサー',
+    cat: 'learn',
+    demo: 'clip',
+    note: [
+      '鍵盤を 1 つ押さえたままにすると、フレーズがくり返されます。別の鍵盤では高さが変わります。「クリップを編集」で音を書き換えてみましょう。',
+      'Hold one key and the phrase plays over and over; another key moves it. Change its notes under "Edit the clip".',
+    ],
+    params: {
+      'clip.on': true, 'master.mono': true, 'master.legato': true, 'master.porta': 0.03,
+      'oscA.oct': -1, 'oscA.wt': 'Basic Shapes', 'oscA.pos': 0.66, 'sub.on': true, 'sub.level': 0.55,
+      'filter.type': 'Ladder24', 'filter.cutoff': 420, 'filter.res': 0.45,
+      'env2.attack': 0.001, 'env2.decay': 0.18, 'env2.sustain': 0,
+      'env1.decay': 0.3, 'env1.sustain': 0.4, 'env1.release': 0.06,
+      'dist.on': true, 'dist.drive': 0.25, 'delay.on': true, 'delay.mix': 0.15,
+    },
+    mods: [mod('env2', 'filter.cutoff', 0.42), mod('velocity', 'filter.cutoff', 0.12)],
   },
 
   // --- Bass ---------------------------------------------------------------------

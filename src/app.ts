@@ -42,6 +42,8 @@ export interface Live {
   readonly note: number;
   /** The newest note is still held (not ringing out). */
   readonly gate: boolean;
+  /** Where the clip sequencer is, in ticks, or -1 while it is not playing. */
+  readonly clipPos: number;
   readonly pitch: number;
   readonly peakL: number;
   readonly peakR: number;

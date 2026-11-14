@@ -206,6 +206,38 @@ test('a shared patch survives the URL round trip', async () => {
   assert.equal(must(a.lfoShapes)[1].length, must(b.lfoShapes)[1].length);
 });
 
+test('the clip survives JSON, the share link and undo', async () => {
+  const { store, posted } = await makeStore();
+  const clip = { length: 96 * 8, notes: [{ pitch: 48, start: 0, length: 96, velocity: 120 }, { pitch: 55, start: 384, length: 48, velocity: 60 }] };
+  assert.ok(store.setClip(clip));
+  assert.equal(posted.at(-1)?.[0], 'patch', 'the audio thread gets the new clip');
+  store.commit();
+  assert.deepEqual(store.getClip(), clip);
+  const json = store.toJSON();
+  assert.deepEqual(json.clip, { length: 768, notes: [[48, 0, 96, 120], [55, 384, 48, 60]] });
+  const { store: other } = await makeStore();
+  assert.deepEqual(other.fromJSON(JSON.parse(JSON.stringify(json))), []);
+  assert.deepEqual(other.getClip(), clip);
+  const { store: third } = await makeStore();
+  assert.ok(third.loadBytes(must(await decodeHash(await encodeHash(store.toBytes())))));
+  assert.deepEqual(third.getClip(), clip);
+  // The untouched clip is not written, and undo brings the old one back.
+  assert.equal((await makeStore()).store.toJSON().clip, undefined);
+  store.setClip({ length: 96 * 4, notes: [] });
+  store.commit();
+  store.undo();
+  assert.deepEqual(store.getClip(), clip);
+  // Invalid clips are refused.
+  assert.equal(store.setClip({ length: 5, notes: [] }), false);
+  assert.deepEqual(other.fromJSON({ params: {}, clip: { length: 384, notes: [[60, -1, 1, 1]] } } as unknown as PatchJSON), ['skipped clip']);
+});
+
+test('Serum export: the clip is reported as not carried over', async () => {
+  const { store } = await makeStore();
+  store.fromJSON({ params: { 'clip.on': true } });
+  assert.ok(store.core.serumExport().notes.some((n) => n.code === 'clip'));
+});
+
 test('value formatting', async () => {
   const { store } = await makeStore();
   const f = (key: string, plain: number) => formatValue(store.def(store.idx(key)), plain);

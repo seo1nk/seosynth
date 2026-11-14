@@ -6,7 +6,7 @@
 //! Signal flow:
 //!
 //! ```text
-//! keys ─► ARP (when on) ─► voices, each of them:
+//! keys ─► CLIP or ARP (when on) ─► voices, each of them:
 //!
 //! OSC A ─┐
 //! OSC B ─┤
@@ -19,6 +19,7 @@
 
 pub mod api;
 pub mod arp;
+pub mod clip;
 pub mod env;
 pub mod fft;
 pub mod filter;

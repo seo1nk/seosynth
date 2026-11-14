@@ -24,4 +24,7 @@ export interface PatchJSON {
   fxLanes?: Record<string, string>;
   /** User wavetables by number: frames of signed byte points. */
   userTables?: Record<string, number[][]>;
+  /** The clip sequencer's notes, in ticks of 96 to a quarter note:
+   * [pitch, start, length, velocity]. */
+  clip?: { length: number; notes: [number, number, number, number][] };
 }

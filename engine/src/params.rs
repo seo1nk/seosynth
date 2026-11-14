@@ -379,6 +379,14 @@ pub mod arp {
     pub const N: usize = 6;
 }
 
+/// The clip sequencer (see `clip`). The notes live in the patch.
+pub mod clip {
+    pub const ON: usize = 0;
+    pub const ROOT: usize = 1;
+    pub const LOOP: usize = 2;
+    pub const N: usize = 3;
+}
+
 pub const OSC_BASE: usize = master::N;
 pub const SUB_BASE: usize = OSC_BASE + NUM_OSC * osc::N;
 pub const NOISE_BASE: usize = SUB_BASE + sub::N;
@@ -401,7 +409,8 @@ pub const FXFILTER_BASE: usize = EQ_BASE + eq::N;
 pub const FX_BLOCK: usize = FXFILTER_BASE + fxfilter::N - HYPER_BASE;
 pub const SPLIT_BASE: usize = HYPER_BASE + FX_COPIES * FX_BLOCK;
 pub const ARP_BASE: usize = SPLIT_BASE + split::N;
-pub const NUM_PARAMS: usize = ARP_BASE + arp::N;
+pub const CLIP_BASE: usize = ARP_BASE + arp::N;
+pub const NUM_PARAMS: usize = CLIP_BASE + clip::N;
 
 #[inline]
 pub const fn osc_idx(o: usize, p: usize) -> usize {
@@ -834,6 +843,12 @@ fn build() -> Vec<ParamDef> {
     b.num(i(arp::GATE), 864, "arp.gate", 0.05, 1.0, 0.6, Lin, "%", F_GLOBAL);
     b.num(i(arp::SWING), 865, "arp.swing", 0.0, 1.0, 0.0, Lin, "%", F_GLOBAL);
 
+    // --- the clip sequencer -------------------------------------------------
+    let i = |p: usize| CLIP_BASE + p;
+    b.flag(i(clip::ON), 870, "clip.on", false, F_GLOBAL);
+    b.int(i(clip::ROOT), 871, "clip.root", 24, 96, 60, "note", F_GLOBAL);
+    b.flag(i(clip::LOOP), 872, "clip.loop", true, F_GLOBAL);
+
     assert_eq!(b.defs.len(), NUM_PARAMS);
     b.defs
 }
@@ -962,6 +977,8 @@ mod tests {
             ("split.balance", 702),
             ("arp.on", 860),
             ("arp.swing", 865),
+            ("clip.on", 870),
+            ("clip.loop", 872),
         ];
         for (key, sid) in expect {
             let i = index_of_key(key).expect(key);

@@ -67,6 +67,7 @@ async function boot() {
     get voices() { return tele ? tele[T.voices] : 0; },
     get note() { return tele ? tele[T.note] : -1; },
     get gate() { return tele ? tele[T.gate] > 0.5 : false; },
+    get clipPos() { return tele ? tele[T.clipPos] : -1; },
     get pitch() { return tele ? tele[T.pitch] : 60; },
     get peakL() { return tele ? tele[T.peakL] : 0; },
     get peakR() { return tele ? tele[T.peakR] : 0; },

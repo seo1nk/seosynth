@@ -3,7 +3,7 @@
 // drawing previews) and in Node tests. The audio thread talks to its own
 // instance directly, see worklet.ts.
 
-import type { EngineExports, EngineInfo, FxChain, LfoPoint, ParamInfo, SerumNote, Slot } from './types.ts';
+import type { ClipData, EngineExports, EngineInfo, FxChain, LfoPoint, ParamInfo, SerumNote, Slot } from './types.ts';
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
@@ -127,6 +127,44 @@ export class EngineCore {
     if (points.length % per !== 0 || points.length > per * this.info.userMaxFrames) return false;
     this.#bytes().set(new Uint8Array(points.buffer, points.byteOffset, points.length));
     return this.x.user_table_set(slot, points.length / per) === 1;
+  }
+
+  // --- clip sequencer -----------------------------------------------------------
+
+  /** The clip the clip sequencer plays. */
+  getClip(): ClipData {
+    return this.#readClip(this.x.clip_get());
+  }
+  /** The clip a new patch starts with. */
+  defaultClip(): ClipData {
+    return this.#readClip(this.x.clip_default());
+  }
+  /** Returns false, changing nothing, if the clip is not valid (length out
+   * of range). Notes outside it are dropped and long notes are cut. */
+  setClip(clip: ClipData): boolean {
+    const notes = clip.notes.slice(0, this.info.clip.maxNotes);
+    const b = new DataView(new ArrayBuffer(6 + notes.length * 10));
+    b.setUint32(0, Math.round(clip.length), true);
+    b.setUint16(4, notes.length, true);
+    notes.forEach((n, k) => {
+      const at = 6 + k * 10;
+      b.setUint8(at, n.pitch);
+      b.setUint32(at + 1, Math.max(0, Math.round(n.start)), true);
+      b.setUint32(at + 5, Math.max(0, Math.round(n.length)), true);
+      b.setUint8(at + 9, n.velocity);
+    });
+    this.#bytes().set(new Uint8Array(b.buffer));
+    return this.x.clip_set(b.byteLength) === 1;
+  }
+  #readClip(size: number): ClipData {
+    const bytes = this.#bytes().slice(0, size);
+    const b = new DataView(bytes.buffer);
+    const count = b.getUint16(4, true);
+    const notes = Array.from({ length: count }, (_, k) => {
+      const at = 6 + k * 10;
+      return { pitch: b.getUint8(at), start: b.getUint32(at + 1, true), length: b.getUint32(at + 5, true), velocity: b.getUint8(at + 9) };
+    });
+    return { length: b.getUint32(0, true), notes };
   }
 
   /**

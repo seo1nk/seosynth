@@ -75,6 +75,12 @@ class SeosynthProcessor extends AudioWorkletProcessor {
       case 'off':
         x.note_off(m[1]);
         break;
+      case 'hear':
+        x.audition_on(m[1], m[2]);
+        break;
+      case 'unhear':
+        x.audition_off(m[1]);
+        break;
       case 'patch': {
         const bytes = m[1];
         const ptr = x.io_ptr(); // before taking the buffer: may allocate

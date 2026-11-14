@@ -262,27 +262,6 @@ p {
   border-color: var(--ink);
   color: var(--paper);
 }
-/* A switch with its settings button joined on the right. */
-.chip-split {
-  display: inline-flex;
-  flex: none;
-}
-.chip-split .chip-toggle {
-  border-radius: 999px 0 0 999px;
-  padding-right: 9px;
-}
-.chip-more {
-  padding: 5px 9px 5px 7px;
-  border-radius: 0 999px 999px 0;
-  border: 1.5px solid var(--rule);
-  border-left: 0;
-  background: var(--paper);
-  font-size: 11px;
-  line-height: 1;
-}
-.chip-split .chip-toggle[aria-pressed='true'] + .chip-more {
-  border-color: var(--ink);
-}
 
 .link {
   padding: 0;
@@ -1471,26 +1450,6 @@ input[type='range'] {
 .play-settings .menu-title {
   padding-left: 0;
 }
-.menu-note {
-  margin: -6px 0 0;
-  font-size: 12.5px;
-  color: var(--muted);
-}
-/* Six orders of play: two rows of three. */
-.arp-settings .wrap .segmented {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-}
-.arp-settings .wrap .segmented button {
-  border-left: 0;
-  border-top: 1.5px solid var(--rule);
-}
-.arp-settings .wrap .segmented button:nth-child(-n + 3) {
-  border-top: 0;
-}
-.arp-settings .wrap .segmented button:not(:nth-child(3n + 1)) {
-  border-left: 1.5px solid var(--rule);
-}
 .sound-menu {
   display: grid;
   grid-template-columns: repeat(2, minmax(190px, 1fr));
@@ -1708,29 +1667,34 @@ input[type='range'] {
 }
 .keyboard {
   display: flex;
-  gap: 16px;
-  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-  align-items: stretch;
-}
-.kb-side {
-  display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  gap: 5px;
-  width: 324px;
-  flex: none;
+  gap: 8px;
+  padding: 8px 16px calc(10px + env(safe-area-inset-bottom));
 }
-.kb-row {
+/* The bar above the keys: how they play, then octave and hold, then the
+   connection and the instrument's own settings at the far end. */
+.kb-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+}
+.kb-group {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.kb-row .ctl-label {
-  flex: none;
-  min-width: 78px;
+.kb-end {
+  margin-left: auto;
 }
-.kb-row .step {
+.kb-mode button {
+  padding: 5px 12px;
+}
+.kb-group .step {
   height: 28px;
+}
+.kb-drawer-btn .short {
+  display: none;
 }
 .kb-octave {
   min-width: 34px;
@@ -1738,10 +1702,161 @@ input[type='range'] {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+/* The settings of the arpeggiator or the clip, between the bar and the keys. */
+.kb-drawer {
+  border: 1.5px solid var(--ink);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--paper);
+}
+.arp-settings {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) repeat(3, minmax(160px, 1fr));
+  gap: 10px 18px;
+  align-items: start;
+}
+.arp-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.arp-settings .wrap .segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+.arp-settings .wrap .segmented button {
+  border-left: 0;
+  border-top: 1.5px solid var(--rule);
+}
+.arp-settings .wrap .segmented button:nth-child(-n + 3) {
+  border-top: 0;
+}
+.arp-settings .wrap .segmented button:not(:nth-child(3n + 1)) {
+  border-left: 1.5px solid var(--rule);
+}
+.kb-play {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+/* Pitch bend and mod wheel, upright like on a hardware keyboard. */
+.wheels {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+.wheel-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 34px;
+  white-space: nowrap;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.wheel {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 26px;
+  flex: 1;
+  min-height: 60px;
+  margin: 0;
+  accent-color: var(--ink);
+}
+/* The clip editor. */
+.clip-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.clip-tools,
+.clip-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.clip-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.clip-tools .clip-root {
+  width: 200px;
+}
+.btn.play-btn[aria-pressed='true'],
+.btn.play-btn[aria-pressed='true']:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+.play-icon {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 9px solid currentColor;
+  border-top: 5.5px solid transparent;
+  border-bottom: 5.5px solid transparent;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+.play-btn[aria-pressed='true'] .play-icon {
+  width: 9px;
+  height: 10px;
+  border: 0;
+  background: currentColor;
+}
+.clip-roll {
+  height: clamp(180px, 30vh, 300px);
+  border: 1.5px solid var(--ink);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.clip-roll .pianoroll {
+  height: 100%;
+  --pr-bg: var(--paper);
+  --pr-row-alt: var(--well);
+  --pr-line: color-mix(in srgb, var(--rule) 60%, transparent);
+  --pr-beat-line: var(--rule);
+  --pr-bar-line: var(--faint);
+  --pr-outside: color-mix(in srgb, var(--ink) 7%, transparent);
+  --pr-note: var(--sound);
+  --pr-note-edge: color-mix(in srgb, var(--sound) 55%, var(--ink));
+  --pr-note-selected: var(--ink);
+  --pr-note-text: var(--paper);
+  --pr-band: color-mix(in srgb, var(--sound) 18%, transparent);
+  --pr-text: var(--muted);
+  /* The keys look like the keyboard below, in either theme. */
+  --pr-key-white: #fff;
+  --pr-key-black: #172a3a;
+  --pr-key-text: #5b6975;
+  --pr-playhead: var(--mod-lfo2);
+}
+.clip-sel {
+  font-size: 13px;
+  font-weight: 700;
+  min-width: 9em;
+}
+.clip-vel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.clip-vel input {
+  width: 140px;
+  accent-color: var(--ink);
+}
+.clip-hint {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--muted);
+}
 .piano {
   flex: 1;
   display: flex;
-  height: 92px;
+  height: 104px;
   touch-action: none;
   border: 1.5px solid var(--ink);
   border-radius: 10px;
@@ -1882,24 +1997,51 @@ input[type='range'] {
     bottom: 10px;
   }
   .keyboard {
-    flex-direction: column;
-    gap: 8px;
-    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+    gap: 6px;
+    padding: 6px 10px calc(8px + env(safe-area-inset-bottom));
   }
-  .kb-side {
-    width: 100%;
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 6px 12px;
+  .kb-bar {
+    gap: 6px 10px;
   }
-  .kb-side label.kb-row {
+  .kb-bar .ctl-label {
     display: none;
   }
-  .kb-row .ctl-label {
-    min-width: 0;
+  .kb-end {
+    margin-left: 0;
+  }
+  .kb-bar .chip-toggle,
+  .kb-mode button {
+    padding: 5px 9px;
+    font-size: 12.5px;
+  }
+  .kb-drawer-btn .long {
+    display: none;
+  }
+  .kb-drawer-btn .short {
+    display: inline;
+  }
+  .kb-drawer {
+    padding: 8px;
+    max-height: 52vh;
+    overflow: auto;
+  }
+  .arp-settings {
+    grid-template-columns: 1fr;
+  }
+  .clip-tools .clip-root {
+    width: 100%;
+  }
+  .clip-roll {
+    height: 34vh;
+  }
+  .wheel-wrap {
+    width: 28px;
+    font-size: 9.5px;
+  }
+  .wheel {
+    width: 20px;
   }
   .piano {
-    flex: none;
     height: 96px;
   }
   /* Two octaves are enough on a phone; the octave buttons reach the rest. */

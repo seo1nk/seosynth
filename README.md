@@ -38,8 +38,9 @@ Rust で書いたシンセエンジンを WebAssembly にして、ブラウザ�
 | フィルター | ×2（直列、または並列で音源ごとに行き先を選ぶ）。19 種類（LP / HP / BP / ノッチ / ピーク / ラダー / モーフ / コム / フェイザー / フォルマント ほか）、ドライブ、キー追従、ステレオ |
 | うごき | エンベロープ ×3（AHDSR＋カーブ）、LFO ×4（プリセット波形または自分で描く、テンポ同期）、マクロ ×4、弾く強さ／音の高さ／MOD ホイールなど。最大 32 のつながり |
 | エフェクト | ハイパー、ディストーション、フランジャー、フェイザー、コーラス、ディレイ、コンプレッサー、リバーブ、EQ、全体フィルター。順番を入れ替え可能、同じものを 3 つまで重ねがけ、途中で 2 本に分岐（同じ音を 2 つに／低音と高音／中央と左右／左と右） |
-| 演奏 | 画面の鍵盤、PC キーボード、MIDI キーボード（Web MIDI）、「聴く」ボタンでのフレーズ再生、ポリ 16 声／モノ／レガート／グライド |
-| アルペジエーター | 押さえた鍵盤をテンポに合わせて 1 音ずつ鳴らします。順番 6 種（上へ／下へ／上下／弾いた順／ランダム／和音）、1 音の長さ（音符）、1〜4 オクターブ、音の長さ、スウィング。鍵盤の横のボタンでオン／オフし、鳴っている音の鍵盤が光ります |
+| 演奏 | 画面の鍵盤、PC キーボード、MIDI キーボード（Web MIDI）、ピッチベンドと MOD ホイール、「聴く」ボタンでのフレーズ再生、ポリ 16 声／モノ／レガート／グライド。鍵盤の上の「鳴らし方」で、ふつう／アルペジオ／クリップを切り替えます。アルペジオとクリップの設定は鍵盤の上の引き出しに開き、鳴っている音の鍵盤が光ります |
+| アルペジエーター | 押さえた鍵盤をテンポに合わせて 1 音ずつ鳴らします。順番 6 種（上へ／下へ／上下／弾いた順／ランダム／和音）、1 音の長さ（音符）、1〜4 オクターブ、音の長さ、スウィング |
+| クリップシーケンサー | ピアノロールに書いた 1〜8 小節のフレーズを、鍵盤を押さえているあいだくり返します。押した鍵盤に合わせて高さが変わります（基準の音を押すと書いたとおり）。音の追加・移動・長さ・強さ・まとめて選択・複製、マス目（1/4〜1/32、3 連符）、1 回だけ鳴らす設定。描いている途中も音が鳴り、再生位置が線で見えます |
 
 **共有と書き出し**
 
@@ -53,7 +54,7 @@ Rust で書いたシンセエンジンを WebAssembly にして、ブラウザ�
 - 書き出したファイルは、別実装の zstd／CBOR デコーダーで読み戻し、Serum 2 の初期プリセットとモジュール構成が一致することを確認しています。Serum 2 本体でも読み込み、おおむね意図どおりに鳴ることを確認しました。うまく読み込めない音色があれば Issue で教えてください
 - seosynth と Serum は別のシンセなので、同じ音にはなりません。スライダーの位置、つながり、エフェクトの順番を移し替えるものです。移し替えられなかった項目は、書き出しダイアログの「変換メモ」に表示されます
 - 重ねたエフェクトは、同じ種類のモジュールを並べて書き出します。分岐は Serum 側の配線の書き方が確認できていないため、1 本に並べ直して書き出します
-- アルペジエーターの設定は、Serum 側の書き方が確認できていないため移し替えません
+- アルペジエーターとクリップシーケンサーは、Serum 側の書き方が確認できていないため移し替えません
 - Serum はウェーブテーブルを自分のフォルダから読み込むため、テーブルは WAV として別に書き出します。`Serum 2 Presets/Tables/seosynth/` に置いてください（ZIP にまとめてダウンロードできます）
 
 形式の調査で参考にしたもの：
@@ -93,7 +94,7 @@ flowchart LR
 
 **音の流れ**
 
-0. 鍵盤の音は、アルペジエーターがオンならいったんそこに集まり、テンポに合わせて 1 音ずつボイスに送られます。アルペジエーターは押さえている鍵盤をいつも覚えているので、和音を押さえたままオンにすればすぐ鳴り始め、オフにすれば押さえている和音がそのまま鳴ります。拍の位置は 32 サンプルごとの区切りで鳴らしますが、時計は端数まで持つのでずれていきません
+0. 鍵盤の音は、クリップシーケンサーかアルペジエーターがオンならいったんそこに集まり、そこからボイスが鳴らされます（両方オンならクリップが優先）。どちらも押さえている鍵盤をいつも覚えているので、和音を押さえたまま切り替えてもすぐ引き継がれ、両方オフにすれば押さえている和音がそのまま鳴ります。音の頭は 32 サンプルごとの区切りで鳴らしますが、時計は端数まで持つのでずれていきません。クリップの時間は 4 分音符を 96 に分けた単位（ティック）で数えます
 1. 1 ボイスごとに、オシレーター A・B・C（ウェーブテーブル）、サブ、ノイズ → フィルター → アンプ（エンベロープ 1）。音源ごとにフィルターを通すか迂回するかを選べます。フィルター 2 はフィルター 1 の後ろ（直列）か横（並列）につなぎ、並列では音源ごとにフィルター 1・2・両方を選びます（両方は半分ずつ足すので、素通しなら音量は変わりません）。FM・AM・RM の変調元は、A は B、B は A、C は A です
 2. 最大 16 ボイスを足し合わせ、エフェクトチェーンへ
 3. エフェクトは 10 種類 × 3 つ = 30 個のユニットで、並び順と「通る道」（本線・A・B）をユニットごとに持ちます。分岐は 1 か所までで、最初に道 A か B を持つユニットの位置で 2 本に分かれ、まとめ直されます。分け方は、同じ音を 2 つに／低音と高音（4 次の Linkwitz-Riley クロスオーバー）／中央と左右／左と右です
@@ -107,7 +108,7 @@ flowchart LR
 
 **パラメーターとモジュレーション**
 
-- 全 422 パラメーターを 1 つの表（`params.rs`）で管理します。値は 0〜1 に正規化して持ち、表示や計算のときに実際の単位へ変換します
+- 全 425 パラメーターを 1 つの表（`params.rs`）で管理します。値は 0〜1 に正規化して持ち、表示や計算のときに実際の単位へ変換します
 - 各パラメーターには変わらない「安定 ID」があり、保存形式はこの ID で記録します。パラメーターを足しても、古い URL やファイルはそのまま開けます
 - 17 のモジュレーション元（エンベロープ、LFO、弾く強さ、マクロなど）を最大 32 本、220 のパラメーターにつなげます。モジュレーションは正規化した値の上で足し合わせます。ボイスごとのもの（フィルターなど）と全体で 1 つのもの（エフェクトなど）を分けて計算します
 
@@ -130,6 +131,7 @@ flowchart LR
 | 6 | エフェクトの順番と通る道 |
 | 7 | 自分のウェーブテーブル（旧形式。読み込みのみ） |
 | 8 | 自分のウェーブテーブル（1 コマ 128 バイト。各点を前の点との差で記録するので、圧縮がよく効きます。声から取り込んだ 16 コマで約 1,500 文字） |
+| 9 | クリップシーケンサーのフレーズ（長さと、音ごとに開始位置の差・高さ・長さ・強さ） |
 
 詳細は `engine/src/patch.rs` の冒頭にあります。ファイル保存には、同じ内容を読みやすくした JSON を使います。
 
@@ -139,6 +141,7 @@ flowchart LR
 - `Store` がパッチへの操作の唯一の入り口です。変更をメインスレッドのエンジンに反映し、音声スレッドへ送り、表示している部品に知らせます。取り消し／やり直しは、パッチのバイナリを履歴として持つ方式です
 - 画面の部品は `app` オブジェクト（`src/app.ts`）を受け取って組み立てます。購読はその部品の「スコープ」に登録され、パネルを閉じたときや言語を切り替えたときにまとめて解除されます
 - ボード（`ui/board.ts`）は、ノードの並び・分岐・折り返しの配置を計算して、線を SVG で描きます。ノードを押すと、種類ごとの組み立て関数（`ui/panel.ts`）が設定パネルを作ります
+- ピアノロール（`pianoroll/`）は、ほかのアプリにもそのまま持っていけるよう、このフォルダの外を一切読み込まない独立したモジュールです。文言は引数で、色は CSS 変数で外から渡します。データはノートごとに変わらない ID を持ち、編集はすべて「操作」（追加・削除・値の変更・長さの変更）の列として外に出ます。操作は適用・取り消し（逆操作）・差分の計算ができ、消えたノートへの操作は読み飛ばすので、複数人の同時編集にもそのまま使える形です。seosynth 側（`ui/clip-panel.ts`）は、操作をエンジンのフレーズに反映し、ジェスチャーの終わりで取り消しの区切りを記録するだけです。詳しくは `src/pianoroll/README.md`
 - 音声ファイルからのウェーブテーブル作成（`wavetable-import.ts`）は、YIN 法で音の高さを求め、数周期ぶんから倍音の強さと位相を測り、基音の位相をそろえて 128 点に直します
 
 ### ディレクトリ構成
@@ -154,6 +157,7 @@ engine/              Rust のシンセエンジン
   src/env.rs lfo.rs    エンベロープ、LFO
   src/voice.rs         1 ボイス：音源 → フィルター → アンプ
   src/arp.rs           アルペジエーター（鍵盤とボイスのあいだ）
+  src/clip.rs          クリップシーケンサー（フレーズのデータと再生）
   src/fx/              エフェクトと、それを並べるチェーン（重ねがけ、分岐）
   src/synth.rs         ボイス管理、モジュレーション、タップとテレメトリ
   src/patch.rs         パッチと共有用バイナリ形式
@@ -170,6 +174,9 @@ src/                 画面（TypeScript）
   ui/controls.ts       スライダーなどの部品
   ui/displays.ts       波形・フィルター特性・エンベロープ・LFO の表示
   ui/table-editor.ts   波形を描く画面
+  ui/keyboard.ts       鍵盤、鳴らし方の切り替え、ホイール、MIDI
+  ui/clip-panel.ts     クリップの編集（ピアノロールと seosynth のつなぎ）
+  pianoroll/           独立したピアノロール（データモデルと操作、編集部品）
   wavetable-import.ts  音声ファイルから波形を取り出す解析
   i18n.ts              文言（日本語／英語）
   presets.ts           内蔵プリセット
@@ -191,10 +198,10 @@ seosynth is a wavetable synthesizer for the browser. The DSP engine is dependenc
 - **The whole sound as a graph.** The centre of the screen is a whiteboard you can drag and pinch-zoom. Nodes on the signal path have on/off switches, and the sound line runs through every node that is switched on to the output, brightening where sound flows. Sources run in parallel; effects that are off wait in a tray below. Effects can be stacked (up to three of each) and the chain can split into two lanes that run side by side (two copies, lows and highs, centre and sides, or left and right) and join again. Pressing a node opens its settings (a side panel on desktop, a bottom sheet on phones) with sliders, a picture of the sound going in and coming out, and an explanation.
 - **Movement on its own layer.** LFOs, envelopes, macros and playing gestures float on a separate plane. You add one, pick the node and slider it should move, and a coloured tag and dashed line show where it acts.
 - **Wavetables of your own.** Draw one cycle of the wave with the pointer and hear it change as you draw; add frames to make it morph. Or choose an audio file: its pitch is detected and its waveforms become the frames, all inside the browser. These tables travel in the share link too.
-- **Synth features** modelled on Serum's layout: three wavetable oscillators (22 generated tables plus two of your own, unison, 13 warp modes), sub, noise, two 19-type filters in series or parallel, 3 envelopes, 4 LFOs with drawable shapes, 4 macros, up to 32 connections and ten kinds of effect that can be reordered, stacked and run in parallel. An arpeggiator plays held keys in time with the tempo (six orders, note length, up to four octaves, gate, swing). Japanese and English, light and dark.
+- **Synth features** modelled on Serum's layout: three wavetable oscillators (22 generated tables plus two of your own, unison, 13 warp modes), sub, noise, two 19-type filters in series or parallel, 3 envelopes, 4 LFOs with drawable shapes, 4 macros, up to 32 connections and ten kinds of effect that can be reordered, stacked and run in parallel. An arpeggiator plays held keys in time with the tempo (six orders, note length, up to four octaves, gate, swing), and a clip sequencer loops a phrase drawn in a piano roll (1 to 8 bars) while a key is held, transposed to that key. A "Keys play" switch above the keyboard picks notes, arpeggio or clip, and their settings open in a drawer above the keys. Japanese and English, light and dark.
 - **Sharing.** The whole patch is encoded into the URL fragment, so a link is the preset. Presets can also be saved as JSON.
 - **Serum 2 export (beta).** Writes a `.SerumPreset` plus the wavetables as WAV. The format is unpublished and the export follows community reverse-engineering; files round-trip through independent decoders, match the structure of a real init preset, and load in Serum 2 sounding broadly as intended. It is a translation of settings, not a clone of the sound; the arpeggiator is not carried over yet.
 
-**Architecture.** Everything runs in the browser; there is no server-side code. The Rust engine exposes plain `extern "C"` functions and describes itself as JSON (parameters, options, buffer layouts), so the UI holds no parameter tables of its own. Two instances run: one in the AudioWorklet makes the sound, one on the main thread holds the authoritative patch and draws previews. Keys pass through the arpeggiator (when on) to the voices. Each voice runs oscillators A, B and C, sub and noise into two filters (in series, or in parallel with each source choosing) and the amp; up to 16 voices feed a chain of 30 effect units (ten kinds, three copies each) with one optional fork into two lanes. All 422 parameters carry stable ids, so share links and files keep working as the synth grows. The engine records 46 signal taps and telemetry that drive the board's glowing lines, the scopes and the moving dots on sliders. The UI is plain DOM in TypeScript, compiled file by file to ES modules; a `Store` is the single entry point for edits and keeps undo history as patch snapshots.
+**Architecture.** Everything runs in the browser; there is no server-side code. The Rust engine exposes plain `extern "C"` functions and describes itself as JSON (parameters, options, buffer layouts), so the UI holds no parameter tables of its own. Two instances run: one in the AudioWorklet makes the sound, one on the main thread holds the authoritative patch and draws previews. Keys pass through the clip sequencer or the arpeggiator (when on) to the voices. Each voice runs oscillators A, B and C, sub and noise into two filters (in series, or in parallel with each source choosing) and the amp; up to 16 voices feed a chain of 30 effect units (ten kinds, three copies each) with one optional fork into two lanes. All 425 parameters carry stable ids, so share links and files keep working as the synth grows. The engine records 46 signal taps and telemetry that drive the board's glowing lines, the scopes and the moving dots on sliders. The UI is plain DOM in TypeScript, compiled file by file to ES modules; a `Store` is the single entry point for edits and keeps undo history as patch snapshots. The piano roll (`src/pianoroll/`) is a self-contained module meant to be reused elsewhere: notes carry stable ids and every edit leaves it as a list of operations (insert, delete, set fields, change length) that can be applied, inverted and diffed, and that skip cleanly when their note is gone, so they can be shared between collaborators.
 
 License: [MIT](LICENSE).
