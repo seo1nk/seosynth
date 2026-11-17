@@ -582,7 +582,7 @@ function parts(app: App, id: string): Parts {
       return {
         visual: [app.scopes.add(store.info.tap.out, 'big-scope'), SpectrumDisplay(app), h('div', { class: 'out-meter' }, h('span', { class: 'ctl-label' }, i18n.t('out.level')), Meter(app))],
         main: [Slider(app, 'master.volume'), Slider(app, 'master.bpm'), Slider(app, 'master.pitch')],
-        more: [],
+        more: [Segmented(app, 'master.quality')],
       };
   }
 }

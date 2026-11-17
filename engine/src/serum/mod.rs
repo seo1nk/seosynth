@@ -1045,6 +1045,9 @@ pub fn build(patch: &Patch, bank: &mut Bank) -> (Value, Vec<String>) {
     if c.v("master.pitch") != 0.0 {
         c.note("masterPitch", "");
     }
+    if c.v("master.quality") != 0.0 {
+        c.note("quality", "");
+    }
     // Serum 2's arpeggiator is switched on with its first pattern, as in
     // presets saved by Serum; how its rate, order and range are stored is
     // not known yet. The clip sequencer takes precedence over it, as here.

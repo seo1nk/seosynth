@@ -150,7 +150,9 @@ pub mod master {
     pub const BPM: usize = 8;
     pub const VEL_SENS: usize = 9;
     pub const MACRO1: usize = 10;
-    pub const N: usize = MACRO1 + super::NUM_MACRO;
+    /// How many times the output rate the voices run at: 1x, 2x or 4x.
+    pub const QUALITY: usize = MACRO1 + super::NUM_MACRO;
+    pub const N: usize = QUALITY + 1;
 }
 
 pub mod osc {
@@ -530,6 +532,8 @@ pub const WARP_MODES: &[&str] = &[
 pub const USER_TABLE_OPTIONS: &[&str] = &["Off", "User 1", "User 2"];
 /// How filter 2 is connected: after filter 1, or beside it.
 pub const FILTER_MODES: &[&str] = &["Series", "Parallel"];
+
+pub const QUALITY_MODES: &[&str] = &["1x", "2x", "4x"];
 /// Where a source goes when the filters run in parallel.
 pub const FILTER_SELECT: &[&str] = &["Filter1", "Filter2", "Both"];
 pub const SUB_SHAPES: &[&str] = &["Sine", "Round", "Triangle", "Saw", "Square", "Pulse"];
@@ -665,6 +669,7 @@ fn build() -> Vec<ParamDef> {
     for m in 0..NUM_MACRO {
         b.num(master::MACRO1 + m, 11 + m as u16, format!("macro{}", m + 1), 0.0, 1.0, 0.0, Lin, "%", GS);
     }
+    b.choice(master::QUALITY, 30, "master.quality", QUALITY_MODES, 0, F_GLOBAL);
 
     // --- oscillators ------------------------------------------------------
     for o in 0..NUM_OSC {

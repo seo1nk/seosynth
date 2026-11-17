@@ -91,6 +91,10 @@ pub struct Synth {
     /// setting wins over a key switch).
     clip_slot: usize,
     clip_slot_setting: usize,
+    /// Oversampling of the voices (1, 2 or 4) and the filters that bring
+    /// them back to the output rate.
+    oversample: usize,
+    decimator: crate::oversample::Decimator,
     /// What turned the keys into notes during the last block.
     player: Player,
     /// Notes the voices are playing and have not been told to stop: the
@@ -164,6 +168,8 @@ impl Synth {
             clip: ClipPlayer::new(),
             clip_slot: 0,
             clip_slot_setting: 0,
+            oversample: 1,
+            decimator: crate::oversample::Decimator::new(),
             player: Player::Keys,
             held: Vec::with_capacity(32),
             age: 0,
@@ -606,9 +612,14 @@ impl Synth {
             .filter(|(_, v)| v.active)
             .max_by_key(|(_, v)| v.age)
             .map(|(i, _)| i);
+        let os = [1usize, 2, 4][(plain(&self.smoothed, master::QUALITY) as usize).min(2)];
+        if os != self.oversample {
+            self.oversample = os;
+            self.decimator.clear();
+        }
         {
             let shared = Shared {
-                sr: self.sr,
+                sr: self.sr * os as f32,
                 base: &self.smoothed,
                 slots: &self.voice_slots,
                 tables: core::array::from_fn(|o| &*self.tables[o]),
@@ -619,12 +630,45 @@ impl Synth {
                 aftertouch: self.aftertouch,
                 pitch_bend: self.pitch_bend,
             };
-            for (i, v) in self.voices.iter_mut().enumerate() {
-                if !v.active {
-                    continue;
+            if os == 1 {
+                for (i, v) in self.voices.iter_mut().enumerate() {
+                    if !v.active {
+                        continue;
+                    }
+                    let taps = if Some(i) == newest { Some(&mut vtaps) } else { None };
+                    v.process(&shared, &mut bus_l[..n], &mut bus_r[..n], taps);
                 }
-                let taps = if Some(i) == newest { Some(&mut vtaps) } else { None };
-                v.process(&shared, &mut bus_l[..n], &mut bus_r[..n], taps);
+            } else {
+                // The voices run `os` short blocks at the higher rate, one
+                // after the other, then the sound comes back down.
+                let mut big_l = [0.0f32; BLOCK * 4];
+                let mut big_r = [0.0f32; BLOCK * 4];
+                let mut sub_taps: VoiceTaps = [[0.0; BLOCK]; voice::tap::N];
+                for k in 0..os {
+                    let range = k * n..(k + 1) * n;
+                    for (i, v) in self.voices.iter_mut().enumerate() {
+                        if !v.active {
+                            continue;
+                        }
+                        let taps = if Some(i) == newest { Some(&mut sub_taps) } else { None };
+                        v.process(&shared, &mut big_l[range.clone()], &mut big_r[range.clone()], taps);
+                    }
+                    // The displays get every `os`-th sample.
+                    if newest.is_some() {
+                        for (out, sub) in vtaps.iter_mut().zip(sub_taps.iter()) {
+                            for j in 0..n {
+                                let at = k * n + j;
+                                if at % os == 0 {
+                                    out[at / os] = sub[j];
+                                }
+                            }
+                        }
+                    }
+                }
+                self.decimator.process(0, os, &mut big_l, n);
+                self.decimator.process(1, os, &mut big_r, n);
+                bus_l[..n].copy_from_slice(&big_l[..n]);
+                bus_r[..n].copy_from_slice(&big_r[..n]);
             }
         }
 
@@ -1572,6 +1616,53 @@ mod tests {
         render(&mut s, 0.5);
         assert_eq!(s.active_voices(), 0);
         assert_eq!(s.telemetry[tele::CLIP_POS], -1.0);
+    }
+
+    #[test]
+    fn oversampling_keeps_the_sound_and_cuts_what_folds_back() {
+        // A high note with hard sync makes harmonics far past Nyquist.
+        let note = 96u8;
+        let f0 = 440.0 * (2.0f32).powf((note as f32 - 69.0) / 12.0);
+        let run = |quality: f32, warp: f32| {
+            let mut s = Synth::new(48_000.0);
+            s.patch.set_plain(master::QUALITY, quality);
+            s.patch.set_plain(osc_idx(0, osc::WARP), warp);
+            s.patch.set_plain(osc_idx(0, osc::WARP_AMT), 0.8);
+            s.patch.set_plain(FILTER_BASE + filter::CUTOFF, 20_000.0);
+            s.snap();
+            s.note_on(note, 0.9);
+            render(&mut s, 0.2);
+            render(&mut s, 0.5)
+        };
+        // How much of the sound is not a harmonic of the note.
+        let folded = |x: &[f32]| {
+            let total: f32 = x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32;
+            let mut harmonic = 0.0;
+            let mut k = 1.0;
+            while k * f0 < 24_000.0 {
+                let w = crate::util::TAU * k * f0 / 48_000.0;
+                let c = 2.0 * w.cos();
+                let (mut s1, mut s2) = (0.0f32, 0.0f32);
+                for &v in x {
+                    let s0 = v + c * s1 - s2;
+                    s2 = s1;
+                    s1 = s0;
+                }
+                let amp = (s1 * s1 + s2 * s2 - c * s1 * s2).sqrt() * 2.0 / x.len() as f32;
+                harmonic += amp * amp / 2.0;
+                k += 1.0;
+            }
+            ((total - harmonic).max(0.0) / total).sqrt()
+        };
+        // Plain: about the same sound at every setting.
+        let (a, b, c) = (run(0.0, 0.0), run(1.0, 0.0), run(2.0, 0.0));
+        assert!((rms(&b) / rms(&a) - 1.0).abs() < 0.05, "2x level {} vs {}", rms(&b), rms(&a));
+        assert!((rms(&c) / rms(&a) - 1.0).abs() < 0.05, "4x level {} vs {}", rms(&c), rms(&a));
+        // Hard sync: far less folds back. (Around 3% is what this simple
+        // measurement leaks anyway, so 2x and 4x look alike here.)
+        let sync = 1.0;
+        let (x1, x2, x4) = (folded(&run(0.0, sync)), folded(&run(1.0, sync)), folded(&run(2.0, sync)));
+        assert!(x2 < x1 * 0.5 && x4 < x1 * 0.5, "folded back: 1x {x1}, 2x {x2}, 4x {x4}");
     }
 
     #[test]

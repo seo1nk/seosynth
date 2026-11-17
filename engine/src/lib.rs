@@ -26,6 +26,7 @@ pub mod filter;
 pub mod fx;
 pub mod lfo;
 pub mod osc;
+pub mod oversample;
 pub mod params;
 pub mod patch;
 pub mod serum;
