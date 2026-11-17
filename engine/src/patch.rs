@@ -26,6 +26,9 @@
 //!   9 clip      varint length in ticks, then per note (in order of start):
 //!               varint start (as the difference to the note before),
 //!               pitch u8, varint length, velocity u8
+//!  10 mod shape  repeated: position u8 of the routing in section 3,
+//!               curve i8 (-127..127), aux source u8. Kept apart from
+//!               section 3 so that older builds still read the routings.
 //! ```
 //!
 //! Only values that differ from the defaults are written. Unknown sections
@@ -51,13 +54,28 @@ pub struct ModSlot {
     pub amount: f32,
     /// Swing both ways around the knob position instead of one way from it.
     pub bipolar: bool,
+    /// Bends the source before it is used: -1..1, 0 = straight. Above 0 the
+    /// response rises early, below 0 it rises late (mirrored when bipolar).
+    pub curve: f32,
+    /// A second source that scales this routing (`params::src`), 0 = none.
+    pub aux: u8,
 }
 
 impl ModSlot {
-    pub const EMPTY: ModSlot = ModSlot { src: 0, dst: NO_DEST, amount: 0.0, bipolar: false };
+    pub const EMPTY: ModSlot = ModSlot { src: 0, dst: NO_DEST, amount: 0.0, bipolar: false, curve: 0.0, aux: 0 };
 
     pub fn is_set(&self) -> bool {
         self.src != 0 && (self.src as usize) < params::src::N && (self.dst as usize) < NUM_PARAMS
+    }
+
+    /// The aux source, if it names a real source.
+    pub fn aux_src(&self) -> usize {
+        if (self.aux as usize) < params::src::N { self.aux as usize } else { 0 }
+    }
+
+    /// Curve as stored in a patch.
+    fn curve_byte(&self) -> i8 {
+        (self.curve.max(-1.0).min(1.0) * 127.0).round() as i8
     }
 }
 
@@ -272,6 +290,16 @@ impl Patch {
             section(&mut out, 3, &buf);
         }
 
+        buf.clear();
+        for (k, s) in self.slots.iter().filter(|s| s.is_set()).enumerate() {
+            if s.curve_byte() != 0 || s.aux_src() != 0 {
+                buf.extend_from_slice(&[k as u8, s.curve_byte() as u8, s.aux_src() as u8]);
+            }
+        }
+        if !buf.is_empty() {
+            section(&mut out, 10, &buf);
+        }
+
         let default_shape = default_points();
         for (l, shape) in self.lfo_shapes.iter().enumerate() {
             if *shape == default_shape {
@@ -343,6 +371,8 @@ impl Patch {
         patch.name.clear();
         let mut r = Reader { b: bytes, i: 2 };
         let mut slot = 0;
+        // Where each routing of section 3, in written order, ended up.
+        let mut placed: Vec<Option<usize>> = Vec::new();
         while !r.done() {
             let tag = r.u8()?;
             let len = r.varint()? as usize;
@@ -373,11 +403,25 @@ impl Patch {
                         let dst = params::index_of_sid(s.varint()? as u16);
                         let amount = s.u16()? as i16 as f32 / 32767.0;
                         let flags = s.u8()?;
+                        let mut at = None;
                         if let Some(dst) = dst {
                             if slot < NUM_SLOTS && src != 0 && (src as usize) < params::src::N {
-                                patch.slots[slot] = ModSlot { src, dst: dst as u16, amount, bipolar: flags & 1 == 1 };
+                                patch.slots[slot] = ModSlot { src, dst: dst as u16, amount, bipolar: flags & 1 == 1, ..ModSlot::EMPTY };
+                                at = Some(slot);
                                 slot += 1;
                             }
+                        }
+                        placed.push(at);
+                    }
+                }
+                10 => {
+                    while !s.done() {
+                        let k = s.u8()? as usize;
+                        let curve = s.u8()? as i8 as f32 / 127.0;
+                        let aux = s.u8()?;
+                        if let Some(Some(i)) = placed.get(k) {
+                            patch.slots[*i].curve = curve;
+                            patch.slots[*i].aux = if (aux as usize) < params::src::N { aux } else { 0 };
                         }
                     }
                 }
@@ -534,8 +578,8 @@ mod tests {
         p.set_plain(osc_idx(1, osc::ON), 1.0);
         p.set_plain(osc_idx(1, osc::OCT), -2.0);
         p.set_plain(lfo_idx(2, crate::params::lfo::RATE), 7.5);
-        p.slots[0] = ModSlot { src: src::LFO1 as u8, dst: (FILTER_BASE + filter::CUTOFF) as u16, amount: 0.35, bipolar: true };
-        p.slots[1] = ModSlot { src: src::ENV2 as u8, dst: osc_idx(0, osc::POS) as u16, amount: -0.8, bipolar: false };
+        p.slots[0] = ModSlot { src: src::LFO1 as u8, dst: (FILTER_BASE + filter::CUTOFF) as u16, amount: 0.35, bipolar: true, curve: 0.5, aux: src::MOD_WHEEL as u8 };
+        p.slots[1] = ModSlot { src: src::ENV2 as u8, dst: osc_idx(0, osc::POS) as u16, amount: -0.8, bipolar: false, ..ModSlot::EMPTY };
         p.lfo_shapes[1] = vec![
             LfoPoint { x: 0.0, y: 1.0, curve: 0.5 },
             LfoPoint { x: 0.3, y: 0.25, curve: -0.25 },
@@ -591,6 +635,9 @@ mod tests {
         assert_eq!(q.slots[0].src, p.slots[0].src);
         assert_eq!(q.slots[0].dst, p.slots[0].dst);
         assert!(q.slots[0].bipolar);
+        assert!((q.slots[0].curve - 0.5).abs() < 0.01);
+        assert_eq!(q.slots[0].aux, src::MOD_WHEEL as u8);
+        assert_eq!((q.slots[1].curve, q.slots[1].aux), (0.0, 0));
         assert!((q.slots[0].amount - 0.35).abs() < 1e-4);
         assert!((q.slots[1].amount + 0.8).abs() < 1e-4);
         assert!(!q.slots[2].is_set());
@@ -733,6 +780,32 @@ mod tests {
         let mut bytes = vec![MAGIC, FORMAT_VERSION];
         section(&mut bytes, 7, &[]);
         assert!(Patch::from_bytes(&bytes).is_err(), "a section cut short is an error, not a crash");
+    }
+
+    #[test]
+    fn mod_shapes_follow_the_routings_they_belong_to() {
+        // The first routing names a parameter this build does not know, so
+        // the second one lands in slot 0 and its shape must go with it.
+        let mut bytes = vec![MAGIC, FORMAT_VERSION];
+        let mut mods = vec![src::LFO1 as u8];
+        varint(&mut mods, 9999);
+        mods.extend_from_slice(&[0, 0x40, 0]);
+        mods.push(src::ENV2 as u8);
+        varint(&mut mods, defs()[FILTER_BASE + filter::CUTOFF].sid as u32);
+        mods.extend_from_slice(&[0, 0x40, 0]);
+        section(&mut bytes, 3, &mods);
+        section(&mut bytes, 10, &[0, 100, src::LFO2 as u8, 1, (-64i8) as u8, 250]);
+        let p = Patch::from_bytes(&bytes).unwrap();
+        assert_eq!(p.slots[0].src, src::ENV2 as u8);
+        assert!((p.slots[0].curve + 64.0 / 127.0).abs() < 1e-6);
+        assert_eq!(p.slots[0].aux, 0, "an unknown aux source is dropped");
+        assert!(!p.slots[1].is_set());
+        // A routing without a shape writes no section 10.
+        let mut q = Patch::init();
+        q.slots[0] = ModSlot { src: src::LFO1 as u8, dst: (FILTER_BASE + filter::CUTOFF) as u16, amount: 0.5, ..ModSlot::EMPTY };
+        let plain = q.to_bytes();
+        q.slots[0].curve = 0.25;
+        assert_eq!(q.to_bytes().len(), plain.len() + 5);
     }
 
     #[test]

@@ -102,6 +102,10 @@ export interface Slot {
   dst: number;
   amount: number;
   bipolar: boolean;
+  /** Bends the source: -1..1, 0 = straight. */
+  curve: number;
+  /** A second source that scales the routing, 0 = none. */
+  aux: number;
 }
 
 /** A point of a drawn LFO shape. */
@@ -162,7 +166,7 @@ export interface EngineExports {
   set_param(i: number, norm: number): void;
   param_plain(i: number, norm: number): number;
   param_norm(i: number, plain: number): number;
-  slot_set(i: number, src: number, dst: number, amount: number, bipolar: number): void;
+  slot_set(i: number, src: number, dst: number, amount: number, bipolar: number, curve: number, aux: number): void;
   slot_get(i: number): number;
   lfo_shape_set(l: number, count: number): void;
   lfo_shape_get(l: number): number;

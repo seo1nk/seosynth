@@ -264,7 +264,7 @@ impl Synth {
             if !def.has(F_MOD) {
                 continue;
             }
-            let a = ActiveSlot { src: s.src as usize, dst: s.dst as usize, amount: s.amount, bipolar: s.bipolar };
+            let a = ActiveSlot { src: s.src as usize, dst: s.dst as usize, amount: s.amount, bipolar: s.bipolar, curve: s.curve, aux: s.aux_src() };
             if def.has(F_GLOBAL) {
                 self.global_slots.push(a);
             } else {
@@ -624,8 +624,7 @@ impl Synth {
         }
         self.global_m.copy_from_slice(&self.smoothed);
         for s in self.global_slots.iter() {
-            let v = if s.bipolar { self.g_bi[s.src] } else { self.g_uni[s.src] };
-            self.global_m[s.dst] += s.amount * v;
+            self.global_m[s.dst] += s.offset(&self.g_uni, &self.g_bi);
         }
 
         // Effects.
@@ -987,10 +986,10 @@ mod tests {
                 s.patch.set_plain(master::MACRO1, 1.0);
                 s.snap();
                 // LFO 1 moves the cutoff, so its own settings are heard.
-                s.set_slot(0, ModSlot { src: src::LFO1 as u8, dst: (FILTER_BASE + filter::CUTOFF) as u16, amount: 0.4, bipolar: false });
+                s.set_slot(0, ModSlot { src: src::LFO1 as u8, dst: (FILTER_BASE + filter::CUTOFF) as u16, amount: 0.4, bipolar: false, ..ModSlot::EMPTY });
                 if connect {
                     let amount = if s.patch.values[key(dst)] > 0.5 { -0.6 } else { 0.6 };
-                    s.set_slot(1, ModSlot { src: src::MACRO1 as u8, dst: key(dst) as u16, amount, bipolar: false });
+                    s.set_slot(1, ModSlot { src: src::MACRO1 as u8, dst: key(dst) as u16, amount, bipolar: false, ..ModSlot::EMPTY });
                 }
                 s.note_on(48, 0.8);
                 // Both channels: some destinations (the phase offsets) only move the right.
@@ -1017,8 +1016,8 @@ mod tests {
         s.patch.set_plain(lfo_idx(0, params::lfo::SYNC), 0.0);
         s.patch.set_plain(lfo_idx(0, params::lfo::RATE), 5.0);
         s.snap();
-        s.set_slot(0, ModSlot { src: src::LFO1 as u8, dst: cutoff as u16, amount: 0.4, bipolar: false });
-        s.set_slot(1, ModSlot { src: src::LFO1 as u8, dst: master::VOLUME as u16, amount: -0.3, bipolar: false });
+        s.set_slot(0, ModSlot { src: src::LFO1 as u8, dst: cutoff as u16, amount: 0.4, bipolar: false, ..ModSlot::EMPTY });
+        s.set_slot(1, ModSlot { src: src::LFO1 as u8, dst: master::VOLUME as u16, amount: -0.3, bipolar: false, ..ModSlot::EMPTY });
         s.note_on(60, 0.8);
         let base = s.patch.values[cutoff];
         let (mut lo, mut hi) = (1.0f32, 0.0f32);
@@ -1035,6 +1034,42 @@ mod tests {
         assert!((lo - base).abs() < 0.03, "lo {lo} base {base}");
         assert!((hi - (base + 0.4)).abs() < 0.03, "hi {hi}");
         assert!(vhi - vlo > 0.25, "volume swing {}", vhi - vlo);
+    }
+
+    #[test]
+    fn mod_curve_and_aux_shape_a_routing() {
+        let cutoff = FILTER_BASE + filter::CUTOFF;
+        // Macro 1 at half way moves both a voice and a global target; read
+        // back how far each one moved.
+        let moved = |curve: f32, aux: u8, wheel: f32| {
+            let mut s = Synth::new(48_000.0);
+            s.patch.set_plain(cutoff, 200.0);
+            s.patch.set_plain(master::MACRO1, 0.5);
+            s.snap();
+            let slot = ModSlot { src: src::MACRO1 as u8, amount: 0.4, curve, aux, ..ModSlot::EMPTY };
+            s.set_slot(0, ModSlot { dst: cutoff as u16, ..slot });
+            s.set_slot(1, ModSlot { dst: master::VOLUME as u16, amount: -0.4, ..slot });
+            s.set_mod_wheel(wheel);
+            s.note_on(60, 0.8);
+            for _ in 0..40 {
+                s.process(128);
+            }
+            let t = |i: usize| s.telemetry[tele::PARAMS + i] - s.patch.values[i];
+            (t(cutoff), t(master::VOLUME))
+        };
+        let (c, v) = moved(0.0, 0, 0.0);
+        assert!((c - 0.2).abs() < 0.01 && (v + 0.2).abs() < 0.01, "straight: {c} {v}");
+        // Bent up, half way already goes most of the way.
+        let up = crate::util::curve_shape(0.5, 0.5) * 0.4;
+        let (c, v) = moved(0.5, 0, 0.0);
+        assert!((c - up).abs() < 0.01 && (v + up).abs() < 0.01, "bent up: {c} {v}");
+        let (c, _) = moved(-0.5, 0, 0.0);
+        assert!(c < 0.1, "bent down: {c}");
+        // The mod wheel as aux: closed, the routing does nothing.
+        let (c, v) = moved(0.0, src::MOD_WHEEL as u8, 0.0);
+        assert!(c.abs() < 0.01 && v.abs() < 0.01, "aux closed: {c} {v}");
+        let (c, v) = moved(0.0, src::MOD_WHEEL as u8, 1.0);
+        assert!((c - 0.2).abs() < 0.01 && (v + 0.2).abs() < 0.01, "aux open: {c} {v}");
     }
 
     #[test]

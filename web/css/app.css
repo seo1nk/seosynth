@@ -294,7 +294,8 @@ p {
   font-weight: 700;
   white-space: nowrap;
 }
-.chip-toggle[aria-pressed='true'] {
+.chip-toggle[aria-pressed='true'],
+.chip-toggle[aria-expanded='true'] {
   background: var(--ink);
   border-color: var(--ink);
   color: var(--paper);
@@ -1336,6 +1337,43 @@ input[type='range'] {
 }
 .route-controls input {
   flex: 1;
+}
+.route-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding-top: 4px;
+  font-size: 0.8125rem;
+}
+.route-more[hidden] {
+  display: none;
+}
+.route-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.route-field > span {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.route-field input,
+.route-field select {
+  flex: 1;
+  min-width: 0;
+}
+.route-curve {
+  flex: none;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--c) 10%, transparent);
+}
+.route-curve-line {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 2;
+  stroke-linecap: round;
 }
 .empty {
   color: var(--muted);

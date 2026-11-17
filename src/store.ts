@@ -142,10 +142,10 @@ export class Store {
   }
 
   clearSlot(i: number): void {
-    this.setSlot(i, { src: 0, dst: -1, amount: 0, bipolar: false });
+    this.setSlot(i, { src: 0, dst: -1, amount: 0, bipolar: false, curve: 0, aux: 0 });
   }
 
-  /** Routings as [{ index, src, dst, amount, bipolar }] for the used slots. */
+  /** Routings as [{ index, src, dst, amount, bipolar, curve, aux }] for the used slots. */
   activeSlots(): ActiveSlot[] {
     return this.slots.map((s, index) => ({ index, ...s })).filter((s) => s.src > 0 && s.dst >= 0);
   }
@@ -162,7 +162,7 @@ export class Store {
     let i = this.slots.findIndex((s) => s.src === src && s.dst === dst);
     if (i < 0) i = this.slots.findIndex((s) => s.src === 0 || s.dst < 0);
     if (i < 0) return -1;
-    this.setSlot(i, { src, dst, amount, bipolar });
+    this.setSlot(i, { src, dst, amount, bipolar, curve: 0, aux: 0 });
     return i;
   }
 
@@ -281,6 +281,8 @@ export class Store {
       target: this.params[s.dst].key,
       amount: Number(s.amount.toFixed(4)),
       ...(s.bipolar ? { bipolar: true } : {}),
+      ...(Math.abs(s.curve) > 1e-4 ? { curve: Number(s.curve.toFixed(3)) } : {}),
+      ...(s.aux > 0 ? { aux: this.info.sources[s.aux] } : {}),
     }));
     if (mods.length) out.mods = mods;
     const shapes: NonNullable<PatchJSON['lfoShapes']> = {};
@@ -358,7 +360,12 @@ export class Store {
         continue;
       }
       if (slot >= this.info.numSlots) break;
-      c.setSlot(slot++, { src, dst: dst.i, amount: Number(m.amount) || 0, bipolar: !!m.bipolar });
+      let aux = m.aux === undefined ? 0 : this.info.sources.indexOf(m.aux);
+      if (aux < 0) {
+        warnings.push(`skipped aux source: ${m.aux}`);
+        aux = 0;
+      }
+      c.setSlot(slot++, { src, dst: dst.i, amount: Number(m.amount) || 0, bipolar: !!m.bipolar, curve: Number(m.curve) || 0, aux });
     }
     for (const [l, pts] of Object.entries(obj.lfoShapes ?? {})) {
       const index = Number(l) - 1;

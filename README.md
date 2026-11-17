@@ -36,7 +36,7 @@ Rust で書いたシンセエンジンを WebAssembly にして、ブラウザ�
 |---|---|
 | オシレーター | ウェーブテーブル ×3（22 種類のテーブル＋自分で描く・音声から作るテーブル 2 つ、波形の位置のモーフィング、ユニゾン最大 16 声、ワープ 13 種：Sync / Bend / PWM / Asym / Flip / Mirror / Quantize / FM / AM / RM、2 つまで重ねがけ）、サブ、ノイズ |
 | フィルター | ×2（直列、または並列で音源ごとに行き先を選ぶ）。19 種類（LP / HP / BP / ノッチ / ピーク / ラダー / モーフ / コム / フェイザー / フォルマント ほか）、ドライブ、キー追従、ステレオ |
-| うごき | エンベロープ ×4（1 つはアンプ用。AHDSR＋カーブ）、LFO ×10（プリセット波形または自分で描く、テンポ同期）、マクロ ×8、弾く強さ／音の高さ／MOD ホイールなど。最大 64 のつながり |
+| うごき | エンベロープ ×4（1 つはアンプ用。AHDSR＋カーブ）、LFO ×10（プリセット波形または自分で描く、テンポ同期）、マクロ ×8、弾く強さ／音の高さ／MOD ホイールなど。最大 64 のつながり（それぞれに曲げと、強さを決める 2 つ目の源を設定できます） |
 | エフェクト | ハイパー、ディストーション、フランジャー、フェイザー、コーラス、ディレイ、コンプレッサー、リバーブ、EQ、全体フィルター。順番を入れ替え可能、同じものを 3 つまで重ねがけ、途中で 2 本に分岐（同じ音を 2 つに／低音と高音／中央と左右／左と右） |
 | 演奏 | 画面の鍵盤、PC キーボード、MIDI キーボード（Web MIDI）、ピッチベンドと MOD ホイール、「聴く」ボタンでのフレーズ再生、ポリ 16 声／モノ／レガート／グライド。鍵盤の上の「鳴らし方」で、ふつう／アルペジオ／クリップを切り替えます。アルペジオとクリップの設定は鍵盤の上の引き出しに開き、鳴っている音の鍵盤が光ります |
 | アルペジエーター | 押さえた鍵盤をテンポに合わせて 1 音ずつ鳴らします。順番 6 種（上へ／下へ／上下／弾いた順／ランダム／和音）、1 音の長さ（音符）、1〜4 オクターブ、音の長さ、スウィング |
@@ -57,6 +57,7 @@ Rust で書いたシンセエンジンを WebAssembly にして、ブラウザ�
 - アルペジエーターは Serum 側でオンにしますが、速さ・順番・オクターブなどの設定は書き方が確認できていないため移し替えません
 - クリップシーケンサーのフレーズは、Serum の最初のクリップに書き出します。Serum で C3 を押すと、seosynth で基準の音を押したときと同じ高さになるように移調しています（Serum 側の基準の音は未確認）
 - つながりの行き先は、オシレーター・フィルターに加えて、エンベロープのディケイとリリース、LFO の速さとなめらかさ、一部のエフェクト（ディストーション、ディレイ、リバーブ、ハイパー、フェイザー、全体フィルター）に対応しています。それ以外の行き先へのつながりは変換メモで知らせます
+- つながりの曲げと「強さを決めるもの」は移し替えず、変換メモで知らせます
 - フィルター 2 を並列で使うときの、音源ごとの振り分けを移し替えます。Serum の 2 つのフィルターは並列にしかつなげないため、直列で両方を使うときは並列になります
 - ウェーブテーブルは、Serum が自分のエディターで作ったテーブルを保存するのと同じ形でプリセットに埋め込みます（256 フレームに展開済み）。そのためファイルは 1 つで済みますが、使うオシレーター 1 つにつき約 2.6 MB になります
 - ノイズはホワイトノイズのときだけそのまま移し替えます。ほかの色のノイズはホワイトノイズにして、変換メモで知らせます
@@ -136,6 +137,7 @@ flowchart LR
 | 7 | 自分のウェーブテーブル（旧形式。読み込みのみ） |
 | 8 | 自分のウェーブテーブル（1 コマ 128 バイト。各点を前の点との差で記録するので、圧縮がよく効きます。声から取り込んだ 16 コマで約 1,500 文字） |
 | 9 | クリップシーケンサーのフレーズ（長さと、音ごとに開始位置の差・高さ・長さ・強さ） |
+| 10 | つながりの曲げと補助ソース（セクション 3 とは分けてあるので、古い版でもつながり自体は読めます） |
 
 詳細は `engine/src/patch.rs` の冒頭にあります。ファイル保存には、同じ内容を読みやすくした JSON を使います。
 
@@ -205,7 +207,7 @@ seosynth is a wavetable synthesizer for the browser. The DSP engine is dependenc
 - **The whole sound as a graph.** The centre of the screen is a whiteboard you can drag and pinch-zoom. Nodes on the signal path have on/off switches, and the sound line runs through every node that is switched on to the output, brightening where sound flows. Sources run in parallel; effects that are off wait in a tray below. Effects can be stacked (up to three of each) and the chain can split into two lanes that run side by side (two copies, lows and highs, centre and sides, or left and right) and join again. Pressing a node opens its settings (a side panel on desktop, a bottom sheet on phones) with sliders, a picture of the sound going in and coming out, and an explanation.
 - **Movement on its own layer.** LFOs, envelopes, macros and playing gestures float on a separate plane. You add one, pick the node and slider it should move, and a coloured tag and dashed line show where it acts.
 - **Wavetables of your own.** Draw one cycle of the wave with the pointer and hear it change as you draw; add frames to make it morph. Or choose an audio file: its pitch is detected and its waveforms become the frames, all inside the browser. These tables travel in the share link too.
-- **Synth features** modelled on Serum's layout: three wavetable oscillators (22 generated tables plus two of your own, unison, 13 warp modes with two in a row per oscillator), sub, noise, two 19-type filters in series or parallel, 4 envelopes, 10 LFOs with drawable shapes, 8 macros, up to 64 connections and ten kinds of effect that can be reordered, stacked and run in parallel. An arpeggiator plays held keys in time with the tempo (six orders, note length, up to four octaves, gate, swing), and a clip sequencer loops a phrase drawn in a piano roll (1 to 8 bars) while a key is held, transposed to that key. A "Keys play" switch above the keyboard picks notes, arpeggio or clip, and their settings open in a drawer above the keys. Japanese and English, light and dark.
+- **Synth features** modelled on Serum's layout: three wavetable oscillators (22 generated tables plus two of your own, unison, 13 warp modes with two in a row per oscillator), sub, noise, two 19-type filters in series or parallel, 4 envelopes, 10 LFOs with drawable shapes, 8 macros, up to 64 connections (each with a curve and an optional second source that scales it) and ten kinds of effect that can be reordered, stacked and run in parallel. An arpeggiator plays held keys in time with the tempo (six orders, note length, up to four octaves, gate, swing), and a clip sequencer loops a phrase drawn in a piano roll (1 to 8 bars) while a key is held, transposed to that key. A "Keys play" switch above the keyboard picks notes, arpeggio or clip, and their settings open in a drawer above the keys. Japanese and English, light and dark.
 - **Sharing.** The whole patch is encoded into the URL fragment, so a link is the preset. Presets can also be saved as JSON.
 - **Serum 2 export (beta).** Writes one `.SerumPreset` with the wavetables embedded, as Serum stores tables made in its own editor. The format is unpublished and the export follows community reverse-engineering; files round-trip through independent decoders, match the structure of a real init preset and of commercial presets saved by Serum 2, and load in Serum 2 sounding broadly as intended. It is a translation of settings, not a clone of the sound; the clip becomes Serum's first clip, and the arpeggiator is switched on but its settings are not carried over yet.
 

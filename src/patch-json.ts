@@ -7,6 +7,10 @@ export interface ModJSON {
   target: string;
   amount: number;
   bipolar?: boolean;
+  /** Bends the source: -1..1, 0 (left out) = straight. */
+  curve?: number;
+  /** A second source that scales the routing, by source key. */
+  aux?: string;
 }
 
 export interface PatchJSON {

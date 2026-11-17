@@ -184,9 +184,10 @@ pub extern "C" fn param_norm(idx: usize, plain: f32) -> f32 {
 
 // --- modulation matrix --------------------------------------------------------
 
-/// `dst` is a parameter index, or negative for "none".
+/// `dst` is a parameter index, or negative for "none". `curve` is -1..1,
+/// `aux` a source id (0 = none).
 #[no_mangle]
-pub extern "C" fn slot_set(i: usize, src: u32, dst: i32, amount: f32, bipolar: u32) {
+pub extern "C" fn slot_set(i: usize, src: u32, dst: i32, amount: f32, bipolar: u32, curve: f32, aux: u32) {
     let slot = if src == 0 || dst < 0 || dst as usize >= NUM_PARAMS || src as usize >= params::src::N {
         ModSlot::EMPTY
     } else {
@@ -195,17 +196,19 @@ pub extern "C" fn slot_set(i: usize, src: u32, dst: i32, amount: f32, bipolar: u
             dst: dst as u16,
             amount: if amount.is_finite() { amount.max(-1.0).min(1.0) } else { 0.0 },
             bipolar: bipolar != 0,
+            curve: if curve.is_finite() { curve.max(-1.0).min(1.0) } else { 0.0 },
+            aux: if (aux as usize) < params::src::N { aux as u8 } else { 0 },
         }
     };
     synth().set_slot(i, slot);
 }
 
-/// Writes [src, dst (-1 = none), amount, bipolar] as four f32.
+/// Writes [src, dst (-1 = none), amount, bipolar, curve, aux] as six f32.
 #[no_mangle]
 pub extern "C" fn slot_get(i: usize) -> usize {
     let s = synth().patch.slots.get(i).copied().unwrap_or(ModSlot::EMPTY);
     let dst = if s.dst == NO_DEST { -1.0 } else { s.dst as f32 };
-    write_f32s(&[s.src as f32, dst, s.amount, if s.bipolar { 1.0 } else { 0.0 }])
+    write_f32s(&[s.src as f32, dst, s.amount, if s.bipolar { 1.0 } else { 0.0 }, s.curve, s.aux_src() as f32])
 }
 
 // --- LFO shapes ---------------------------------------------------------------

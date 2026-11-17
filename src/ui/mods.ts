@@ -1,12 +1,18 @@
 // Connecting things that move (LFOs, envelopes, macros, how you play) to
 // sliders, and editing or removing those connections.
 
-import { h } from './dom.ts';
+import { h, s as svg } from './dom.ts';
 import { modColor } from '../theme.ts';
 import { nodeOfParam, nodeOfSource, movableParams, movableNodes } from './nodes.ts';
 import type { App } from '../app.ts';
 import type { Slot } from '../engine/types.ts';
 import type { ActiveSlot } from '../store.ts';
+
+/** The engine's bend (util::curve_shape): -1..1, 0 = straight. */
+export function curveShape(t: number, c: number): number {
+  const k = c * 10;
+  return Math.abs(k) < 1e-3 ? t : (1 - Math.exp(-k * t)) / (1 - Math.exp(-k));
+}
 
 /** What a connection line is labelled with: the source, the target or both. */
 type RouteLabel = 'source' | 'target' | 'both';
@@ -118,6 +124,21 @@ export class Mods {
       },
       i18n.t('matrix.bipolar'),
     );
+    const more = this.#moreControls(index);
+    const moreBtn = h(
+      'button',
+      {
+        type: 'button',
+        class: 'chip-toggle',
+        'aria-expanded': String(!more.hidden),
+        title: i18n.t('matrix.more.help'),
+        onclick: () => {
+          more.hidden = !more.hidden;
+          moreBtn.setAttribute('aria-expanded', String(!more.hidden));
+        },
+      },
+      i18n.t('matrix.more'),
+    );
     const sourceKey = this.key(s.src);
     const targetKey = store.def(s.dst).key;
     const link = (text: string, node: string) => h('button', { type: 'button', class: 'link', onclick: () => this.app.select(node) }, text);
@@ -136,6 +157,7 @@ export class Mods {
         { class: 'route-controls' },
         slider,
         both,
+        moreBtn,
         h(
           'button',
           {
@@ -151,7 +173,76 @@ export class Mods {
           '×',
         ),
       ),
+      more,
     );
+  }
+
+  /**
+   * The less common settings of a connection: how the source is bent and
+   * which second source scales it. Shown when one of them is in use.
+   */
+  #moreControls(index: number): HTMLElement {
+    const { store, i18n } = this.app;
+    const s = store.slots[index];
+    const W = 28;
+    const path = svg('path', { class: 'route-curve-line' });
+    const drawCurve = (c: number) => {
+      const pts = Array.from({ length: 17 }, (_, k) => {
+        const t = k / 16;
+        return `${(t * W).toFixed(1)},${((1 - curveShape(t, c)) * W).toFixed(1)}`;
+      });
+      path.setAttribute('d', `M${pts.join('L')}`);
+    };
+    drawCurve(s.curve);
+    const curveOut = h('output', { class: 'route-amount' }, String(Math.round(s.curve * 100)));
+    const curve = h('input', {
+      type: 'range',
+      min: -100,
+      max: 100,
+      step: 1,
+      value: Math.round(s.curve * 100),
+      'aria-label': i18n.t('matrix.curve'),
+      oninput: () => {
+        const c = Number(curve.value) / 100;
+        store.setSlot(index, { ...store.slots[index], curve: c });
+        curveOut.textContent = String(Math.round(c * 100));
+        drawCurve(c);
+      },
+      onchange: () => store.commit(),
+      ondblclick: () => {
+        curve.value = '0';
+        curve.dispatchEvent(new Event('input'));
+        store.commit();
+      },
+    });
+    const aux = h(
+      'select',
+      {
+        'aria-label': i18n.t('matrix.aux'),
+        onchange: () => {
+          store.setSlot(index, { ...store.slots[index], aux: Number(aux.value) });
+          store.commit();
+        },
+      },
+      h('option', { value: 0 }, i18n.t('matrix.aux.none')),
+      ...store.info.sources.slice(1).map((key, k) => h('option', { value: k + 1 }, i18n.sourceName(key))),
+    );
+    aux.value = String(s.aux);
+    const el = h(
+      'div',
+      { class: 'route-more' },
+      h(
+        'label',
+        { class: 'route-field', title: i18n.t('matrix.curve.help') },
+        h('span', {}, i18n.t('matrix.curve')),
+        svg('svg', { class: 'route-curve', viewBox: `-2 -2 ${W + 4} ${W + 4}`, width: W, height: W, 'aria-hidden': 'true' }, path),
+        curve,
+        curveOut,
+      ),
+      h('label', { class: 'route-field', title: i18n.t('matrix.aux.help') }, h('span', {}, i18n.t('matrix.aux')), aux),
+    );
+    el.hidden = s.curve === 0 && s.aux === 0;
+    return el;
   }
 
   /**

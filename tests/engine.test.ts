@@ -72,7 +72,7 @@ test('parameter conversion and patch roundtrip', async () => {
   e.setPlain(cutoff, 440);
   assert.ok(Math.abs(e.getPlain(cutoff) - 440) < 0.5);
   e.setPlain(e.idx('oscA.unison'), 5);
-  e.setSlot(0, { src: e.info.sources.indexOf('lfo1'), dst: cutoff, amount: 0.25, bipolar: true });
+  e.setSlot(0, { src: e.info.sources.indexOf('lfo1'), dst: cutoff, amount: 0.25, bipolar: true, curve: -0.5, aux: e.info.sources.indexOf('modWheel') });
   e.setLfoShape(1, [{ x: 0, y: 1, curve: 0.5 }, { x: 1, y: 0, curve: 0 }]);
   // Reverb first, and the second distortion on lane B of the fork.
   const units = e.info.fx.map((_, u) => u);
@@ -92,6 +92,8 @@ test('parameter conversion and patch roundtrip', async () => {
   assert.equal(slot.dst, cutoff);
   assert.ok(slot.bipolar);
   assert.ok(Math.abs(slot.amount - 0.25) < 1e-3);
+  assert.ok(Math.abs(slot.curve + 0.5) < 0.01);
+  assert.equal(slot.aux, f.info.sources.indexOf('modWheel'));
   assert.equal(f.getLfoShape(1).length, 2);
   assert.deepEqual(f.getFxChain(), { order, lanes });
   assert.equal(f.getName(), 'ねいろ 1');

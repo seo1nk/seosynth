@@ -121,6 +121,26 @@ pub struct ActiveSlot {
     pub dst: usize,
     pub amount: f32,
     pub bipolar: bool,
+    pub curve: f32,
+    /// Source that scales the routing, 0 = none.
+    pub aux: usize,
+}
+
+impl ActiveSlot {
+    /// How far this routing moves its target, given the sources' values.
+    #[inline]
+    pub fn offset(&self, uni: &[f32], bi: &[f32]) -> f32 {
+        let mut v = if self.bipolar { bi[self.src] } else { uni[self.src] };
+        if self.curve != 0.0 {
+            // Bipolar sources bend the same way on both sides of the middle.
+            let bent = crate::util::curve_shape(v.abs(), self.curve);
+            v = if v < 0.0 { -bent } else { bent };
+        }
+        if self.aux != 0 {
+            v *= uni[self.aux];
+        }
+        self.amount * v
+    }
 }
 
 /// Everything a voice needs from the synth for one block.
@@ -321,8 +341,7 @@ impl Voice {
         // --- apply the mod matrix ------------------------------------------
         self.m.copy_from_slice(sh.base);
         for s in sh.slots {
-            let v = if s.bipolar { self.bi[s.src] } else { self.uni[s.src] };
-            self.m[s.dst] += s.amount * v;
+            self.m[s.dst] += s.offset(&self.uni, &self.bi);
         }
         let m = &self.m;
 

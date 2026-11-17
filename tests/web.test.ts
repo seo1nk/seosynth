@@ -51,6 +51,26 @@ test('every parameter has a label and help text in both languages', async () => 
   }
 });
 
+test('a connection keeps its curve and aux source through JSON and bytes', async () => {
+  const { store } = await makeStore();
+  const warnings = store.fromJSON({
+    params: {},
+    mods: [
+      { source: 'lfo1', target: 'filter.cutoff', amount: 0.5, curve: 0.4, aux: 'modWheel' },
+      { source: 'env2', target: 'oscA.pos', amount: 0.3, aux: 'nope' },
+    ],
+  });
+  assert.deepEqual(warnings, ['skipped aux source: nope']);
+  const mods = must(store.toJSON().mods);
+  assert.deepEqual(mods[0], { source: 'lfo1', target: 'filter.cutoff', amount: 0.5, curve: 0.4, aux: 'modWheel' });
+  assert.deepEqual(mods[1], { source: 'env2', target: 'oscA.pos', amount: 0.3 });
+  const { store: other } = await makeStore();
+  assert.ok(other.loadBytes(store.toBytes()));
+  const back = must(other.toJSON().mods)[0];
+  assert.ok(Math.abs(must(back.curve) - 0.4) < 0.01);
+  assert.equal(back.aux, 'modWheel');
+});
+
 test('tour and UI strings exist', () => {
   for (const lang of ['ja', 'en'] as Lang[]) {
     const { t } = createI18n(lang);

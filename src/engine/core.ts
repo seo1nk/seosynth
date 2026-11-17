@@ -84,12 +84,12 @@ export class EngineCore {
 
   getSlot(i: number): Slot {
     this.x.slot_get(i);
-    const [src, dst, amount, bipolar] = this.#floats(4);
-    return { src, dst, amount, bipolar: bipolar !== 0 };
+    const [src, dst, amount, bipolar, curve, aux] = this.#floats(6);
+    return { src, dst, amount, bipolar: bipolar !== 0, curve, aux };
   }
   /** `dst` < 0 or `src` 0 clears the slot. */
-  setSlot(i: number, { src, dst, amount, bipolar }: Slot): void {
-    this.x.slot_set(i, src, dst, amount, bipolar ? 1 : 0);
+  setSlot(i: number, { src, dst, amount, bipolar, curve, aux }: Slot): void {
+    this.x.slot_set(i, src, dst, amount, bipolar ? 1 : 0, curve, aux);
   }
   getSlots(): Slot[] {
     return Array.from({ length: this.info.numSlots }, (_, i) => this.getSlot(i));

@@ -612,6 +612,14 @@ fn mod_slots(c: &mut Ctx, data: &mut Value, rack: &[usize]) {
         if slot >= 64 {
             break;
         }
+        // Serum has both, but the units of its curve and the way it stores
+        // an aux source are not known yet.
+        if s.curve != 0.0 {
+            c.note("modCurve", &format!("{source_key} > {key}"));
+        }
+        if s.aux_src() != 0 {
+            c.note("modAux", &format!("{source_key} > {key}"));
+        }
         let amount = (s.amount * 100.0 * dest.scale).max(-100.0).min(100.0);
         let mut params = vec![("kParamAmount", num(amount))];
         if s.bipolar {
@@ -1275,7 +1283,7 @@ mod tests {
         set(&mut p, "oscA.warpAmt", 0.4);
         set(&mut p, "oscA.warp2", 11.0); // FM
         set(&mut p, "oscA.warp2Amt", 0.3);
-        p.slots[0] = ModSlot { src: src::LFO1 as u8, dst: osc_idx(0, osc::WARP2_AMT) as u16, amount: 0.5, bipolar: false };
+        p.slots[0] = ModSlot { src: src::LFO1 as u8, dst: osc_idx(0, osc::WARP2_AMT) as u16, amount: 0.5, bipolar: false, ..ModSlot::EMPTY };
         let (d, _) = export(&p);
         let wt = plain_of(&d, &["Oscillator0", "WTOsc0", "plainParams"]);
         assert_eq!(wt.get("kParamWarpMenu"), Some(&Value::from("kBendPos")));
@@ -1290,10 +1298,10 @@ mod tests {
     fn modulation_routings_are_translated_or_reported() {
         let mut p = Patch::init();
         let cutoff = (FILTER_BASE + filter::CUTOFF) as u16;
-        p.slots[0] = ModSlot { src: src::LFO1 as u8, dst: cutoff, amount: 0.5, bipolar: true };
-        p.slots[1] = ModSlot { src: src::ENV2 as u8, dst: osc_idx(1, osc::POS) as u16, amount: -1.0, bipolar: false };
-        p.slots[2] = ModSlot { src: src::MACRO1 as u8, dst: index_of_key("env1.attack").unwrap() as u16, amount: 0.3, bipolar: false };
-        p.slots[3] = ModSlot { src: src::MACRO1 as u8, dst: lfo_idx(0, crate::params::lfo::RATE) as u16, amount: 0.3, bipolar: false };
+        p.slots[0] = ModSlot { src: src::LFO1 as u8, dst: cutoff, amount: 0.5, bipolar: true, ..ModSlot::EMPTY };
+        p.slots[1] = ModSlot { src: src::ENV2 as u8, dst: osc_idx(1, osc::POS) as u16, amount: -1.0, bipolar: false, ..ModSlot::EMPTY };
+        p.slots[2] = ModSlot { src: src::MACRO1 as u8, dst: index_of_key("env1.attack").unwrap() as u16, amount: 0.3, bipolar: false, ..ModSlot::EMPTY };
+        p.slots[3] = ModSlot { src: src::MACRO1 as u8, dst: lfo_idx(0, crate::params::lfo::RATE) as u16, amount: 0.3, bipolar: false, ..ModSlot::EMPTY };
         let (d, notes) = export(&p);
         let s0 = d.get("ModSlot0").unwrap();
         assert_eq!(s0.get("source"), Some(&Value::List(vec![Value::Int(6), Value::Int(0)])));
@@ -1324,10 +1332,10 @@ mod tests {
         set(&mut p, "delay.on", 1.0);
         set(&mut p, "dist.on", 1.0);
         let dst = |k: &str| index_of_key(k).unwrap() as u16;
-        p.slots[0] = ModSlot { src: src::MACRO1 as u8, dst: dst("env2.decay"), amount: 0.5, bipolar: false };
-        p.slots[1] = ModSlot { src: src::MACRO1 as u8, dst: dst("reverb.mix"), amount: 0.5, bipolar: false };
-        p.slots[2] = ModSlot { src: src::MACRO1 as u8, dst: dst("dist.drive"), amount: 0.5, bipolar: false };
-        p.slots[3] = ModSlot { src: src::MACRO1 as u8, dst: dst("chorus.mix"), amount: 0.5, bipolar: false };
+        p.slots[0] = ModSlot { src: src::MACRO1 as u8, dst: dst("env2.decay"), amount: 0.5, bipolar: false, ..ModSlot::EMPTY };
+        p.slots[1] = ModSlot { src: src::MACRO1 as u8, dst: dst("reverb.mix"), amount: 0.5, bipolar: false, ..ModSlot::EMPTY };
+        p.slots[2] = ModSlot { src: src::MACRO1 as u8, dst: dst("dist.drive"), amount: 0.5, bipolar: false, ..ModSlot::EMPTY };
+        p.slots[3] = ModSlot { src: src::MACRO1 as u8, dst: dst("chorus.mix"), amount: 0.5, bipolar: false, ..ModSlot::EMPTY };
         let (d, notes) = export(&p);
         let slot = |i: usize| {
             let s = d.get(&format!("ModSlot{i}")).unwrap();
