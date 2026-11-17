@@ -13,6 +13,12 @@ export interface ModJSON {
   aux?: string;
 }
 
+/** A clip: its length and its notes as [pitch, start, length, velocity]. */
+export interface ClipJSON {
+  length: number;
+  notes: [number, number, number, number][];
+}
+
 export interface PatchJSON {
   format?: string;
   version?: number;
@@ -30,5 +36,7 @@ export interface PatchJSON {
   userTables?: Record<string, number[][]>;
   /** The clip sequencer's notes, in ticks of 96 to a quarter note:
    * [pitch, start, length, velocity]. */
-  clip?: { length: number; notes: [number, number, number, number][] };
+  clip?: ClipJSON;
+  /** Clips 2 to 12 by number, in the same form; empty ones are left out. */
+  clips?: Record<string, ClipJSON>;
 }

@@ -131,17 +131,17 @@ export class EngineCore {
 
   // --- clip sequencer -----------------------------------------------------------
 
-  /** The clip the clip sequencer plays. */
-  getClip(): ClipData {
-    return this.#readClip(this.x.clip_get());
+  /** Clip `slot` (0-based) of the clip sequencer. */
+  getClip(slot: number): ClipData {
+    return this.#readClip(this.x.clip_get(slot));
   }
-  /** The clip a new patch starts with. */
-  defaultClip(): ClipData {
-    return this.#readClip(this.x.clip_default());
+  /** What clip `slot` holds in a new patch. */
+  defaultClip(slot: number): ClipData {
+    return this.#readClip(this.x.clip_default(slot));
   }
   /** Returns false, changing nothing, if the clip is not valid (length out
    * of range). Notes outside it are dropped and long notes are cut. */
-  setClip(clip: ClipData): boolean {
+  setClip(slot: number, clip: ClipData): boolean {
     const notes = clip.notes.slice(0, this.info.clip.maxNotes);
     const b = new DataView(new ArrayBuffer(6 + notes.length * 10));
     b.setUint32(0, Math.round(clip.length), true);
@@ -154,7 +154,7 @@ export class EngineCore {
       b.setUint8(at + 9, n.velocity);
     });
     this.#bytes().set(new Uint8Array(b.buffer));
-    return this.x.clip_set(b.byteLength) === 1;
+    return this.x.clip_set(slot, b.byteLength) === 1;
   }
   #readClip(size: number): ClipData {
     const bytes = this.#bytes().slice(0, size);

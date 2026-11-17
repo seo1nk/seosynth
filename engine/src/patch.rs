@@ -25,9 +25,10 @@
 //!               the point before it (wrapping, the first from 0). Drawn and
 //!               recorded waves change smoothly, so the differences are small
 //!               and a share link compresses well (see web share.ts)
-//!   9 clip      varint length in ticks, then per note (in order of start):
-//!               varint start (as the difference to the note before),
-//!               pitch u8, varint length, velocity u8
+//!   9 clip      the first clip: varint length in ticks, then per note (in
+//!               order of start): varint start (as the difference to the
+//!               note before), pitch u8, varint length, velocity u8
+//!  12 clip      another clip: its slot u8 (1..11), then as section 9
 //!  10 mod shape  repeated: position u8 of the routing in section 3,
 //!               curve i8 (-127..127), aux source u8. Kept apart from
 //!               section 3 so that older builds still read the routings.
@@ -37,7 +38,7 @@
 //! and unknown parameter ids are skipped, so old builds can open newer
 //! patches and vice versa.
 
-use crate::clip::{Clip, ClipNote};
+use crate::clip::{Clip, ClipNote, NUM_CLIPS};
 use crate::lfo::{default_points, sanitize_points, LfoPoint};
 use crate::params::{self, defs, osc, osc_idx, unit_from_old, unit_on, NUM_LFO, NUM_OSC, NUM_PARAMS, NUM_SLOTS, NUM_UNITS, OLD_NUM_FX};
 use crate::wavetable::{UserTable, FACTORY_TABLES, USER_TABLES};
@@ -95,8 +96,9 @@ pub struct Patch {
     pub fx_lane: [u8; NUM_UNITS],
     /// Wavetables drawn or imported by the user.
     pub user_tables: [UserTable; USER_TABLES],
-    /// The pattern the clip sequencer plays.
-    pub clip: Clip,
+    /// The patterns of the clip sequencer; `clip.slot` picks the one that
+    /// plays.
+    pub clips: [Clip; NUM_CLIPS],
 }
 
 /// Where a unit sits relative to the fork in the effect chain.
@@ -188,7 +190,7 @@ impl Patch {
             fx_order: DEFAULT_FX_ORDER,
             fx_lane: [lane::MAIN; NUM_UNITS],
             user_tables: Default::default(),
-            clip: Clip::default(),
+            clips: core::array::from_fn(Clip::initial),
         }
     }
 
@@ -345,18 +347,24 @@ impl Patch {
             section(&mut out, 8, &buf);
         }
 
-        if self.clip != Clip::default() {
+        for (slot, clip) in self.clips.iter().enumerate() {
+            if *clip == Clip::initial(slot) {
+                continue;
+            }
             buf.clear();
-            varint(&mut buf, self.clip.length);
+            if slot > 0 {
+                buf.push(slot as u8);
+            }
+            varint(&mut buf, clip.length);
             let mut prev = 0;
-            for n in &self.clip.notes {
+            for n in &clip.notes {
                 varint(&mut buf, n.start - prev);
                 prev = n.start;
                 buf.push(n.pitch);
                 varint(&mut buf, n.length);
                 buf.push(n.velocity);
             }
-            section(&mut out, 9, &buf);
+            section(&mut out, if slot == 0 { 9 } else { 12 }, &buf);
         }
         out
     }
@@ -488,7 +496,8 @@ impl Patch {
                         patch.user_tables[slot] = table;
                     }
                 }
-                9 => {
+                9 | 12 => {
+                    let slot = if tag == 12 { s.u8()? as usize } else { 0 };
                     let length = s.varint()?;
                     let mut notes = Vec::new();
                     let mut start = 0u32;
@@ -499,8 +508,8 @@ impl Patch {
                         let velocity = s.u8()?;
                         notes.push(ClipNote { pitch, start, length: len, velocity });
                     }
-                    if let Some(clip) = Clip::new(length, &notes) {
-                        patch.clip = clip;
+                    if let (true, Some(clip)) = (slot < NUM_CLIPS, Clip::new(length, &notes)) {
+                        patch.clips[slot] = clip;
                     }
                 }
                 _ => {} // unknown section from a newer version: skip
@@ -603,7 +612,7 @@ mod tests {
         p.set_plain(osc_idx(1, osc::USER), 2.0);
         let ramp: Vec<i8> = (0..2 * crate::wavetable::USER_POINTS).map(|i| (i as i32 - 128) as i8).collect();
         p.user_tables[1] = UserTable::new(&ramp).unwrap();
-        p.clip = Clip::new(
+        p.clips[0] = Clip::new(
             crate::clip::PPQ * 8,
             &[
                 ClipNote { pitch: 48, start: 0, length: 90, velocity: 127 },
@@ -633,8 +642,8 @@ mod tests {
         assert_eq!(q.user_tables, p.user_tables);
         assert_eq!(q.user_tables[1].frames(), 2);
         assert_eq!(q.user_tables[0], UserTable::default());
-        assert_eq!(q.clip, p.clip);
-        assert_eq!(Patch::from_bytes(&Patch::init().to_bytes()).unwrap().clip, Clip::default());
+        assert_eq!(q.clips, p.clips);
+        assert_eq!(Patch::from_bytes(&Patch::init().to_bytes()).unwrap().clips, Patch::init().clips);
         assert_eq!(q.table_index(0), 0);
         assert_eq!(q.table_index(1), FACTORY_TABLES + 1);
         for i in 0..NUM_PARAMS {
@@ -841,6 +850,23 @@ mod tests {
         let plain = q.to_bytes();
         q.slots[0].curve = 0.25;
         assert_eq!(q.to_bytes().len(), plain.len() + 5);
+    }
+
+    #[test]
+    fn every_clip_is_saved_and_empty_ones_cost_nothing() {
+        let mut p = Patch::init();
+        let base = p.to_bytes().len();
+        p.clips[11] = Clip::new(crate::clip::PPQ * 2, &[ClipNote { pitch: 50, start: 10, length: 20, velocity: 99 }]).unwrap();
+        p.clips[3] = Clip::new(crate::clip::PPQ * 8, &[]).unwrap();
+        let bytes = p.to_bytes();
+        let q = Patch::from_bytes(&bytes).unwrap();
+        assert_eq!(q.clips, p.clips);
+        assert_eq!(q.clips[0], Clip::default());
+        assert!(bytes.len() < base + 20, "two small clips: {} bytes", bytes.len() - base);
+        // A slot this build does not have is skipped.
+        let mut bytes = vec![MAGIC, FORMAT_VERSION];
+        section(&mut bytes, 12, &[40, 0x80, 0x03]);
+        assert_eq!(Patch::from_bytes(&bytes).unwrap().clips, Patch::init().clips);
     }
 
     #[test]

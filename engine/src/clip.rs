@@ -19,6 +19,11 @@ pub const MAX_LENGTH: u32 = 8 * 4 * PPQ;
 pub const MIN_LENGTH: u32 = PPQ;
 /// Most notes in a clip.
 pub const MAX_NOTES: usize = 256;
+/// Clips a patch holds (as in Serum 2); one plays at a time.
+pub const NUM_CLIPS: usize = 12;
+/// With key switching on, these keys (C1 to B1) pick clip 1 to 12
+/// instead of playing.
+pub const SWITCH_KEYS: core::ops::Range<u8> = 24..24 + NUM_CLIPS as u8;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ClipNote {
@@ -57,6 +62,20 @@ impl Default for Clip {
 }
 
 impl Clip {
+    /// One empty bar: what clips 2 to 12 start as.
+    pub fn empty() -> Clip {
+        Clip { length: 4 * PPQ, notes: Vec::new() }
+    }
+
+    /// What clip `slot` holds in a new patch.
+    pub fn initial(slot: usize) -> Clip {
+        if slot == 0 {
+            Clip::default()
+        } else {
+            Clip::empty()
+        }
+    }
+
     /// A clip with every value in range and the notes in order, or None if
     /// the length is out of range. Notes outside the clip are dropped and
     /// notes running past its end are cut there.

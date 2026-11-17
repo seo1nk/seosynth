@@ -71,6 +71,31 @@ test('a connection keeps its curve and aux source through JSON and bytes', async
   assert.equal(back.aux, 'modWheel');
 });
 
+test('twelve clips: the picked one is edited, all are saved', async () => {
+  const { store } = await makeStore();
+  assert.equal(store.info.clip.clips, 12);
+  assert.equal(store.clipSlot(), 0);
+  const seventh = { length: 96 * 2, notes: [{ pitch: 50, start: 96, length: 24, velocity: 80 }] };
+  store.set(store.idx('clip.slot'), store.core.toNorm(store.idx('clip.slot'), 7));
+  assert.equal(store.clipSlot(), 6);
+  assert.deepEqual(store.getClip(), { length: 384, notes: [] }, 'other clips start as an empty bar');
+  assert.ok(store.setClip(seventh));
+  store.commit();
+  const json = store.toJSON();
+  assert.equal(json.clip, undefined, 'clip 1 is untouched');
+  assert.deepEqual(json.clips, { 7: { length: 192, notes: [[50, 96, 24, 80]] } });
+  assert.equal(json.params['clip.slot'], 7);
+  const { store: other } = await makeStore();
+  assert.deepEqual(other.fromJSON(JSON.parse(JSON.stringify(json))), []);
+  assert.deepEqual(other.getClip(6), seventh);
+  assert.equal(other.clipSlot(), 6);
+  const { store: third } = await makeStore();
+  assert.ok(third.loadBytes(store.toBytes()));
+  assert.deepEqual(third.getClip(6), seventh);
+  assert.deepEqual(third.getClip(0), store.getClip(0));
+  assert.deepEqual(other.fromJSON({ params: {}, clips: { 13: seventh as never, x: seventh as never } }), ['skipped clip 13', 'skipped clip x']);
+});
+
 test('tour and UI strings exist', () => {
   for (const lang of ['ja', 'en'] as Lang[]) {
     const { t } = createI18n(lang);

@@ -51,7 +51,9 @@ pub mod tele {
     pub const COMP_REDUCTION: usize = 7;
     /// Where the clip sequencer is, in ticks (-1 while it is not playing).
     pub const CLIP_POS: usize = 8;
-    pub const ENV_POS: usize = 9;
+    /// The clip that plays (0-based); key switching can change it.
+    pub const CLIP_SLOT: usize = 9;
+    pub const ENV_POS: usize = 10;
     pub const ENV_VAL: usize = ENV_POS + NUM_ENV;
     pub const LFO_PHASE: usize = ENV_VAL + NUM_ENV;
     pub const LFO_VAL: usize = LFO_PHASE + NUM_LFO;
@@ -85,6 +87,10 @@ pub struct Synth {
     fx: FxChain,
     arp: Arp,
     clip: ClipPlayer,
+    /// The clip that plays, and the `clip.slot` setting last seen (a new
+    /// setting wins over a key switch).
+    clip_slot: usize,
+    clip_slot_setting: usize,
     /// What turned the keys into notes during the last block.
     player: Player,
     /// Notes the voices are playing and have not been told to stop: the
@@ -156,6 +162,8 @@ impl Synth {
             fx: FxChain::new(sr),
             arp: Arp::new(),
             clip: ClipPlayer::new(),
+            clip_slot: 0,
+            clip_slot_setting: 0,
             player: Player::Keys,
             held: Vec::with_capacity(32),
             age: 0,
@@ -316,8 +324,19 @@ impl Synth {
         }
     }
 
-    pub fn set_clip(&mut self, clip: crate::clip::Clip) {
-        self.patch.clip = clip;
+    pub fn set_clip(&mut self, slot: usize, clip: crate::clip::Clip) {
+        if let Some(c) = self.patch.clips.get_mut(slot) {
+            *c = clip;
+        }
+    }
+
+    /// Plays clip `slot` from its start from now on.
+    fn switch_clip(&mut self, slot: usize) {
+        if slot != self.clip_slot {
+            self.clip_slot = slot;
+            self.clip.stop();
+            self.carry_out_clip();
+        }
     }
 
     pub fn set_fx_chain(&mut self, order: &[u8], lanes: &[u8]) -> bool {
@@ -360,6 +379,10 @@ impl Synth {
             self.note_off(note);
             return;
         }
+        if self.is_switch_key(note) {
+            self.switch_clip((note - crate::clip::SWITCH_KEYS.start) as usize);
+            return;
+        }
         // Both always know the keys, so either can take over at any time.
         self.arp.press(note, velocity);
         self.clip.press(note);
@@ -368,8 +391,16 @@ impl Synth {
         }
     }
 
+    /// With key switching on, the lowest octave picks the clip.
+    fn is_switch_key(&self, note: u8) -> bool {
+        self.wanted_player() == Player::Clip && self.patch.values[CLIP_BASE + clip::KEY_SWITCH] >= 0.5 && crate::clip::SWITCH_KEYS.contains(&note)
+    }
+
     /// A key comes up.
     pub fn note_off(&mut self, note: u8) {
+        if self.is_switch_key(note) {
+            return;
+        }
         self.arp.release(note);
         self.clip.release(note);
         if self.player == Player::Keys {
@@ -743,9 +774,14 @@ impl Synth {
                 self.carry_out_arp();
             }
             Player::Clip => {
+                let setting = (plain(&self.smoothed, CLIP_BASE + clip::SLOT) as usize).max(1).min(crate::clip::NUM_CLIPS) - 1;
+                if setting != self.clip_slot_setting {
+                    self.clip_slot_setting = setting;
+                    self.switch_clip(setting);
+                }
                 let p = |k: usize| plain(&self.smoothed, CLIP_BASE + k);
                 let settings = ClipSettings { root: p(clip::ROOT) as u8, looped: p(clip::LOOP) >= 0.5, bpm, sr: self.sr };
-                self.clip.advance(n, &self.patch.clip, &settings);
+                self.clip.advance(n, &self.patch.clips[self.clip_slot], &settings);
                 self.carry_out_clip();
             }
         }
@@ -787,6 +823,7 @@ impl Synth {
             (Player::Clip, Some(pos)) => pos as f32,
             _ => -1.0,
         };
+        t[tele::CLIP_SLOT] = self.clip_slot as f32;
         match newest {
             Some(v) => {
                 t[tele::NOTE] = v.note as f32;
@@ -1535,6 +1572,39 @@ mod tests {
         render(&mut s, 0.5);
         assert_eq!(s.active_voices(), 0);
         assert_eq!(s.telemetry[tele::CLIP_POS], -1.0);
+    }
+
+    #[test]
+    fn clips_are_picked_by_the_setting_or_by_the_lowest_keys() {
+        use crate::clip::{Clip, ClipNote, PPQ};
+        let one = |pitch: u8| Clip::new(PPQ, &[ClipNote { pitch, start: 0, length: PPQ / 2, velocity: 100 }]).unwrap();
+        let mut s = Synth::new(48_000.0);
+        s.patch.set_plain(CLIP_BASE + clip::ON, 1.0);
+        s.set_clip(2, one(40));
+        s.set_clip(5, one(45));
+        s.set_param(CLIP_BASE + clip::SLOT, defs()[CLIP_BASE + clip::SLOT].to_norm(3.0));
+        s.snap();
+        s.note_on(60, 0.8);
+        assert_eq!(arp_notes(&mut s, 1), [40.0], "clip 3 plays as drawn on the root");
+        assert_eq!(s.telemetry[tele::CLIP_SLOT], 2.0);
+        // Without key switching, the lowest keys just play (transpose).
+        s.note_on(29, 0.8);
+        assert_eq!(s.telemetry[tele::CLIP_SLOT], 2.0);
+        s.note_off(29);
+        // With it, F1 picks clip 6 and starts it over; the key is not held.
+        s.set_param(CLIP_BASE + clip::KEY_SWITCH, 1.0);
+        s.note_on(29, 0.8);
+        render(&mut s, 0.01);
+        assert_eq!(s.telemetry[tele::CLIP_SLOT], 5.0);
+        assert_eq!(arp_notes(&mut s, 1), [45.0], "clip 6, still transposed by the held 60");
+        // Changing the setting takes over again.
+        s.set_param(CLIP_BASE + clip::SLOT, defs()[CLIP_BASE + clip::SLOT].to_norm(1.0));
+        render(&mut s, 0.01);
+        assert_eq!(s.telemetry[tele::CLIP_SLOT], 0.0);
+        s.note_off(29);
+        s.note_off(60);
+        render(&mut s, 0.5);
+        assert_eq!(s.active_voices(), 0, "switching left nothing hanging");
     }
 
     #[test]

@@ -44,6 +44,8 @@ export interface Live {
   readonly gate: boolean;
   /** Where the clip sequencer is, in ticks, or -1 while it is not playing. */
   readonly clipPos: number;
+  /** The clip that plays (0-based). */
+  readonly clipSlot: number;
   readonly pitch: number;
   readonly peakL: number;
   readonly peakR: number;

@@ -6,7 +6,7 @@
 
 import type { EngineCore } from './engine/core.ts';
 import type { AudioMessage, ClipData, EngineInfo, FxChain, LfoPoint, ParamInfo, Slot } from './engine/types.ts';
-import type { PatchJSON } from './patch-json.ts';
+import type { ClipJSON, PatchJSON } from './patch-json.ts';
 
 const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
 const MAX_HISTORY = 200;
@@ -207,12 +207,17 @@ export class Store {
     }
   }
 
-  getClip(): ClipData {
-    return this.core.getClip();
+  /** The clip that is picked to play and edit (0-based). */
+  clipSlot(): number {
+    return Math.round(this.plain('clip.slot')) - 1;
   }
 
-  setClip(clip: ClipData): boolean {
-    if (!this.core.setClip(clip)) return false;
+  getClip(slot = this.clipSlot()): ClipData {
+    return this.core.getClip(slot);
+  }
+
+  setClip(clip: ClipData, slot = this.clipSlot()): boolean {
+    if (!this.core.setClip(slot, clip)) return false;
     this.#sync();
     this.emit('clip');
     return true;
@@ -313,10 +318,15 @@ export class Store {
       if (!untouched) tables[slot + 1] = Array.from({ length: points.length / per }, (_, f) => points.slice(f * per, (f + 1) * per));
     }
     if (Object.keys(tables).length) out.userTables = tables;
-    const clip = c.getClip();
-    if (JSON.stringify(clip) !== JSON.stringify(c.defaultClip())) {
-      out.clip = { length: clip.length, notes: clip.notes.map((n) => [n.pitch, n.start, n.length, n.velocity]) };
+    const clips: NonNullable<PatchJSON['clips']> = {};
+    for (let slot = 0; slot < this.info.clip.clips; slot++) {
+      const clip = c.getClip(slot);
+      if (JSON.stringify(clip) === JSON.stringify(c.defaultClip(slot))) continue;
+      const json = { length: clip.length, notes: clip.notes.map((n): [number, number, number, number] => [n.pitch, n.start, n.length, n.velocity]) };
+      if (slot === 0) out.clip = json;
+      else clips[slot + 1] = json;
     }
+    if (Object.keys(clips).length) out.clips = clips;
     return out;
   }
 
@@ -395,11 +405,13 @@ export class Store {
       const ok = flat.length > 0 && flat.every((v) => Number.isInteger(v) && v >= -128 && v <= 127);
       if (!ok || !c.setUserTable(Number(key) - 1, Int8Array.from(flat))) warnings.push(`skipped wavetable: ${key}`);
     }
-    if (obj.clip) {
-      const notes = Array.isArray(obj.clip.notes) ? obj.clip.notes : [];
-      const ok = notes.every((n) => Array.isArray(n) && n.length === 4 && n.every((v) => Number.isInteger(v) && v >= 0));
-      if (!ok || !c.setClip({ length: Number(obj.clip.length), notes: notes.map(([pitch, start, length, velocity]) => ({ pitch, start, length, velocity })) })) {
-        warnings.push('skipped clip');
+    const clips: [string, ClipJSON][] = [...(obj.clip ? [['1', obj.clip] as [string, ClipJSON]] : []), ...Object.entries(obj.clips ?? {})];
+    for (const [key, clip] of clips) {
+      const number = Number(key);
+      const notes = Array.isArray(clip?.notes) ? clip.notes : [];
+      const ok = Number.isInteger(number) && number >= 1 && number <= this.info.clip.clips && notes.every((n) => Array.isArray(n) && n.length === 4 && n.every((v) => Number.isInteger(v) && v >= 0));
+      if (!ok || !c.setClip(number - 1, { length: Number(clip.length), notes: notes.map(([pitch, start, length, velocity]) => ({ pitch, start, length, velocity })) })) {
+        warnings.push(key === '1' ? 'skipped clip' : `skipped clip ${key}`);
       }
     }
     c.setName(typeof obj.name === 'string' ? obj.name : 'Untitled');

@@ -425,7 +425,11 @@ pub mod clip {
     pub const ON: usize = 0;
     pub const ROOT: usize = 1;
     pub const LOOP: usize = 2;
-    pub const N: usize = 3;
+    /// Which clip plays (1..12) and is edited.
+    pub const SLOT: usize = 3;
+    /// The lowest octave (C1 to B1) picks the clip.
+    pub const KEY_SWITCH: usize = 4;
+    pub const N: usize = 5;
 }
 
 pub const OSC_BASE: usize = master::N;
@@ -916,6 +920,8 @@ fn build() -> Vec<ParamDef> {
     b.flag(i(clip::ON), 870, "clip.on", false, F_GLOBAL);
     b.int(i(clip::ROOT), 871, "clip.root", 24, 96, 60, "note", F_GLOBAL);
     b.flag(i(clip::LOOP), 872, "clip.loop", true, F_GLOBAL);
+    b.int(i(clip::SLOT), 873, "clip.slot", 1, crate::clip::NUM_CLIPS as i32, 1, "", F_GLOBAL);
+    b.flag(i(clip::KEY_SWITCH), 874, "clip.keySwitch", false, F_GLOBAL);
 
     assert_eq!(b.defs.len(), NUM_PARAMS);
     b.defs

@@ -273,6 +273,8 @@ const UI: Record<string, Pair> = {
   'clip.clear': ['すべて消す', 'Clear all'],
   'clip.selected': ['{n} 個の音を選択中', '{n} note(s) selected'],
   'clip.newNotes': ['次に書く音', 'New notes'],
+  'clip.slots': ['クリップ', 'Clips'],
+  'clip.slotN': ['クリップ {n}', 'Clip {n}'],
   'clip.hint': [
     '空いたマスを押すと音を書けます。音をドラッグで移動、右端で長さ、ダブルクリックで消去。Shift＋ドラッグでまとめて選択。',
     'Press an empty cell to add a note. Drag a note to move it, its right end to resize it, double-click to remove it. Shift + drag selects.',
@@ -382,6 +384,10 @@ const UI: Record<string, Pair> = {
   'serum.note.clip': [
     'クリップのフレーズは Serum の最初のクリップに書き出しています。Serum で C3 を押すと、seosynth で基準の音を押したときと同じ高さになるように移調しています（Serum 側の基準は未確認です）。',
     'The clip\'s phrase is written to Serum\'s first clip, moved so that C3 in Serum plays what the root note plays here (Serum\'s reference note is not confirmed).',
+  ],
+  'serum.note.clipSlots': [
+    'Serum の 12 個のクリップに同じ番号で書き出していますが、どれを鳴らすかと鍵盤での切り替えは移し替えていません。Serum で選び直してください。',
+    'Each clip is written to Serum\'s clip of the same number, but which one plays and switching by key were not carried over. Pick them again in Serum.',
   ],
   'serum.note.clipOnce': ['クリップの「1 回だけ」は移し替えていません。Serum ではくり返し鳴ります。', 'Playing the clip once was not carried over: it loops in Serum.'],
   'serum.note.arp': [
@@ -738,6 +744,14 @@ const PARAM: Record<string, [Pair, Pair]> = {
   'clip.on': [['電源', 'On'], ['クリップシーケンサーを使うかどうか。オンのあいだはアルペジエーターより優先されます。', 'Switch the clip sequencer on or off. While on, it comes before the arpeggiator.']],
   'clip.root': [['基準の音', 'Root note'], ['この鍵盤を押すと、書いたとおりの高さで鳴ります。ほかの鍵盤では、その差だけ高さが変わります。', 'Pressing this key plays the clip as drawn; other keys move it up or down by the difference.']],
   'clip.loop': [['くり返す', 'Loop'], ['オン：押さえているあいだくり返します。オフ：1 回だけ鳴らします。', 'On: plays over and over while held. Off: plays once.']],
+  'clip.slot': [['どのクリップ', 'Clip'], ['12 個のクリップのうち、鳴らして編集するもの。', 'Which of the 12 clips plays and is edited.']],
+  'clip.keySwitch': [
+    ['鍵盤で切り替え', 'Switch by key'],
+    [
+      'オンにすると、いちばん下のオクターブ（C1〜B1）の鍵盤がクリップ 1〜12 を選ぶボタンになります。弾きながらフレーズを切り替えられます。',
+      'When on, the lowest octave (C1 to B1) picks clip 1 to 12 instead of playing, so you can change phrases while you play.',
+    ],
+  ],
 
   'split.mode': [['分け方', 'Divide by'], ['音を 2 つの道にどう分けるか。', 'How the sound is divided between the two lanes.']],
   'split.freq': [['分ける高さ', 'Crossover'], ['この高さより下が低音の道、上が高音の道に進みます。', 'Sound below this goes to the lows lane, sound above it to the highs lane.']],

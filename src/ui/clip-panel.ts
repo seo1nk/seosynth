@@ -40,7 +40,10 @@ export function ClipPanel(app: App): ClipPanel {
   // Notes read from the patch get ids of one site, notes drawn in the roll
   // of another, so the two never meet.
   const newId = idMaker('patch');
-  const fromPatch = (prev: Clip): Clip => adoptIds(prev, { ppq, ...store.getClip() }, newId);
+  // The clip being edited; a gesture in progress is written to it even if
+  // another clip is picked meanwhile.
+  let editing = store.clipSlot();
+  const fromPatch = (prev: Clip): Clip => adoptIds(prev, { ppq, ...store.getClip(editing) }, newId);
   let model: Clip = fromPatch({ ppq, length: 0, notes: [] });
   let writing = false;
   let pending = 0;
@@ -49,7 +52,7 @@ export function ClipPanel(app: App): ClipPanel {
     cancelAnimationFrame(pending);
     pending = 0;
     writing = true;
-    store.setClip({ length: model.length, notes: model.notes.map(({ pitch, start, length, velocity }) => ({ pitch, start, length, velocity })) });
+    store.setClip({ length: model.length, notes: model.notes.map(({ pitch, start, length, velocity }) => ({ pitch, start, length, velocity })) }, editing);
     writing = false;
   };
 
@@ -188,14 +191,59 @@ export function ClipPanel(app: App): ClipPanel {
     t('clip.clear'),
   );
 
-  // --- keeping in step ---------------------------------------------------------------------
-  app.on('clip', () => {
-    if (writing) return;
+  // --- which clip -------------------------------------------------------------------------
+  // One tab per clip: the picked one plays and is edited; a dot marks the
+  // ones with notes; a ring the one playing (key switching can change it).
+  const tabs = Array.from({ length: store.info.clip.clips }, (_, k) =>
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'clip-tab',
+        'aria-label': t('clip.slotN', { n: k + 1 }),
+        onclick: () => {
+          store.set(store.idx('clip.slot'), store.core.toNorm(store.idx('clip.slot'), k + 1));
+          store.commit();
+        },
+      },
+      String(k + 1),
+    ),
+  );
+  const markTabs = () => {
+    tabs.forEach((tab, k) => {
+      tab.setAttribute('aria-pressed', String(k === editing));
+      tab.classList.toggle('has-notes', store.getClip(k).notes.length > 0);
+    });
+  };
+  let shownPlaying = -1;
+  const reload = () => {
+    if (pending) write();
+    editing = store.clipSlot();
     model = fromPatch(model);
     roll.setClip(model);
     syncLength();
+    markTabs();
+  };
+
+  // --- keeping in step ---------------------------------------------------------------------
+  app.on('clip', () => {
+    if (writing) {
+      markTabs();
+      return;
+    }
+    reload();
   });
-  app.onFrame((live) => roll.setPlayhead(live.clipPos >= 0 ? live.clipPos : null));
+  app.watch(store.idx('clip.slot'), () => {
+    if (store.clipSlot() !== editing) reload();
+  });
+  app.onFrame((live) => {
+    const playing = live.clipPos >= 0 ? live.clipSlot : -1;
+    roll.setPlayhead(playing === editing ? live.clipPos : null);
+    if (playing !== shownPlaying) {
+      shownPlaying = playing;
+      tabs.forEach((tab, k) => tab.classList.toggle('is-playing', k === playing));
+    }
+  });
   app.onDispose(() => {
     if (pending) write();
     for (const p of [...heard]) unhear(p);
@@ -204,12 +252,20 @@ export function ClipPanel(app: App): ClipPanel {
   });
 
   syncLength();
+  markTabs();
   showSelection();
   roll.reveal();
 
   const el = h(
     'section',
     { class: 'clip-panel', 'aria-label': t('clip.title') },
+    h(
+      'div',
+      { class: 'clip-slots' },
+      h('span', { class: 'ctl-label' }, t('clip.slots')),
+      h('div', { class: 'clip-tabs', role: 'group', 'aria-label': t('clip.slots') }, tabs),
+      Switch(app, 'clip.keySwitch'),
+    ),
     h(
       'div',
       { class: 'clip-tools' },

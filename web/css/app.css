@@ -1929,6 +1929,49 @@ input[type='range'] {
   accent-color: var(--ink);
 }
 /* The clip editor. */
+.clip-slots {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.clip-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.clip-tab {
+  position: relative;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: 8px;
+  border: 1.5px solid var(--rule);
+  background: var(--paper);
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.clip-tab[aria-pressed='true'] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+/* A dot: this clip has notes. */
+.clip-tab.has-notes::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+/* The clip that is playing now. */
+.clip-tab.is-playing {
+  box-shadow: 0 0 0 2px var(--sound);
+}
 .clip-panel {
   display: flex;
   flex-direction: column;

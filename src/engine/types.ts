@@ -58,6 +58,8 @@ export interface TeleLayout {
   gate: number;
   /** Where the clip sequencer is, in ticks; -1 while it is not playing. */
   clipPos: number;
+  /** The clip that plays (0-based). */
+  clipSlot: number;
   compReduction: number;
   envPos: number;
   envVal: number;
@@ -83,7 +85,7 @@ export interface EngineInfo {
   userMaxFrames: number;
   divisionBeats: number[];
   /** The clip sequencer: ticks per quarter note and the limits of a clip. */
-  clip: { ppq: number; minLength: number; maxLength: number; maxNotes: number };
+  clip: { ppq: number; minLength: number; maxLength: number; maxNotes: number; clips: number };
   numSlots: number;
   numLfos: number;
   /** Envelopes, the amp envelope (env1) included. */
@@ -177,9 +179,9 @@ export interface EngineExports {
   table_offer_ready(): void;
   user_table_set(slot: number, frames: number): number;
   user_table_get(slot: number): number;
-  clip_set(len: number): number;
-  clip_get(): number;
-  clip_default(): number;
+  clip_set(slot: number, len: number): number;
+  clip_get(slot: number): number;
+  clip_default(slot: number): number;
   fx_chain_set(): number;
   fx_chain_get(): number;
   name_set(len: number): void;

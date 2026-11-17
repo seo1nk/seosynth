@@ -1053,12 +1053,20 @@ pub fn build(patch: &Patch, bank: &mut Bank) -> (Value, Vec<String>) {
         c.note("arp", "");
     }
     if c.on("clip.on") {
-        let (clip, once) = midi_clip(&c);
-        d.set("MidiClip0", clip);
+        // Serum has twelve clips too: each goes to its own slot. Which one
+        // plays and how keys switch them is not known yet.
+        for slot in 0..crate::clip::NUM_CLIPS {
+            if slot == 0 || !c.patch.clips[slot].notes.is_empty() {
+                d.set(&format!("MidiClip{slot}"), midi_clip(&c, slot));
+            }
+        }
         d.set("ClipPlayer0", module(vec![("kParamEnabled", flag(true))]));
         c.note("clip", "");
-        if once {
+        if !c.on("clip.loop") {
             c.note("clipOnce", "");
+        }
+        if c.v("clip.slot") != 1.0 || c.on("clip.keySwitch") {
+            c.note("clipSlots", "");
         }
     }
     d.set("Global0", module(global));
@@ -1097,14 +1105,13 @@ pub fn build(patch: &Patch, bank: &mut Bank) -> (Value, Vec<String>) {
     (d, c.notes)
 }
 
-/// The clip as Serum's first MIDI clip, and whether it plays only once
-/// (which is not carried over). Serum counts time in beats and stores a
+/// Clip `slot` as Serum's MIDI clip of the same number. Serum counts time in beats and stores a
 /// velocity of 0..1 with seven more per-note attributes, written here with
 /// the values its piano roll gives a new note. Serum is assumed to play a
 /// clip as written on C3 (MIDI 60), so the notes are moved by how far our
 /// root is from it; the note to the user says this is unconfirmed.
-fn midi_clip(c: &Ctx) -> (Value, bool) {
-    let clip = &c.patch.clip;
+fn midi_clip(c: &Ctx, slot: usize) -> Value {
+    let clip = &c.patch.clips[slot];
     let ppq = crate::clip::PPQ as f64;
     let shift = 60 - c.v("clip.root") as i32;
     let notes = clip
@@ -1127,7 +1134,7 @@ fn midi_clip(c: &Ctx) -> (Value, bool) {
         ("clip", map(vec![("notes", Value::List(notes)), ("regionEndBeats", Value::Num(clip.length as f64 / ppq))])),
         ("plainParams", Value::from("default")),
     ]);
-    (module, !c.on("clip.loop"))
+    module
 }
 
 fn header_fields(patch: &Patch) -> Vec<(&'static str, Value)> {
@@ -1406,8 +1413,8 @@ mod tests {
         let clip = plain_of(&d, &["MidiClip0", "clip"]);
         assert_eq!(clip.get("regionEndBeats"), Some(&Value::Num(4.0)), "one bar");
         let Some(Value::List(written)) = clip.get("notes") else { panic!() };
-        assert_eq!(written.len(), p.clip.notes.len());
-        let first = &p.clip.notes[1];
+        assert_eq!(written.len(), p.clips[0].notes.len());
+        let first = &p.clips[0].notes[1];
         let n = &written[1];
         assert_eq!(n.get("noteNum"), Some(&Value::Int(first.pitch as i64 + 12)), "moved from root C2 to C3");
         assert_eq!(n.get("timeStamp"), Some(&Value::Num(first.start as f64 / 96.0)));
