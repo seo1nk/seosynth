@@ -1,4 +1,5 @@
-//! Low-frequency oscillators: preset shapes plus a drawable custom shape.
+//! Low-frequency oscillators: preset shapes, a drawable custom shape and two
+//! chaotic ones that follow a strange attractor.
 
 use crate::util::{curve_shape, smooth_coeff, Rng, TAU};
 
@@ -15,12 +16,93 @@ pub enum LfoKind {
     SampleHold,
     Smooth,
     Custom,
+    /// The Lorenz attractor: swings between two lobes at irregular times.
+    Lorenz,
+    /// The Rössler attractor: a steadier spiral that sometimes jumps.
+    Rossler,
 }
 
 impl LfoKind {
     pub fn from_index(i: usize) -> LfoKind {
         use LfoKind::*;
-        [Sine, Triangle, SawUp, SawDown, Square, SampleHold, Smooth, Custom][i.min(7)]
+        [Sine, Triangle, SawUp, SawDown, Square, SampleHold, Smooth, Custom, Lorenz, Rossler][i.min(9)]
+    }
+
+    pub fn is_chaos(self) -> bool {
+        matches!(self, LfoKind::Lorenz | LfoKind::Rossler)
+    }
+}
+
+/// A point moving on a strange attractor. One LFO cycle covers a few loops
+/// of it, so the rate works as a speed.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Chaos {
+    x: f32,
+    y: f32,
+    z: f32,
+}
+
+impl Chaos {
+    /// Attractor time per LFO cycle, and the largest step that stays
+    /// accurate with the midpoint method.
+    fn scale(kind: LfoKind) -> (f32, f32) {
+        match kind {
+            LfoKind::Rossler => (18.0, 0.02),
+            _ => (4.0, 0.004),
+        }
+    }
+
+    fn deriv(kind: LfoKind, x: f32, y: f32, z: f32) -> (f32, f32, f32) {
+        match kind {
+            LfoKind::Rossler => (-y - z, x + 0.2 * y, 0.2 + z * (x - 5.7)),
+            _ => (10.0 * (y - x), x * (28.0 - z) - y, x * y - 8.0 / 3.0 * z),
+        }
+    }
+
+    /// The point `start` (0..1) of a cycle along a fixed path on the
+    /// attractor, so the same start always gives the same movement.
+    pub fn start(kind: LfoKind, start: f32) -> Chaos {
+        let mut c = match kind {
+            LfoKind::Rossler => Chaos { x: 1.0, y: -5.0, z: 0.02 },
+            _ => Chaos { x: -8.0, y: 8.0, z: 27.0 },
+        };
+        c.advance(kind, start.max(0.0).min(1.0));
+        c
+    }
+
+    /// Moves on by `cycles` LFO cycles.
+    pub fn advance(&mut self, kind: LfoKind, cycles: f32) {
+        let (per_cycle, max_h) = Chaos::scale(kind);
+        let t = (cycles * per_cycle).max(0.0);
+        let steps = (t / max_h).ceil().max(1.0).min(4096.0);
+        let h = t / steps;
+        for _ in 0..steps as usize {
+            let (dx, dy, dz) = Chaos::deriv(kind, self.x, self.y, self.z);
+            let (mx, my, mz) = (self.x + 0.5 * h * dx, self.y + 0.5 * h * dy, self.z + 0.5 * h * dz);
+            let (dx, dy, dz) = Chaos::deriv(kind, mx, my, mz);
+            self.x += h * dx;
+            self.y += h * dy;
+            self.z += h * dz;
+        }
+        // Never leave the attractor, whatever the input.
+        if !(self.x.is_finite() && self.y.is_finite() && self.z.is_finite()) || self.x.abs() > 100.0 || self.z.abs() > 200.0 {
+            *self = Chaos::start(kind, 0.0);
+        }
+    }
+
+    /// Current value, 0..1.
+    pub fn value(&self, kind: LfoKind) -> f32 {
+        let v = match kind {
+            LfoKind::Rossler => (self.x + 9.0) / 20.0,
+            _ => 0.5 + self.x / 36.0,
+        };
+        v.max(0.0).min(1.0)
+    }
+}
+
+impl Default for Chaos {
+    fn default() -> Self {
+        Chaos::start(LfoKind::Lorenz, 0.0)
     }
 }
 
@@ -102,7 +184,8 @@ pub fn render_points(points: &[LfoPoint], table: &mut [f32]) {
 }
 
 /// Value (0..1) of a shape at `phase` (0..1). `ra`/`rb` are the current and
-/// next random values for the random shapes.
+/// next random values for the random shapes. The chaotic shapes have no
+/// value by phase (see `Chaos`); they give the middle here.
 #[inline]
 pub fn eval(kind: LfoKind, phase: f32, table: &[f32], ra: f32, rb: f32) -> f32 {
     match kind {
@@ -127,6 +210,7 @@ pub fn eval(kind: LfoKind, phase: f32, table: &[f32], ra: f32, rb: f32) -> f32 {
             let i = (x as usize).min(LFO_TABLE - 1);
             table[i] + (table[i + 1] - table[i]) * (x - i as f32)
         }
+        LfoKind::Lorenz | LfoKind::Rossler => 0.5,
     }
 }
 
@@ -150,11 +234,15 @@ pub struct LfoState {
     out: f32,
     done: bool,
     fresh: bool,
+    chaos: Chaos,
+    /// Which attractor `chaos` was started on.
+    chaos_kind: Option<LfoKind>,
+    start: f32,
 }
 
 impl Default for LfoState {
     fn default() -> Self {
-        LfoState { phase: 0.0, time: 0.0, ra: 0.5, rb: 0.5, out: 0.0, done: false, fresh: true }
+        LfoState { phase: 0.0, time: 0.0, ra: 0.5, rb: 0.5, out: 0.0, done: false, fresh: true, chaos: Chaos::default(), chaos_kind: None, start: 0.0 }
     }
 }
 
@@ -166,14 +254,19 @@ impl LfoState {
         self.rb = rng.unipolar();
         self.done = false;
         self.fresh = true;
+        self.start = start_phase;
+        // Started on the attractor when first used.
+        self.chaos_kind = None;
     }
 
     /// Advance by `dt` seconds. `free_phase` is the shared phase used in Free
-    /// mode. Returns (value 0..1, fade 0..1); the fade is the rise/delay
-    /// envelope, kept separate so a bipolar routing can fade around its
-    /// centre rather than from the bottom.
-    pub fn advance(&mut self, p: &LfoParams, dt: f32, free_phase: f32, table: &[f32], rng: &mut Rng) -> (f32, f32) {
+    /// mode and `free_chaos` the shared value of a chaotic shape. Returns
+    /// (value 0..1, fade 0..1); the fade is the rise/delay envelope, kept
+    /// separate so a bipolar routing can fade around its centre rather than
+    /// from the bottom.
+    pub fn advance(&mut self, p: &LfoParams, dt: f32, free_phase: f32, free_chaos: f32, table: &[f32], rng: &mut Rng) -> (f32, f32) {
         let mut fade = 1.0;
+        let before = self.phase;
         match p.mode {
             LfoMode::Free => {
                 let ph = free_phase + p.phase;
@@ -207,7 +300,23 @@ impl LfoState {
                 }
             }
         }
-        let target = eval(p.kind, self.phase, table, self.ra, self.rb);
+        let target = if !p.kind.is_chaos() {
+            eval(p.kind, self.phase, table, self.ra, self.rb)
+        } else if p.mode == LfoMode::Free {
+            free_chaos
+        } else {
+            if self.chaos_kind != Some(p.kind) {
+                self.chaos = Chaos::start(p.kind, self.start - self.start.floor());
+                self.chaos_kind = Some(p.kind);
+            }
+            // As far as the phase moved (it wraps, and holds once done).
+            let mut moved = self.phase - before;
+            if moved < 0.0 {
+                moved += 1.0;
+            }
+            self.chaos.advance(p.kind, moved);
+            self.chaos.value(p.kind)
+        };
         if self.fresh || p.smooth <= 1e-4 {
             self.out = target;
             self.fresh = false;
@@ -273,7 +382,7 @@ mod tests {
         let mut wraps = 0;
         let mut last = 0.0;
         for _ in 0..3000 {
-            let (v, _) = st.advance(&p, dt, 0.0, &table, &mut rng);
+            let (v, _) = st.advance(&p, dt, 0.0, 0.5, &table, &mut rng);
             if v < last - 0.5 {
                 wraps += 1;
             }
@@ -291,7 +400,7 @@ mod tests {
         st.trigger(0.0, &mut rng);
         let mut v = 0.0;
         for _ in 0..2000 {
-            v = st.advance(&p, 0.001, 0.0, &table, &mut rng).0;
+            v = st.advance(&p, 0.001, 0.0, 0.5, &table, &mut rng).0;
         }
         assert!((v - 1.0).abs() < 1e-6);
     }
@@ -307,11 +416,45 @@ mod tests {
         st.trigger(0.0, &mut rng);
         let mut fades = Vec::new();
         for _ in 0..400 {
-            fades.push(st.advance(&p, 0.001, 0.0, &table, &mut rng).1);
+            fades.push(st.advance(&p, 0.001, 0.0, 0.5, &table, &mut rng).1);
         }
         assert_eq!(fades[50], 0.0);
         assert!((fades[199] - 0.5).abs() < 0.02);
         assert_eq!(fades[399], 1.0);
+    }
+
+    #[test]
+    fn chaos_wanders_but_stays_in_range() {
+        let table = [0.0f32; LFO_TABLE + 1];
+        for kind in [LfoKind::Lorenz, LfoKind::Rossler] {
+            let p = LfoParams { rate_hz: 1.5, ..params(kind, LfoMode::Trig) };
+            let mut rng = Rng::new(7);
+            let run = |start: f32, rng: &mut Rng| {
+                let mut st = LfoState::default();
+                st.trigger(start, rng);
+                (0..4000).map(|_| st.advance(&p, 0.001, 0.0, 0.5, &table, rng).0).collect::<Vec<f32>>()
+            };
+            let a = run(0.0, &mut rng);
+            assert!(a.iter().all(|v| (0.0..=1.0).contains(v)), "{kind:?}");
+            let (lo, hi) = a.iter().fold((1.0f32, 0.0f32), |(l, h), &v| (l.min(v), h.max(v)));
+            assert!(hi - lo > 0.5, "{kind:?} moves widely: {lo}..{hi}");
+            // Not periodic: the second second differs from the first.
+            let diff = (0..1000).map(|i| (a[i] - a[i + 1000]).abs()).fold(0.0f32, f32::max);
+            assert!(diff > 0.2, "{kind:?}");
+            // The same start gives the same movement; another start does not.
+            assert_eq!(a, run(0.0, &mut rng));
+            assert_ne!(a, run(0.5, &mut rng));
+        }
+    }
+
+    #[test]
+    fn chaos_matches_its_preview_and_survives_huge_steps() {
+        let mut c = Chaos::start(LfoKind::Lorenz, 0.25);
+        let mut d = Chaos::start(LfoKind::Lorenz, 0.0);
+        d.advance(LfoKind::Lorenz, 0.25);
+        assert!((c.value(LfoKind::Lorenz) - d.value(LfoKind::Lorenz)).abs() < 1e-3);
+        c.advance(LfoKind::Lorenz, 1e9);
+        assert!((0.0..=1.0).contains(&c.value(LfoKind::Lorenz)));
     }
 
     #[test]

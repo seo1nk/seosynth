@@ -488,7 +488,7 @@ pub const FILTER_TYPES: &[&str] = &[
     "Peak", "Morph", "Comb+", "Comb-", "Phaser", "Formant", "Reduce", "Ring",
 ];
 pub const LFO_SHAPES: &[&str] = &[
-    "Sine", "Triangle", "SawUp", "SawDown", "Square", "S&H", "Smooth", "Custom",
+    "Sine", "Triangle", "SawUp", "SawDown", "Square", "S&H", "Smooth", "Custom", "Lorenz", "Rossler",
 ];
 pub const LFO_MODES: &[&str] = &["Trig", "Env", "Free"];
 pub const DIVISIONS: &[&str] = &[

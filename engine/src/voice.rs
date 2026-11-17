@@ -152,6 +152,8 @@ pub struct Shared<'a> {
     pub tables: [&'a Wavetable; NUM_OSC],
     pub lfo_tables: &'a [[f32; LFO_TABLE + 1]; NUM_LFO],
     pub lfo_free: [f32; NUM_LFO],
+    /// Values of the free-running chaotic LFOs.
+    pub lfo_chaos: [f32; NUM_LFO],
     pub mod_wheel: f32,
     pub aftertouch: f32,
     pub pitch_bend: f32,
@@ -318,7 +320,7 @@ impl Voice {
         }
         for l in 0..NUM_LFO {
             let p = lfo_params(defs, &self.m, l, bpm);
-            let (v, fade) = self.lfos[l].advance(&p, dt, sh.lfo_free[l], &sh.lfo_tables[l], &mut self.rng);
+            let (v, fade) = self.lfos[l].advance(&p, dt, sh.lfo_free[l], sh.lfo_chaos[l], &sh.lfo_tables[l], &mut self.rng);
             self.uni[src::lfo(l)] = v * fade;
             self.bi[src::lfo(l)] = (2.0 * v - 1.0) * fade;
         }

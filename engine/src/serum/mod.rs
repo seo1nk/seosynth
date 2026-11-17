@@ -400,6 +400,18 @@ fn lfo_points(kind: LfoKind, custom: &[LfoPoint]) -> Vec<LfoPoint> {
             p(0.0, 0.35), p(0.25, 0.35), p(0.25, 0.8), p(0.5, 0.8), p(0.5, 0.15), p(0.75, 0.15), p(0.75, 0.6), p(1.0, 0.6),
         ],
         LfoKind::Smooth => vec![p(0.0, 0.35), p(0.25, 0.8), p(0.5, 0.15), p(0.75, 0.6), p(1.0, 0.35)],
+        // The first cycle, traced at 32 points.
+        LfoKind::Lorenz | LfoKind::Rossler => {
+            let mut c = crate::lfo::Chaos::start(kind, 0.0);
+            (0..=32)
+                .map(|i| {
+                    if i > 0 {
+                        c.advance(kind, 1.0 / 32.0);
+                    }
+                    p(i as f32 / 32.0, c.value(kind))
+                })
+                .collect()
+        }
         LfoKind::Custom => {
             let mut pts = custom.to_vec();
             if pts.is_empty() {
@@ -423,6 +435,9 @@ fn lfo(c: &mut Ctx, l: usize) -> Value {
     let kind = LfoKind::from_index(c.v(&k("shape")) as usize);
     if matches!(kind, LfoKind::SampleHold | LfoKind::Smooth) {
         c.note("lfoRandom", &format!("LFO {}", l + 1));
+    }
+    if kind.is_chaos() {
+        c.note("lfoChaos", &format!("LFO {}", l + 1));
     }
     let pts = lfo_points(kind, &c.patch.lfo_shapes[l]);
     let curve_data = map(vec![

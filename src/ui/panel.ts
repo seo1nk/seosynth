@@ -222,6 +222,10 @@ const LFO_ICONS: Record<string, () => SVGElement> = {
   Smooth: ICON('M1 9C4 9 5 3 9 3S13 11 17 11S22 5 27 6'),
   // A hand-drawn line: draw your own.
   Custom: ICON('M2 11L7 4L12 9L17 3L21 8M21 8l4 4M23 12h3v-3'),
+  // Two lobes, like the Lorenz "butterfly".
+  Lorenz: ICON('M14 7C11 2 3 1 3 7S11 12 14 7S25 2 25 7S17 12 14 7'),
+  // A widening spiral, like the Rössler band.
+  Rossler: ICON('M14 7c0-2 3-2 3 0s-2 3-5 2-3-6 1-6 8 1 8 5-5 6-9 5'),
 };
 
 // Which controls each effect shows first; the rest go under "more settings".

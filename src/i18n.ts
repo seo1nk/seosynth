@@ -373,6 +373,7 @@ const UI: Record<string, Pair> = {
   'serum.note.modDropped': ['つながり「{detail}」は Serum 側の行き先が特定できず、移し替えていません。', 'Connection "{detail}" was not carried over: its Serum destination is unknown.'],
   'serum.note.modCurve': ['つながり「{detail}」の曲げは移し替えていません（Serum 側の単位が未確認です）。', 'Connection "{detail}": its curve was not carried over (Serum\'s unit is not confirmed).'],
   'serum.note.modAux': ['つながり「{detail}」の「強さを決めるもの」は移し替えていません。Serum の Aux ソースで設定し直してください。', 'Connection "{detail}": what scales it was not carried over. Set it again as an Aux source in Serum.'],
+  'serum.note.lfoChaos': ['{detail} のカオスの形は、最初の 1 周を描いた形に置き換えています。', '{detail}: the chaos shape became a drawing of its first cycle.'],
   'serum.note.lfoRandom': ['{detail} のランダムな形は、決まったパターンに置き換えています。', '{detail}: the random shape became a fixed pattern.'],
   'serum.note.lfoSmooth': ['{detail} の「なめらかさ」は Serum の Smooth に同じ割合で移していますが、かかり方は少し違います。', '{detail}: smoothing became Serum\'s Smooth at the same percentage, which rounds the shape a little differently.'],
   'serum.note.portamento': ['グライドの時間は、Serum 側の単位が確認できていないため、ずれることがあります。Serum で聞いて合わせてください。', 'Glide: Serum\'s unit for the time is not confirmed, so it may differ. Check it by ear in Serum.'],
@@ -599,7 +600,13 @@ const PARAM: Record<string, [Pair, Pair]> = {
   'env.decCurve': [['ディケイのカーブ', 'Decay curve'], ['ディケイの曲がり方。＋で最初に速く落ちる自然な減衰に。', 'Bend of the decay. Positive drops fast first, like a natural decay.']],
   'env.relCurve': [['リリースのカーブ', 'Release curve'], ['リリースの曲がり方。', 'Bend of the release.']],
 
-  'lfo.shape': [['波形', 'Shape'], ['揺れ方の形。Custom を選ぶと自分で描けます。', 'The shape of the wobble. Choose Custom to draw your own.']],
+  'lfo.shape': [
+    ['波形', 'Shape'],
+    [
+      '揺れ方の形。「描く」を選ぶと自分で描けます。カオスの 2 つは、決まった形をくり返さず、似ているのに毎回少しずつ違う揺れ方をします（ローレンツは 2 つの山を行き来し、レスラーはらせんを描きながらときどき跳ねます）。速さはそのまま進む速さです。',
+      'The shape of the wobble. Choose Draw to draw your own. The two chaos shapes never repeat exactly: they move in a similar way each time but never the same (Lorenz swings between two lobes, Rössler spirals and jumps now and then). The rate sets how fast they move.',
+    ],
+  ],
   'lfo.rate': [['速さ', 'Rate'], ['揺れる速さ（1秒間に何回か）。', 'How fast it cycles, in times per second.']],
   'lfo.sync': [['テンポに合わせる', 'Sync to tempo'], ['オンで速さをテンポ（音符の長さ）に合わせます。', 'On: the speed locks to the tempo, in note lengths.']],
   'lfo.div': [['1周の長さ', 'Cycle length'], ['1周の長さを音符で指定します。1/4 は4分音符、T は3連、. は付点。', 'Length of one cycle as a note value. T is triplet, a dot is dotted.']],
@@ -607,7 +614,7 @@ const PARAM: Record<string, [Pair, Pair]> = {
   'lfo.rise': [['だんだん強く', 'Fade in'], ['揺れがだんだん大きくなるまでの時間。遅れてかかるビブラートなどに。', 'Time for the wobble to fade in. Good for delayed vibrato.']],
   'lfo.delay': [['始まるまでの間', 'Delay'], ['揺れ始めるまでの待ち時間。', 'Wait before the wobble starts.']],
   'lfo.smooth': [['なめらかさ', 'Smoothing'], ['形の角を丸めます。', 'Rounds off sharp corners of the shape.']],
-  'lfo.phase': [['スタート位置', 'Start phase'], ['形のどこから始めるか。', 'Where in the shape it starts.']],
+  'lfo.phase': [['スタート位置', 'Start phase'], ['形のどこから始めるか。カオスの形では、同じ位置からは毎回同じ動きになります。', 'Where in the shape it starts. For the chaos shapes, the same start always gives the same movement.']],
 
   'hyper.on': [['電源', 'On'], ['', '']],
   'hyper.rate': [['速さ', 'Rate'], ['重ねた音が揺れる速さ。', 'How fast the added voices drift.']],
@@ -782,6 +789,8 @@ const OPTION: Record<string, Pair> = {
   'S&H': ['ランダム（階段）', 'Random steps'],
   Smooth: ['ランダム（なめらか）', 'Smooth random'],
   Custom: ['描く', 'Draw'],
+  Lorenz: ['カオス（ローレンツ）', 'Chaos (Lorenz)'],
+  Rossler: ['カオス（レスラー）', 'Chaos (Rössler)'],
   Trig: ['弾くたび最初から', 'Restart per note'],
   Env: ['一度だけ', 'Once'],
   Free: ['止めずに動かす', 'Free running'],

@@ -4,7 +4,7 @@
 use crate::arp::{Arp, ArpEvent, ArpMode, ArpSettings};
 use crate::clip::{ClipEvent, ClipPlayer, ClipSettings};
 use crate::fx::{self, Ctx, FxChain};
-use crate::lfo::{self, sanitize_points, LfoMode, LfoPoint, LFO_TABLE};
+use crate::lfo::{self, sanitize_points, Chaos, LfoMode, LfoPoint, LFO_TABLE};
 use crate::osc::{warp2_phase, Warp};
 use crate::params::{
     self, arp, clip, defs, master, osc, osc_idx, src, ARP_BASE, CLIP_BASE, F_GLOBAL, F_MOD, F_SMOOTH, NUM_ENV, NUM_LFO,
@@ -77,6 +77,9 @@ pub struct Synth {
     jobs: TableJobs,
     lfo_tables: [[f32; LFO_TABLE + 1]; NUM_LFO],
     lfo_free: [f32; NUM_LFO],
+    /// Free-running chaotic LFOs, shared by all voices, and their values.
+    lfo_chaos: [Chaos; NUM_LFO],
+    lfo_chaos_val: [f32; NUM_LFO],
     voice_slots: Vec<ActiveSlot>,
     global_slots: Vec<ActiveSlot>,
     fx: FxChain,
@@ -146,6 +149,8 @@ impl Synth {
             jobs: TableJobs::default(),
             lfo_tables: [[0.0; LFO_TABLE + 1]; NUM_LFO],
             lfo_free: [0.0; NUM_LFO],
+            lfo_chaos: [Chaos::default(); NUM_LFO],
+            lfo_chaos_val: [0.5; NUM_LFO],
             voice_slots: Vec::with_capacity(NUM_SLOTS),
             global_slots: Vec::with_capacity(NUM_SLOTS),
             fx: FxChain::new(sr),
@@ -552,6 +557,10 @@ impl Synth {
             let p = lfo_params(d, &self.smoothed, l, bpm);
             let ph = self.lfo_free[l] + p.rate_hz * dt;
             self.lfo_free[l] = ph - ph.floor();
+            if p.kind.is_chaos() && p.mode == LfoMode::Free {
+                self.lfo_chaos[l].advance(p.kind, p.rate_hz * dt);
+                self.lfo_chaos_val[l] = self.lfo_chaos[l].value(p.kind);
+            }
             free_params[l] = Some(p);
         }
 
@@ -574,6 +583,7 @@ impl Synth {
                 tables: core::array::from_fn(|o| &*self.tables[o]),
                 lfo_tables: &self.lfo_tables,
                 lfo_free: self.lfo_free,
+                lfo_chaos: self.lfo_chaos_val,
                 mod_wheel: self.mod_wheel,
                 aftertouch: self.aftertouch,
                 pitch_bend: self.pitch_bend,
@@ -603,7 +613,7 @@ impl Synth {
                     if let Some(p) = free_params[l] {
                         if p.mode == LfoMode::Free {
                             let ph = self.lfo_free[l] + p.phase;
-                            let v = lfo::eval(p.kind, ph - ph.floor(), &self.lfo_tables[l], 0.5, 0.5);
+                            let v = if p.kind.is_chaos() { self.lfo_chaos_val[l] } else { lfo::eval(p.kind, ph - ph.floor(), &self.lfo_tables[l], 0.5, 0.5) };
                             self.g_uni[src::lfo(l)] = v;
                             self.g_bi[src::lfo(l)] = 2.0 * v - 1.0;
                         }
@@ -865,13 +875,26 @@ impl Synth {
     }
 
     /// The shape of an LFO over one cycle (random shapes show a fixed
-    /// example pattern).
+    /// example pattern; chaotic ones their first cycle from the start
+    /// position).
     pub fn preview_lfo(&self, l: usize, out: &mut [f32]) {
         let l = l.min(NUM_LFO - 1);
         let kind = lfo::LfoKind::from_index(self.patch.plain(params::lfo_idx(l, params::lfo::SHAPE)) as usize);
         let n = out.len();
         // Fixed "random" steps so the picture does not jitter.
         const STEPS: [f32; 9] = [0.35, 0.8, 0.15, 0.6, 0.95, 0.4, 0.05, 0.7, 0.35];
+        if kind.is_chaos() {
+            let start = self.patch.plain(params::lfo_idx(l, params::lfo::PHASE));
+            let mut c = Chaos::start(kind, start - start.floor());
+            let step = 1.0 / (n - 1).max(1) as f32;
+            for (i, v) in out.iter_mut().enumerate() {
+                if i > 0 {
+                    c.advance(kind, step);
+                }
+                *v = c.value(kind);
+            }
+            return;
+        }
         for (i, v) in out.iter_mut().enumerate() {
             let ph = i as f32 / (n - 1).max(1) as f32;
             *v = match kind {
@@ -1034,6 +1057,39 @@ mod tests {
         assert!((lo - base).abs() < 0.03, "lo {lo} base {base}");
         assert!((hi - (base + 0.4)).abs() < 0.03, "hi {hi}");
         assert!(vhi - vlo > 0.25, "volume swing {}", vhi - vlo);
+    }
+
+    #[test]
+    fn chaos_lfos_move_targets_in_every_mode() {
+        let cutoff = FILTER_BASE + filter::CUTOFF;
+        for shape in [8.0, 9.0] {
+            for mode in [0.0, 1.0, 2.0] {
+                let mut s = Synth::new(48_000.0);
+                s.patch.set_plain(cutoff, 500.0);
+                s.patch.set_plain(lfo_idx(0, params::lfo::SHAPE), shape);
+                s.patch.set_plain(lfo_idx(0, params::lfo::MODE), mode);
+                s.patch.set_plain(lfo_idx(0, params::lfo::SYNC), 0.0);
+                s.patch.set_plain(lfo_idx(0, params::lfo::RATE), 0.5);
+                s.snap();
+                s.set_slot(0, ModSlot { src: src::LFO1 as u8, dst: cutoff as u16, amount: 0.5, ..ModSlot::EMPTY });
+                s.note_on(60, 0.8);
+                let (mut lo, mut hi) = (1.0f32, 0.0f32);
+                for _ in 0..375 {
+                    s.process(128);
+                    let m = s.telemetry[tele::PARAMS + cutoff];
+                    lo = lo.min(m);
+                    hi = hi.max(m);
+                }
+                assert!(hi - lo > 0.15, "shape {shape} mode {mode}: {lo}..{hi}");
+                assert!(render(&mut s, 0.05).iter().all(|v| v.is_finite()));
+            }
+        }
+        let mut s = Synth::new(48_000.0);
+        s.patch.set_plain(lfo_idx(0, params::lfo::SHAPE), 8.0);
+        let mut buf = [0.0f32; 64];
+        s.preview_lfo(0, &mut buf);
+        assert!(buf.iter().all(|v| (0.0..=1.0).contains(v)));
+        assert!(buf.iter().fold(0.0f32, |m, v| m.max(*v)) - buf.iter().fold(1.0f32, |m, v| m.min(*v)) > 0.5);
     }
 
     #[test]

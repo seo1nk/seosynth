@@ -1105,6 +1105,21 @@ select {
   background: var(--ink);
   color: var(--paper);
 }
+/* Ten LFO shapes: two rows of five. */
+.shape-picker .segmented {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+}
+.shape-picker .segmented button {
+  border-left: 0;
+  border-top: 1.5px solid var(--rule);
+}
+.shape-picker .segmented button:nth-child(-n + 5) {
+  border-top: 0;
+}
+.shape-picker .segmented button:not(:nth-child(5n + 1)) {
+  border-left: 1.5px solid var(--rule);
+}
 .shape-icon {
   width: 28px;
   height: 14px;
