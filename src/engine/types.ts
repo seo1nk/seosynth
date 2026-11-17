@@ -14,8 +14,8 @@ export interface ParamInfo {
   def: number;
   /** Default as a normalised 0..1 value. */
   defNorm: number;
-  curve: 'lin' | 'pow' | 'log' | 'int' | 'bool' | 'enum';
-  /** Exponent of a 'pow' curve. */
+  curve: 'lin' | 'pow' | 'sympow' | 'log' | 'int' | 'bool' | 'enum';
+  /** Exponent of a 'pow' or 'sympow' curve. */
   k: number;
   unit: string;
   /** Can be moved by a modulation source. */

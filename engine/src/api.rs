@@ -502,6 +502,7 @@ pub fn describe_json() -> String {
             Curve::Lin => ("lin", 0.0),
             Curve::Pow(k) => ("pow", k),
             Curve::Log => ("log", 0.0),
+            Curve::SymPow(k) => ("sympow", k),
             Curve::Int => ("int", 0.0),
             Curve::Bool => ("bool", 0.0),
             Curve::Enum => ("enum", 0.0),

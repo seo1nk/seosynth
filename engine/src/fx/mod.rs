@@ -7,6 +7,7 @@ mod dynamics;
 mod eq;
 mod modulation;
 mod reverb;
+mod utility;
 
 pub use delay::Delay;
 pub use dist::Distortion;
@@ -14,6 +15,7 @@ pub use dynamics::Compressor;
 pub use eq::Eq;
 pub use modulation::{Chorus, Flanger, Hyper, Phaser};
 pub use reverb::Reverb;
+pub use utility::{FreqShifter, Utility};
 
 use crate::filter::{Filter, FilterParams, FilterType};
 use crate::params::{self, fxfilter, split, unit_on, unit_shift, ParamDef, FXFILTER_BASE, NUM_FX, NUM_UNITS, SPLIT_BASE};
@@ -32,6 +34,8 @@ pub mod id {
     pub const REVERB: usize = 7;
     pub const EQ: usize = 8;
     pub const FILTER: usize = 9;
+    pub const FREQSHIFT: usize = 10;
+    pub const UTILITY: usize = 11;
 }
 
 /// Parameter access for one block of effect processing.
@@ -265,6 +269,8 @@ enum Unit {
     Reverb(Reverb),
     Eq(Eq),
     Filter(Filter),
+    FreqShift(FreqShifter),
+    Utility(Utility),
 }
 
 impl Unit {
@@ -279,6 +285,8 @@ impl Unit {
             id::COMP => Unit::Comp(Compressor::new()),
             id::REVERB => Unit::Reverb(Reverb::new(sr)),
             id::EQ => Unit::Eq(Eq::new()),
+            id::FREQSHIFT => Unit::FreqShift(FreqShifter::new()),
+            id::UTILITY => Unit::Utility(Utility::new()),
             _ => Unit::Filter(Filter::default()),
         }
     }
@@ -295,6 +303,8 @@ impl Unit {
             Unit::Reverb(u) => u.clear(),
             Unit::Eq(u) => u.clear(),
             Unit::Filter(u) => u.reset(),
+            Unit::FreqShift(u) => u.clear(),
+            Unit::Utility(u) => u.clear(),
         }
     }
 
@@ -309,6 +319,8 @@ impl Unit {
             Unit::Comp(u) => u.process(c, l, r),
             Unit::Reverb(u) => u.process(c, l, r),
             Unit::Eq(u) => u.process(c, l, r),
+            Unit::FreqShift(u) => u.process(c, l, r),
+            Unit::Utility(u) => u.process(c, l, r),
             Unit::Filter(u) => {
                 let i = |p: usize| FXFILTER_BASE + p;
                 let p = FilterParams {
@@ -650,6 +662,8 @@ mod tests {
                 m[unit_on(unit)] = 1.0;
                 // The EQ is flat until a band is moved.
                 set(&mut m, crate::params::EQ_BASE + unit_shift(unit) + crate::params::eq::LOW_GAIN, 6.0);
+                // So is the utility until it changes the level.
+                set(&mut m, crate::params::UTILITY_BASE + unit_shift(unit) + crate::params::utility::GAIN, -6.0);
                 outs.push(render(&m, &DEFAULT_FX_ORDER, &MAIN, 600));
             }
             let dry = render(&defaults(), &DEFAULT_FX_ORDER, &MAIN, 600);

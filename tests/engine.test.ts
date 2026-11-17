@@ -25,9 +25,9 @@ test('describes itself', async () => {
   const e = await make();
   assert.ok(e.params.length > 200);
   assert.equal(e.params[e.idx('filter.cutoff')].unit, 'Hz');
-  assert.equal(e.info.fxKinds.length, 10);
-  assert.equal(e.info.fx.length, 30, 'three copies of each kind');
-  assert.deepEqual(e.info.fx.slice(9, 12), ['fxfilter', 'hyper2', 'dist2']);
+  assert.equal(e.info.fxKinds.length, 12);
+  assert.equal(e.info.fx.length, 36, 'three copies of each kind');
+  assert.deepEqual(e.info.fx.slice(9, 14), ['fxfilter', 'freqshift', 'utility', 'hyper2', 'dist2']);
   assert.ok(e.info.tables.includes('Basic Shapes'));
 });
 

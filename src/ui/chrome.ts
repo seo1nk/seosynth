@@ -549,7 +549,9 @@ export function openSerumExport(app: App): void {
 
   const noteText = (n: SerumNote) => {
     const key = `serum.note.${n.code}`;
-    const text = t(key, { detail: n.detail });
+    // Effect units come as their key ("freqshift2"): show their name.
+    const detail = n.code === 'fxDropped' ? i18n.nodeName(n.detail) : n.detail;
+    const text = t(key, { detail });
     return text === key ? `${n.code} ${n.detail}`.trim() : text;
   };
 

@@ -16,7 +16,10 @@ pub const NUM_LFO: usize = 10;
 pub const NUM_MACRO: usize = 8;
 pub const NUM_SLOTS: usize = 64;
 /// Kinds of effect.
-pub const NUM_FX: usize = 10;
+pub const NUM_FX: usize = 12;
+/// Kinds of effect before the frequency shifter and utility were added.
+/// Effect chains saved then number their units with this.
+pub const OLD_NUM_FX: usize = 10;
 /// Copies of each kind, so the same effect can be stacked.
 pub const FX_COPIES: usize = 3;
 /// Effect units: every copy of every kind. Unit `u` is copy `u / NUM_FX` of
@@ -39,6 +42,9 @@ pub enum Curve {
     Pow(f32),
     /// plain = min * (max / min)^n  (frequencies, times; needs min > 0)
     Log,
+    /// Around zero: plain = max * sign(x) * |x|^k with x = 2n - 1 (needs
+    /// min = -max). Fine control near zero, both ways.
+    SymPow(f32),
     /// Integer steps between min and max.
     Int,
     /// Off / on.
@@ -67,6 +73,15 @@ impl ParamDef {
             Curve::Lin => self.min + (self.max - self.min) * n,
             Curve::Pow(k) => self.min + (self.max - self.min) * n.powf(k),
             Curve::Log => self.min * (self.max / self.min).powf(n),
+            Curve::SymPow(k) => {
+                let x = 2.0 * n - 1.0;
+                let m = self.max * x.abs().powf(k);
+                if x < 0.0 {
+                    -m
+                } else {
+                    m
+                }
+            }
             Curve::Int | Curve::Enum => (self.min + (self.max - self.min) * n).round(),
             Curve::Bool => {
                 if n >= 0.5 {
@@ -91,6 +106,10 @@ impl ParamDef {
             }
             Curve::Pow(k) => ((p - self.min) / span).powf(1.0 / k),
             Curve::Log => (p / self.min).ln() / (self.max / self.min).ln(),
+            Curve::SymPow(k) => {
+                let x = (p.abs() / self.max).powf(1.0 / k);
+                0.5 + if p < 0.0 { -0.5 * x } else { 0.5 * x }
+            }
             Curve::Bool => {
                 if p >= 0.5 {
                     1.0
@@ -284,6 +303,25 @@ pub mod phaser {
     pub const N: usize = 7;
 }
 
+pub mod freqshift {
+    pub const ON: usize = 0;
+    pub const SHIFT: usize = 1;
+    pub const STEREO: usize = 2;
+    pub const FEEDBACK: usize = 3;
+    pub const MIX: usize = 4;
+    pub const N: usize = 5;
+}
+
+pub mod utility {
+    pub const ON: usize = 0;
+    pub const GAIN: usize = 1;
+    pub const PAN: usize = 2;
+    pub const WIDTH: usize = 3;
+    pub const MONO_BASS: usize = 4;
+    pub const MONO_FREQ: usize = 5;
+    pub const N: usize = 6;
+}
+
 pub mod chorus {
     pub const ON: usize = 0;
     pub const RATE: usize = 1;
@@ -407,9 +445,11 @@ pub const COMP_BASE: usize = DELAY_BASE + delay::N;
 pub const REVERB_BASE: usize = COMP_BASE + comp::N;
 pub const EQ_BASE: usize = REVERB_BASE + reverb::N;
 pub const FXFILTER_BASE: usize = EQ_BASE + eq::N;
+pub const FREQSHIFT_BASE: usize = FXFILTER_BASE + fxfilter::N;
+pub const UTILITY_BASE: usize = FREQSHIFT_BASE + freqshift::N;
 /// Parameters of one copy of all the effects. Copy `c` of an effect lives
 /// `c * FX_BLOCK` after the first copy.
-pub const FX_BLOCK: usize = FXFILTER_BASE + fxfilter::N - HYPER_BASE;
+pub const FX_BLOCK: usize = UTILITY_BASE + utility::N - HYPER_BASE;
 pub const SPLIT_BASE: usize = HYPER_BASE + FX_COPIES * FX_BLOCK;
 pub const ARP_BASE: usize = SPLIT_BASE + split::N;
 pub const CLIP_BASE: usize = ARP_BASE + arp::N;
@@ -452,8 +492,13 @@ pub fn unit_key(unit: usize) -> String {
 /// The kinds of effect in their fixed id order. The processing order of the
 /// units is a separate, user-editable permutation stored in the patch.
 pub const FX_KEYS: [&str; NUM_FX] = [
-    "hyper", "dist", "flanger", "phaser", "chorus", "delay", "comp", "reverb", "eq", "fxfilter",
+    "hyper", "dist", "flanger", "phaser", "chorus", "delay", "comp", "reverb", "eq", "fxfilter", "freqshift", "utility",
 ];
+
+/// A unit number from an effect chain saved with `OLD_NUM_FX` kinds.
+pub const fn unit_from_old(u: usize) -> usize {
+    (u / OLD_NUM_FX) * NUM_FX + u % OLD_NUM_FX
+}
 pub const FX_BASES: [usize; NUM_FX] = [
     HYPER_BASE,
     DIST_BASE,
@@ -465,6 +510,8 @@ pub const FX_BASES: [usize; NUM_FX] = [
     REVERB_BASE,
     EQ_BASE,
     FXFILTER_BASE,
+    FREQSHIFT_BASE,
+    UTILITY_BASE,
 ];
 
 // ---------------------------------------------------------------------------
@@ -832,6 +879,21 @@ fn build() -> Vec<ParamDef> {
         b.num(i(fxfilter::DRIVE), sid + 684, k("fxfilter", "drive"), 0.0, 1.0, 0.0, Lin, "%", GMS);
         b.num(i(fxfilter::VAR), sid + 685, k("fxfilter", "var"), 0.0, 1.0, 0.0, Lin, "%", GMS);
         b.num(i(fxfilter::MIX), sid + 686, k("fxfilter", "mix"), 0.0, 1.0, 1.0, Lin, "%", GMS);
+
+        let i = |p: usize| FREQSHIFT_BASE + shift + p;
+        b.flag(i(freqshift::ON), sid + 710, k("freqshift", "on"), false, F_GLOBAL);
+        b.num(i(freqshift::SHIFT), sid + 711, k("freqshift", "shift"), -2000.0, 2000.0, 100.0, SymPow(3.0), "Hz", GMS);
+        b.num(i(freqshift::STEREO), sid + 712, k("freqshift", "stereo"), 0.0, 1.0, 0.0, Lin, "%", GMS);
+        b.num(i(freqshift::FEEDBACK), sid + 713, k("freqshift", "feedback"), 0.0, 0.9, 0.0, Lin, "%", GMS);
+        b.num(i(freqshift::MIX), sid + 714, k("freqshift", "mix"), 0.0, 1.0, 1.0, Lin, "%", GMS);
+
+        let i = |p: usize| UTILITY_BASE + shift + p;
+        b.flag(i(utility::ON), sid + 730, k("utility", "on"), false, F_GLOBAL);
+        b.num(i(utility::GAIN), sid + 731, k("utility", "gain"), -24.0, 24.0, 0.0, Lin, "dB", GMS);
+        b.num(i(utility::PAN), sid + 732, k("utility", "pan"), -1.0, 1.0, 0.0, Lin, "", GMS);
+        b.num(i(utility::WIDTH), sid + 733, k("utility", "width"), 0.0, 2.0, 1.0, Lin, "%", GMS);
+        b.flag(i(utility::MONO_BASS), sid + 734, k("utility", "monoBass"), false, F_GLOBAL);
+        b.num(i(utility::MONO_FREQ), sid + 735, k("utility", "monoFreq"), 40.0, 500.0, 120.0, Log, "Hz", GMS);
     }
 
     // --- the fork in the effect chain -------------------------------------
@@ -972,7 +1034,7 @@ mod tests {
             assert_eq!(d[on].curve, Curve::Bool);
         }
         // The last parameter of the last copy sits right before the fork.
-        assert_eq!(d[SPLIT_BASE - 1].key, "fxfilter3.mix");
+        assert_eq!(d[SPLIT_BASE - 1].key, "utility3.monoFreq");
         assert_eq!(unit_key(1), "dist");
         assert_eq!(unit_key(NUM_FX + 1), "dist2");
     }

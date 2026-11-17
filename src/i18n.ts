@@ -371,6 +371,7 @@ const UI: Record<string, Pair> = {
   'serum.note.warpApprox': ['{detail} は Serum の近いワープで代用しています。', '{detail} is approximated by the nearest Serum warp.'],
   'serum.note.warpDropped': ['{detail} のワープは移し替えていません。', '{detail}: this warp mode was not carried over.'],
   'serum.note.modDropped': ['つながり「{detail}」は Serum 側の行き先が特定できず、移し替えていません。', 'Connection "{detail}" was not carried over: its Serum destination is unknown.'],
+  'serum.note.fxDropped': ['{detail} は Serum 側の対応が確認できていないため、移し替えていません。', '{detail} was not carried over: its Serum counterpart is not confirmed.'],
   'serum.note.modCurve': ['つながり「{detail}」の曲げは移し替えていません（Serum 側の単位が未確認です）。', 'Connection "{detail}": its curve was not carried over (Serum\'s unit is not confirmed).'],
   'serum.note.modAux': ['つながり「{detail}」の「強さを決めるもの」は移し替えていません。Serum の Aux ソースで設定し直してください。', 'Connection "{detail}": what scales it was not carried over. Set it again as an Aux source in Serum.'],
   'serum.note.lfoChaos': ['{detail} のカオスの形は、最初の 1 周を描いた形に置き換えています。', '{detail}: the chaos shape became a drawing of its first cycle.'],
@@ -708,6 +709,25 @@ const PARAM: Record<string, [Pair, Pair]> = {
   'fxfilter.var': [['バリエーション', 'Variation'], ['バリエーション。タイプによって働きが変わります。', 'Depends on the type.']],
   'fxfilter.mix': [['ミックス', 'Mix'], ['エフェクト音の割合。', 'Amount of the effect.']],
 
+  'freqshift.on': [['電源', 'On'], ['', '']],
+  'freqshift.shift': [
+    ['ずらす量', 'Shift'],
+    [
+      'すべての周波数を同じ Hz だけ上（プラス）か下（マイナス）にずらします。倍音の並びがくずれるので、数 Hz ではうねり、大きくすると金属的な響きになります。',
+      'Moves every frequency up (plus) or down (minus) by the same number of hertz. This breaks the harmonic series: a few hertz makes it swirl, more makes it metallic.',
+    ],
+  ],
+  'freqshift.stereo': [['左右の差', 'Stereo'], ['右の音を左と逆の向きにずらしていきます。100% で右は真逆にずれ、大きく広がります。', 'Shifts the right channel the other way. At 100% it moves opposite to the left, for a wide sound.']],
+  'freqshift.feedback': [['フィードバック', 'Feedback'], ['ずらした音をもう一度通して、階段のように何度もずらします。', 'Feeds the shifted sound back in, so it keeps stepping up or down.']],
+  'freqshift.mix': [['ミックス', 'Mix'], ['ずらした音の割合。50% で元の音と重なり、うねりが出ます。', 'Amount of shifted sound. At 50% it mixes with the original and beats against it.']],
+
+  'utility.on': [['電源', 'On'], ['', '']],
+  'utility.gain': [['音量', 'Gain'], ['ここを通る音の大きさを dB で上げ下げします。', 'Raises or lowers the level passing through, in dB.']],
+  'utility.pan': [['左右の位置', 'Pan'], ['音を左（マイナス）か右（プラス）に寄せます。まん中では何も変わりません。', 'Moves the sound left (minus) or right (plus). The middle leaves it as it is.']],
+  'utility.width': [['広がり', 'Width'], ['0% でモノラル、100% でそのまま、200% で左右の差を 2 倍にします。', '0% is mono, 100% leaves it as it is, 200% doubles the difference between left and right.']],
+  'utility.monoBass': [['低音をまん中に', 'Mono bass'], ['下の周波数より低い音から左右の差をなくし、低音をまん中にまとめます。', 'Removes the stereo difference below the frequency underneath, keeping the bass in the centre.']],
+  'utility.monoFreq': [['まん中にする高さ', 'Mono below'], ['これより低い音をまん中にまとめます。', 'Sound below this is kept in the centre.']],
+
   'arp.on': [['電源', 'On'], ['アルペジエーターを使うかどうか。オフにすると、押さえた音がそのまま鳴ります。', 'Switch the arpeggiator on or off. When off, the keys you hold sound as they are.']],
   'arp.mode': [['順番', 'Order'], ['押さえた音を鳴らす順番。上へ・下へ・上下、弾いた順、ランダム、または全部いっしょ（和音）。', 'The order the held notes are played in: up, down, up and down, as played, random, or all together (chord).']],
   'arp.div': [['1 音の長さ', 'Rate'], ['1 音ごとの間隔を音符で決めます。1/16 で 1 拍に 4 音です。', 'How far apart the notes are, as a note length. 1/16 plays four notes per beat.']],
@@ -739,6 +759,8 @@ const FX: Record<string, [Pair, Pair]> = {
   reverb: [['リバーブ', 'Reverb'], ['部屋やホールの響き', 'Room and hall ambience']],
   eq: [['EQ', 'EQ'], ['低音と高音の調整', 'Adjusts lows and highs']],
   fxfilter: [['全体フィルター', 'Master filter'], ['全体にかけるフィルター', 'A filter on everything']],
+  freqshift: [['周波数シフター', 'Frequency shifter'], ['周波数をずらして金属的に', 'Shifts frequencies for a metallic tone']],
+  utility: [['ユーティリティ', 'Utility'], ['音量・左右・広がりの調整', 'Level, pan and width']],
 };
 
 /** Modulation sources: [name, what it does]. */

@@ -270,6 +270,11 @@ const FX_LAYOUT: Record<string, { main: FxEntry[]; more: FxEntry[] }> = {
     more: [['select', 'lowType'], ['slider', 'lowFreq'], ['slider', 'lowQ'], ['select', 'highType'], ['slider', 'highFreq'], ['slider', 'highQ']],
   },
   fxfilter: { main: [['select', 'type'], ['slider', 'cutoff'], ['slider', 'res']], more: [['slider', 'drive'], ['slider', 'var'], ['slider', 'mix']] },
+  freqshift: { main: [['slider', 'shift'], ['slider', 'mix']], more: [['slider', 'stereo'], ['slider', 'feedback']] },
+  utility: {
+    main: [['slider', 'gain'], ['slider', 'pan'], ['slider', 'width']],
+    more: [['switch', 'monoBass'], ['slider', 'monoFreq', (v) => v('monoBass') > 0]],
+  },
 };
 
 /** The controls of effect unit `id`, laid out as for its kind of effect. */

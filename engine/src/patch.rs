@@ -16,7 +16,9 @@
 //!   5 fx order  10 bytes: order of the first copy of each effect (old patches)
 //!   6 fx chain  one byte per unit, in processing order: unit | lane << 6.
 //!               Only a prefix is written; units that are left out follow in
-//!               ascending order on the main lane.
+//!               ascending order on the main lane. Units are numbered as
+//!               when there were 10 kinds of effect (read only)
+//!  11 fx chain  the same, numbered with today's kinds (`params::NUM_FX`)
 //!   7 user table  slot u8, then its frames: 128 signed bytes each (old
 //!               patches; read only)
 //!   8 user table  the same, but each point is stored as its difference to
@@ -37,7 +39,7 @@
 
 use crate::clip::{Clip, ClipNote};
 use crate::lfo::{default_points, sanitize_points, LfoPoint};
-use crate::params::{self, defs, osc, osc_idx, unit_on, NUM_FX, NUM_LFO, NUM_OSC, NUM_PARAMS, NUM_SLOTS, NUM_UNITS};
+use crate::params::{self, defs, osc, osc_idx, unit_from_old, unit_on, NUM_LFO, NUM_OSC, NUM_PARAMS, NUM_SLOTS, NUM_UNITS, OLD_NUM_FX};
 use crate::wavetable::{UserTable, FACTORY_TABLES, USER_TABLES};
 
 pub const NO_DEST: u16 = 0xFFFF;
@@ -325,7 +327,7 @@ impl Patch {
         if keep > 0 {
             buf.clear();
             buf.extend(self.fx_order[..keep].iter().map(|&u| u | self.fx_lane[u as usize] << 6));
-            section(&mut out, 6, &buf);
+            section(&mut out, 11, &buf);
         }
 
         let untouched = UserTable::default();
@@ -442,18 +444,29 @@ impl Patch {
                 }
                 5 => {
                     // An old patch: the order of the ten original units.
-                    if is_permutation(s.b, NUM_FX) {
+                    if is_permutation(s.b, OLD_NUM_FX) {
                         patch.fx_order = complete_order(s.b);
                     }
                 }
-                6 => {
-                    let units: Vec<u8> = s.b.iter().map(|b| b & 0x3F).collect();
+                6 | 11 => {
+                    // Old chains count units with fewer kinds of effect.
+                    let unit = |b: u8| {
+                        let u = (b & 0x3F) as usize;
+                        if tag == 11 {
+                            u
+                        } else if u < OLD_NUM_FX * params::FX_COPIES {
+                            unit_from_old(u)
+                        } else {
+                            usize::MAX
+                        }
+                    };
+                    let units: Vec<u8> = s.b.iter().map(|&b| unit(b).min(255) as u8).collect();
                     patch.fx_order = complete_order(&units);
                     patch.fx_lane = [lane::MAIN; NUM_UNITS];
-                    for b in s.b {
-                        let (unit, l) = ((b & 0x3F) as usize, b >> 6);
-                        if unit < NUM_UNITS && l <= lane::B {
-                            patch.fx_lane[unit] = l;
+                    for &b in s.b {
+                        let (u, l) = (unit(b), b >> 6);
+                        if u < NUM_UNITS && l <= lane::B {
+                            patch.fx_lane[u] = l;
                         }
                     }
                 }
@@ -714,6 +727,28 @@ mod tests {
         let q = Patch::from_bytes(&p.to_bytes()).unwrap();
         assert_eq!(q.fx_lane, p.fx_lane);
         assert_eq!(q.fx_order, DEFAULT_FX_ORDER);
+    }
+
+    #[test]
+    fn chains_saved_with_ten_kinds_of_effect_keep_their_units() {
+        // Before the frequency shifter and utility: unit 11 was the second
+        // distortion and 27 the third reverb.
+        let mut bytes = vec![MAGIC, FORMAT_VERSION];
+        section(&mut bytes, 6, &[27, 11 | lane::B << 6, 3]);
+        let p = Patch::from_bytes(&bytes).unwrap();
+        let dist2 = params::NUM_FX + 1;
+        let reverb3 = 2 * params::NUM_FX + 7;
+        assert_eq!(&p.fx_order[..3], &[reverb3 as u8, dist2 as u8, 3]);
+        assert_eq!(params::unit_key(dist2), "dist2");
+        assert_eq!(params::unit_key(reverb3), "reverb3");
+        assert_eq!(p.fx_lane[dist2], lane::B);
+        // Saved again, it is written in today's numbering and reads back.
+        let q = Patch::from_bytes(&p.to_bytes()).unwrap();
+        assert_eq!((q.fx_order, q.fx_lane), (p.fx_order, p.fx_lane));
+        // Out of range in the old numbering: dropped.
+        let mut bytes = vec![MAGIC, FORMAT_VERSION];
+        section(&mut bytes, 6, &[30, 31]);
+        assert_eq!(Patch::from_bytes(&bytes).unwrap().fx_order, DEFAULT_FX_ORDER);
     }
 
     #[test]

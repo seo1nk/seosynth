@@ -875,7 +875,10 @@ fn effect(c: &mut Ctx, unit: usize) -> Option<Value> {
                 ],
             )
         }
-        _ => return None,
+        _ => {
+            c.note("fxDropped", &prefix);
+            return None;
+        }
     };
     let mut entry = map(vec![("type", Value::Int(ty)), (name, module(params))]);
     match key {
@@ -1457,12 +1460,25 @@ mod tests {
         // Reverb on lane A, the second distortion on lane B: the fork sits
         // where the reverb was, and the delay follows it.
         p.fx_lane[7] = crate::patch::lane::A;
-        p.fx_lane[11] = crate::patch::lane::B;
+        p.fx_lane[NUM_FX + 1] = crate::patch::lane::B;
         let (d, notes) = export(&p);
         assert!(notes.iter().any(|n| n.starts_with("split")));
         assert_eq!(kinds(&d), vec![0, 4, 6, 0]);
         p.fx_lane[1] = crate::patch::lane::B;
         assert_eq!(kinds(&export(&p).0), vec![6, 0, 0, 4], "reverb | both distortions, then the delay");
+    }
+
+    #[test]
+    fn effects_serum_lacks_are_reported() {
+        let mut p = Patch::init();
+        set(&mut p, "freqshift.on", 1.0);
+        set(&mut p, "utility2.on", 1.0);
+        set(&mut p, "reverb.on", 1.0);
+        let (d, notes) = export(&p);
+        assert!(notes.iter().any(|n| n == "fxDropped\tfreqshift"), "{notes:?}");
+        assert!(notes.iter().any(|n| n == "fxDropped\tutility2"), "{notes:?}");
+        let Some(Value::List(rack)) = d.get("FXRack0").and_then(|r| r.get("FX")) else { panic!() };
+        assert_eq!(rack.len(), 1, "only the reverb is written");
     }
 
     #[test]
