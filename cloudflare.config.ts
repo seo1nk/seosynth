@@ -1,5 +1,5 @@
 // Deployment: a Worker that serves dist/ as static assets at
-// https://kseo.ink/service/seosynth/. Nothing runs on the server.
+// https://kseo.ink/poc/seosynth/. Nothing runs on the server.
 //
 // The rest of kseo.ink is another Worker (asobi). A route runs before the
 // Worker that owns the hostname, so these two routes take over just this path.
@@ -15,7 +15,7 @@ export default defineConfig({
     assets: {
       // Files stay at the root of dist/; requests carry the prefix.
       basePath: BASE_PATH,
-      // /service/seosynth redirects to /service/seosynth/, so the page's
+      // /poc/seosynth redirects to /poc/seosynth/, so the page's
       // relative paths (js/, css/, wasm/) resolve under the prefix.
       htmlHandling: 'auto-trailing-slash',
       notFoundHandling: 'none',

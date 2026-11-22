@@ -2,4 +2,4 @@
 // so local URLs look exactly like the live ones.
 
 /** The URL path the app is served under (no trailing slash). */
-export const BASE_PATH = '/service/seosynth';
+export const BASE_PATH = '/poc/seosynth';

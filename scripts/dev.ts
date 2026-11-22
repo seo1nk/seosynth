@@ -1,5 +1,5 @@
 // `pnpm dev`: builds once, then recompiles src/ on every change and serves
-// the app at http://localhost:8080/service/seosynth/. index.html and css/
+// the app at http://localhost:8080/poc/seosynth/. index.html and css/
 // are served straight from web/, so edits there show on reload too.
 import { spawn, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
