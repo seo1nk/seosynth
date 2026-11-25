@@ -170,6 +170,7 @@ async function boot() {
         app.loading = false;
       }
       app.presetIndex = index;
+      app.onPresetChange?.();
       if (preset.note) toast(preset.note[app.i18n.lang === 'ja' ? 0 : 1], 6000);
       else toast.clear();
     },
@@ -210,7 +211,12 @@ async function boot() {
     app.loading = false;
     if (announce) toast(app.i18n.t(ok ? 'share.loaded' : 'share.invalid'), 4000);
     if (ok) {
-      app.presetIndex = null;
+      // A built-in sound keeps its name in the link: find it again, so
+      // the demo phrase and "Learn" still know which sound this is.
+      const name = store.getName();
+      const k = PRESETS.findIndex((p) => p.name === name || p.ja === name);
+      app.presetIndex = k >= 0 ? k : null;
+      app.onPresetChange?.();
       lastHash = location.hash;
     }
     return ok;

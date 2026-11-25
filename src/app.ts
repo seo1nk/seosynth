@@ -116,4 +116,6 @@ export interface App {
   onKeyboardShown?: (shown: boolean) => void;
   onDemo?: (playing: boolean) => void;
   onPlay?: (note: number) => void;
+  /** The preset or the lesson changed: the Learn button follows. */
+  onPresetChange?: () => void;
 }

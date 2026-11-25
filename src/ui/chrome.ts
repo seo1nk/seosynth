@@ -24,6 +24,8 @@ const ICONS = {
   prev: 'M14.5 6l-6 6 6 6',
   next: 'M9.5 6l6 6-6 6',
   keys: 'M3 6h18v12H3zM8 6v7M12 6v7M16 6v7M6.5 13v5M10 13v5M14 13v5M17.5 13v5',
+  // Steps going up: building a sound one step at a time.
+  learn: 'M3 19h5v-4.5h5V10h5V5.5h3',
 };
 
 export type IconName = keyof typeof ICONS;
@@ -330,40 +332,23 @@ export function Header(app: App): HTMLElement {
             'div',
             { class: 'sound-cat' },
             h('h4', {}, t(`cat.${cat}`)),
-            PRESETS.map((p, k) => {
-              if (p.cat !== cat) return null;
-              const title = presetTitle(p, i18n.lang);
-              const load = h(
-                'button',
-                {
-                  type: 'button',
-                  class: 'menu-item',
-                  'aria-current': String(k === app.presetIndex),
-                  onclick: () => {
-                    close();
-                    app.loadPreset(k);
-                  },
-                },
-                title,
-              );
-              // The plain starting sound has nothing to build.
-              if (!lessonSteps(p, store).length) return load;
-              const learn = h(
-                'button',
-                {
-                  type: 'button',
-                  class: 'learn-btn',
-                  title: t('lesson.learn.help', { name: title }),
-                  'aria-label': t('lesson.learn.help', { name: title }),
-                  onclick: () => {
-                    close();
-                    app.lesson.start(k);
-                  },
-                },
-                t('lesson.learn'),
-              );
-              return h('div', { class: 'sound-row' }, load, learn);
-            }),
+            PRESETS.map((p, k) =>
+              p.cat === cat
+                ? h(
+                    'button',
+                    {
+                      type: 'button',
+                      class: 'menu-item',
+                      'aria-current': String(k === app.presetIndex),
+                      onclick: () => {
+                        close();
+                        app.loadPreset(k);
+                      },
+                    },
+                    presetTitle(p, i18n.lang),
+                  )
+                : null,
+            ),
           ),
         ),
       ),
@@ -379,6 +364,42 @@ export function Header(app: App): HTMLElement {
     listenIcon,
     listenLabel,
   );
+  // --- learn: how the chosen sound is made, from the plain start --------------------
+  const learnBtn = h(
+    'button',
+    {
+      type: 'button',
+      class: 'learn',
+      'aria-pressed': 'false',
+      'aria-label': t('lesson.learn'),
+      onclick: () => {
+        if (app.lesson.active) app.lesson.stop();
+        // Nothing to build: say why instead.
+        else if (learnBtn.hasAttribute('aria-disabled')) app.toast(learnBtn.title, 5000);
+        else if (app.presetIndex != null) app.lesson.start(app.presetIndex);
+      },
+    },
+    icon('learn'),
+    h('span', {}, t('lesson.learn')),
+  );
+  const renderLearn = () => {
+    const k = app.presetIndex;
+    const preset = k != null ? PRESETS[k] : null;
+    const active = app.lesson?.active ?? false;
+    const can = !!preset && lessonSteps(preset, store).length > 0;
+    learnBtn.setAttribute('aria-pressed', String(active));
+    learnBtn.toggleAttribute('aria-disabled', !can && !active);
+    learnBtn.title = active
+      ? t('lesson.end')
+      : !preset
+        ? t('lesson.learn.none')
+        : can
+          ? t('lesson.learn.help', { name: presetTitle(preset, i18n.lang) })
+          : t('lesson.learn.start');
+  };
+  app.onPresetChange = renderLearn;
+  renderLearn();
+
   app.onDemo = (playing: boolean) => {
     listen.setAttribute('aria-pressed', String(playing));
     listenIcon.replaceChildren(icon(playing ? 'stop' : 'play', true));
@@ -407,6 +428,7 @@ export function Header(app: App): HTMLElement {
       try {
         store.fromJSON(JSON.parse(await file.text()));
         app.presetIndex = null;
+        app.onPresetChange?.();
         app.toast(t('file.imported'));
       } catch {
         app.toast(t('file.importFailed'));
@@ -439,6 +461,7 @@ export function Header(app: App): HTMLElement {
           app.lesson.stop();
           store.init();
           app.presetIndex = null;
+          app.onPresetChange?.();
           app.toast(t('toast.patchInit'));
         }),
         item(t('file.importJson'), () => fileInput.click()),
@@ -475,7 +498,7 @@ export function Header(app: App): HTMLElement {
       soundBtn,
       h('button', { type: 'button', class: 'tool', 'aria-label': t('btn.next'), title: t('btn.next'), onclick: () => step(1) }, icon('next')),
     ),
-    listen,
+    h('div', { class: 'listen-group' }, listen, learnBtn),
     h(
       'div',
       { class: 'top-right' },

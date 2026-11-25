@@ -184,7 +184,9 @@ const UI: Record<string, Pair> = {
   'preset.label': ['音色', 'Sound'],
   'cat.basic': ['きほん', 'Basics'],
   'lesson.learn': ['学ぶ', 'Learn'],
-  'lesson.learn.help': ['「{name}」を、はじめの音から組み立てながら学ぶ', 'Learn by building "{name}" from the plain starting sound'],
+  'lesson.learn.help': ['「{name}」の作り方を、はじめの音から組み立てて学ぶ', 'Learn how "{name}" is made by building it from the plain starting sound'],
+  'lesson.learn.none': ['音色を選ぶと、その音の作り方を学べます', 'Choose a sound to learn how it is made'],
+  'lesson.learn.start': ['はじめの音は、すべての音色の出発点です。ほかの音色を選ぶと、その作り方を学べます', 'The plain saw is where every sound starts. Choose another sound to learn how it is made'],
   'lesson.intro.title': ['「{name}」を組み立てる', 'Build "{name}"'],
   'lesson.intro.body': [
     'はじめの音（ノコギリ波）から、{n} つのステップで「{name}」を作ります。それぞれのステップで、書いてある値にスライダーやスイッチを合わせましょう。合うと ✓ がつきます。迷ったら「代わりにやる」を押してください。',

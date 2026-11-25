@@ -52,6 +52,7 @@ export class Lesson {
     app.select(null);
     app.toast(i18n.t('lesson.started'), 5000);
     this.go(0);
+    app.onPresetChange?.();
   }
 
   stop(): void {
@@ -60,6 +61,7 @@ export class Lesson {
     this.el?.remove();
     this.el = null;
     this.#unfocus();
+    this.app.onPresetChange?.();
   }
 
   #unfocus() {

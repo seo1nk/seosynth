@@ -391,6 +391,46 @@ p {
 .listen-icon {
   display: grid;
 }
+/* Listen, then learn how it is made: the two actions on a chosen sound. */
+.listen-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.learn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px 7px 12px;
+  border-radius: 999px;
+  border: 1.5px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  font-weight: 900;
+  font-size: 0.9375rem;
+}
+.learn .icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: var(--sound);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.learn:hover {
+  background: color-mix(in srgb, var(--paper) 88%, var(--sound));
+}
+.learn[aria-pressed='true'] {
+  background: var(--sound-soft);
+}
+.learn[aria-disabled] {
+  color: var(--muted);
+  border-color: var(--faint);
+}
+.learn[aria-disabled] .icon {
+  stroke: var(--faint);
+}
 .top-right {
   margin-left: auto;
   display: flex;
@@ -1846,29 +1886,6 @@ input[type='range'] {
 }
 
 /* --- lessons: building a sound from the start ----------------------------------- */
-.sound-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.sound-row .menu-item {
-  flex: 1;
-  min-width: 0;
-}
-.learn-btn {
-  flex: none;
-  padding: 3px 10px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--ink);
-  background: none;
-  border: 1.5px solid var(--sound);
-  border-radius: 999px;
-}
-.learn-btn:hover,
-.learn-btn:focus-visible {
-  background: var(--sound-soft);
-}
 .lesson:focus {
   outline: none;
 }
@@ -2294,7 +2311,7 @@ input[type='range'] {
   .sound-picker {
     order: 3;
     /* A wide basis pushes it onto the second row, next to Listen. */
-    flex: 1 1 calc(100% - 130px);
+    flex: 1 1 calc(100% - 190px);
     min-width: 0;
   }
   .sound-btn {
@@ -2304,8 +2321,15 @@ input[type='range'] {
   .sound-label {
     display: none;
   }
-  .listen {
+  .listen-group {
     order: 4;
+  }
+  /* Only the icon on a phone, so the sound's name keeps its room. */
+  .learn {
+    padding: 7px 10px;
+  }
+  .learn span {
+    display: none;
   }
   .btn-share {
     padding: 7px 14px;

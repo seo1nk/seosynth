@@ -22,7 +22,7 @@ export interface Preset extends PatchJSON {
 const mod = (source: string, target: string, amount: number, bipolar = false): ModJSON => ({ source, target, amount, ...(bipolar ? { bipolar } : {}) });
 
 export const PRESETS: Preset[] = [
-  // --- Basics: one idea each --------------------------------------------------
+  // --- Basics: the plain starting point --------------------------------------
   {
     name: 'Init Saw',
     ja: 'はじめの音（ノコギリ波）',
@@ -31,30 +31,14 @@ export const PRESETS: Preset[] = [
     note: ['いちばん素の状態。ここから自由に作れます。', 'The plain starting point. Build anything from here.'],
     params: {},
   },
-  {
-    name: 'Filter Pluck',
-    ja: 'ポワッと鳴るシンセ',
-    lesson: {
-      filter: ['カットオフを低めにしておくと、あとで ENV 2 がフィルターを開いたときの変化がよく聞こえます。', 'Keep the cutoff low so you clearly hear ENV 2 open the filter later.'],
-      env2: ['ENV 2 は弾くたびに一度だけ上がって下がります。カットオフにつなぐと「ポワッ」という音になります。ディケイを変えると、閉じる速さが変わります。', 'ENV 2 rises and falls once per note. Tied to the cutoff it makes the plucky "pew"; its decay sets how fast the filter closes.'],
-    },
-    cat: 'basic',
-    demo: 'arp',
-    note: ['ENV 2 がカットオフを上から下へ動かして「ポワッ」という音に。ENV 2 のディケイを変えてみましょう。', 'ENV 2 sweeps the cutoff down on every note. Try changing the ENV 2 decay.'],
-    params: {
-      'filter.cutoff': 300, 'filter.res': 0.35, 'filter.type': 'LP24',
-      'env2.attack': 0.002, 'env2.decay': 0.45, 'env2.sustain': 0, 'env2.release': 0.3,
-      'env1.release': 0.25,
-    },
-    mods: [mod('env2', 'filter.cutoff', 0.5)],
-  },
+  // --- Bass ---------------------------------------------------------------------
   {
     name: 'Wobble Bass',
-    ja: 'うねるベース',
+    ja: 'ワブル・ベース',
     lesson: {
       lfo1: ['LFO 1 をカットオフにつなぐと、フィルターがくり返し開いたり閉じたりします。速さを音符（1/8）にすると、テンポに合わせてうねります。', 'Tie LFO 1 to the cutoff and the filter opens and closes over and over. A note length (1/8) makes it wobble in time.'],
     },
-    cat: 'basic',
+    cat: 'bass',
     demo: 'bass',
     note: ['LFO 1 がカットオフを周期的に動かします。LFO の速さ（音符）を変えてみましょう。', 'LFO 1 moves the cutoff in a cycle. Try a different LFO note length.'],
     params: {
@@ -65,30 +49,13 @@ export const PRESETS: Preset[] = [
     mods: [mod('lfo1', 'filter.cutoff', 0.38)],
   },
   {
-    name: 'Morphing Vowels',
-    ja: '形が変わるパッド',
-    lesson: {
-      oscA: ['Vowels は、位置によって母音のように違う形が並んだテーブルです。', 'Vowels is a table whose frames sound like different vowels.'],
-      lfo1: ['LFO 1 で WT 位置をゆっくり動かすと、波形そのものが変わり続けます。オシレーター A の表示を見てみましょう。', 'LFO 1 slowly moving the wave position keeps the waveform itself changing. Watch oscillator A\'s display.'],
-    },
-    cat: 'basic',
-    demo: 'pad',
-    note: ['LFO 1 がWT位置をゆっくり動かし、波形そのものが変化します。OSC A の表示に注目。', 'LFO 1 slowly moves WT POS so the waveform itself changes. Watch the OSC A display.'],
-    params: {
-      'oscA.wt': 'Vowels', 'oscA.pos': 0, 'oscA.unison': 3, 'oscA.detune': 0.12,
-      'lfo1.sync': false, 'lfo1.rate': 0.25, 'lfo1.shape': 'Triangle', 'lfo1.mode': 'Free',
-      'env1.attack': 0.25, 'env1.release': 0.8, 'reverb.on': true, 'reverb.mix': 0.3,
-    },
-    mods: [mod('lfo1', 'oscA.pos', 1)],
-  },
-  {
-    name: 'Bent Sync Bass',
-    ja: 'ゆがんだシンクベース',
+    name: 'Sync Bass',
+    ja: 'シンク・ベース',
     lesson: {
       oscA: ['ワープ 1（Bend+）で波形を片寄らせ、それをワープ 2（Sync）がさらに鋭くします。ワープは「くわしい設定」の中にあります。', 'Warp 1 (Bend+) skews the wave and warp 2 (Sync) sharpens it further. The warps are under "More settings".'],
       env2: ['ENV 2 で Sync の量を動かすと、弾くたびに音色が動きます。', 'ENV 2 moving the Sync amount makes the tone move on every note.'],
     },
-    cat: 'basic',
+    cat: 'bass',
     demo: 'bass',
     note: [
       'OSC A にワープを 2 つ順にかけています。Bend+ で波形を片寄らせ、それを Sync がさらに鋭くし、ENV 2 が Sync の量を動かします。OSC A の「くわしい設定」で「ワープ 2」を切ったり、2 つを入れ替えたりして聞き比べてみましょう。',
@@ -104,34 +71,12 @@ export const PRESETS: Preset[] = [
     mods: [mod('env2', 'oscA.warp2Amt', 0.55)],
   },
   {
-    name: 'Arp Chords',
-    ja: 'アルペジオの和音',
-    lesson: {
-      keys: ['鍵盤の上の「鳴らし方」をアルペジオにすると、押さえた和音が 1 音ずつ順番に鳴ります。', 'Set "Keys play" above the keyboard to arpeggio and a held chord plays one note at a time.'],
-    },
-    cat: 'basic',
-    demo: 'chords',
-    note: [
-      '和音を押さえたままにすると、1 音ずつ順番に鳴ります。鍵盤の上の「アルペジオの設定」で順番やオクターブを変えてみましょう。',
-      'Hold a chord and its notes play one by one. Try another order or more octaves under "Arpeggio settings" above the keyboard.',
-    ],
-    params: {
-      'arp.on': true, 'arp.octaves': 2, 'arp.gate': 0.45,
-      'oscA.unison': 3, 'oscA.detune': 0.12,
-      'filter.type': 'LP24', 'filter.cutoff': 900, 'filter.res': 0.25, 'filter.keytrack': 0.4,
-      'env2.attack': 0.001, 'env2.decay': 0.22, 'env2.sustain': 0,
-      'env1.decay': 0.4, 'env1.sustain': 0.2, 'env1.release': 0.18,
-      'delay.on': true, 'delay.mode': 'PingPong', 'delay.mix': 0.2, 'delay.divL': '1/8.', 'reverb.on': true, 'reverb.mix': 0.2,
-    },
-    mods: [mod('env2', 'filter.cutoff', 0.35)],
-  },
-  {
-    name: 'Clip Bassline',
-    ja: 'くり返すベースライン',
+    name: 'Sequenced Bass',
+    ja: 'シーケンス・ベース',
     lesson: {
       keys: ['鍵盤の上の「鳴らし方」をクリップにすると、鍵盤を押さえている間フレーズがくり返されます。フレーズは用意してあります。', 'Set "Keys play" above the keyboard to clip and the phrase repeats while a key is held. The phrase is ready for you.'],
     },
-    cat: 'basic',
+    cat: 'bass',
     demo: 'clip',
     note: [
       '鍵盤を 1 つ押さえたままにすると、フレーズがくり返されます。別の鍵盤では高さが変わります。「クリップを編集」で音を書き換えてみましょう。',
@@ -147,8 +92,6 @@ export const PRESETS: Preset[] = [
     },
     mods: [mod('env2', 'filter.cutoff', 0.42), mod('velocity', 'filter.cutoff', 0.12)],
   },
-
-  // --- Bass ---------------------------------------------------------------------
   {
     name: 'Deep Sub',
     ja: 'ディープ・サブ',
@@ -223,7 +166,6 @@ export const PRESETS: Preset[] = [
     },
     mods: [mod('env2', 'oscA.warpAmt', 0.55)],
   },
-
   // --- Lead ---------------------------------------------------------------------
   {
     name: 'Super Saw',
@@ -286,8 +228,24 @@ export const PRESETS: Preset[] = [
     lfoShapes: { 1: [[0, 0, 0], [0.25, 1, 0], [0.5, 0.25, 0], [0.75, 0.75, 0], [1, 0, 0]] },
     mods: [mod('lfo1', 'oscA.pos', 0.85)],
   },
-
   // --- Pad ----------------------------------------------------------------------
+  {
+    name: 'Morph Pad',
+    ja: 'モーフ・パッド',
+    lesson: {
+      oscA: ['Vowels は、位置によって母音のように違う形が並んだテーブルです。', 'Vowels is a table whose frames sound like different vowels.'],
+      lfo1: ['LFO 1 で WT 位置をゆっくり動かすと、波形そのものが変わり続けます。オシレーター A の表示を見てみましょう。', 'LFO 1 slowly moving the wave position keeps the waveform itself changing. Watch oscillator A\'s display.'],
+    },
+    cat: 'pad',
+    demo: 'pad',
+    note: ['LFO 1 がWT位置をゆっくり動かし、波形そのものが変化します。OSC A の表示に注目。', 'LFO 1 slowly moves WT POS so the waveform itself changes. Watch the OSC A display.'],
+    params: {
+      'oscA.wt': 'Vowels', 'oscA.pos': 0, 'oscA.unison': 3, 'oscA.detune': 0.12,
+      'lfo1.sync': false, 'lfo1.rate': 0.25, 'lfo1.shape': 'Triangle', 'lfo1.mode': 'Free',
+      'env1.attack': 0.25, 'env1.release': 0.8, 'reverb.on': true, 'reverb.mix': 0.3,
+    },
+    mods: [mod('lfo1', 'oscA.pos', 1)],
+  },
   {
     name: 'Warm Pad',
     ja: 'ウォーム・パッド',
@@ -350,8 +308,46 @@ export const PRESETS: Preset[] = [
     },
     mods: [mod('lfo1', 'oscA.pos', 0.8), mod('lfo2', 'oscB.pos', 0.5), mod('lfo2', 'filter.cutoff', 0.15, true)],
   },
-
   // --- Pluck ----------------------------------------------------------------------
+  {
+    name: 'Filter Pluck',
+    ja: 'フィルター・プラック',
+    lesson: {
+      filter: ['カットオフを低めにしておくと、あとで ENV 2 がフィルターを開いたときの変化がよく聞こえます。', 'Keep the cutoff low so you clearly hear ENV 2 open the filter later.'],
+      env2: ['ENV 2 は弾くたびに一度だけ上がって下がります。カットオフにつなぐと「ポワッ」という音になります。ディケイを変えると、閉じる速さが変わります。', 'ENV 2 rises and falls once per note. Tied to the cutoff it makes the plucky "pew"; its decay sets how fast the filter closes.'],
+    },
+    cat: 'pluck',
+    demo: 'arp',
+    note: ['ENV 2 がカットオフを上から下へ動かして「ポワッ」という音に。ENV 2 のディケイを変えてみましょう。', 'ENV 2 sweeps the cutoff down on every note. Try changing the ENV 2 decay.'],
+    params: {
+      'filter.cutoff': 300, 'filter.res': 0.35, 'filter.type': 'LP24',
+      'env2.attack': 0.002, 'env2.decay': 0.45, 'env2.sustain': 0, 'env2.release': 0.3,
+      'env1.release': 0.25,
+    },
+    mods: [mod('env2', 'filter.cutoff', 0.5)],
+  },
+  {
+    name: 'Arp Pluck',
+    ja: 'アルペジオ・プラック',
+    lesson: {
+      keys: ['鍵盤の上の「鳴らし方」をアルペジオにすると、押さえた和音が 1 音ずつ順番に鳴ります。', 'Set "Keys play" above the keyboard to arpeggio and a held chord plays one note at a time.'],
+    },
+    cat: 'pluck',
+    demo: 'chords',
+    note: [
+      '和音を押さえたままにすると、1 音ずつ順番に鳴ります。鍵盤の上の「アルペジオの設定」で順番やオクターブを変えてみましょう。',
+      'Hold a chord and its notes play one by one. Try another order or more octaves under "Arpeggio settings" above the keyboard.',
+    ],
+    params: {
+      'arp.on': true, 'arp.octaves': 2, 'arp.gate': 0.45,
+      'oscA.unison': 3, 'oscA.detune': 0.12,
+      'filter.type': 'LP24', 'filter.cutoff': 900, 'filter.res': 0.25, 'filter.keytrack': 0.4,
+      'env2.attack': 0.001, 'env2.decay': 0.22, 'env2.sustain': 0,
+      'env1.decay': 0.4, 'env1.sustain': 0.2, 'env1.release': 0.18,
+      'delay.on': true, 'delay.mode': 'PingPong', 'delay.mix': 0.2, 'delay.divL': '1/8.', 'reverb.on': true, 'reverb.mix': 0.2,
+    },
+    mods: [mod('env2', 'filter.cutoff', 0.35)],
+  },
   {
     name: 'Classic Pluck',
     ja: 'クラシック・プラック',
@@ -395,7 +391,6 @@ export const PRESETS: Preset[] = [
     },
     mods: [mod('env2', 'oscA.pos', 0.45), mod('velocity', 'oscA.pos', 0.2)],
   },
-
   // --- Keys -----------------------------------------------------------------------
   {
     name: 'Electric Piano',
@@ -426,7 +421,6 @@ export const PRESETS: Preset[] = [
     },
     mods: [mod('modWheel', 'oscA.pos', 0.4)],
   },
-
   // --- FX -------------------------------------------------------------------------
   {
     name: 'Laser Zap',

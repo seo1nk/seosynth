@@ -327,7 +327,7 @@ test('the clip survives JSON, the share link and undo', async () => {
 
 test('Serum export: the clip becomes a Serum clip', async () => {
   const { store } = await makeStore();
-  store.fromJSON(PRESETS.find((p) => p.name === 'Clip Bassline'));
+  store.fromJSON(PRESETS.find((p) => p.name === 'Sequenced Bass'));
   const { preset, notes } = store.core.serumExport();
   const { data } = unpackSerum(preset);
   assert.equal(data.ClipPlayer0.plainParams.kParamEnabled, 1);
@@ -502,7 +502,7 @@ test('Serum export: values land in the right modules', async () => {
 
 test('the second warp survives the share link and reaches the Serum export', async () => {
   const { store } = await makeStore();
-  store.fromJSON(PRESETS.find((p) => p.name === 'Bent Sync Bass'));
+  store.fromJSON(PRESETS.find((p) => p.name === 'Sync Bass'));
   assert.equal(store.toJSON().params['oscA.warp2'], 'Sync');
   const link = await encodeHash(store.toBytes());
   store.init();
@@ -521,7 +521,7 @@ test('the second warp survives the share link and reaches the Serum export', asy
 
 test('Serum export: the arpeggiator is switched on in Serum', async () => {
   const { store } = await makeStore();
-  store.fromJSON(PRESETS.find((p) => p.name === 'Arp Chords'));
+  store.fromJSON(PRESETS.find((p) => p.name === 'Arp Pluck'));
   const arp = store.core.serumExport();
   assert.equal(unpackSerum(arp.preset).data.Arp0.plainParams.kParamEnabled, 1);
   assert.ok(arp.notes.some((n) => n.code === 'arp'), 'its settings are reported');
