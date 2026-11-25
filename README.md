@@ -18,6 +18,7 @@ Rust で書いたシンセエンジンを WebAssembly にして、ブラウザ�
 ![エフェクトの分岐](docs/screenshot-split.png)
 
 - **波形を自分で描けます**。オシレーターのテーブル一覧から「自分のテーブル」を選ぶと、音の波 1 回ぶんをなぞって描く画面が開き、描いたそばから音が変わります。コマを足せば、パラパラ漫画のように形が移り変わるテーブルになります
+- **どの音色も「学ぶ」で組み立てられます**。音色の一覧で「学ぶ」を押すと、はじめの音（ノコギリ波）から、その音色をノードひとつずつ組み立てるレッスンが始まります。ステップは音の流れの順（音源 → フィルター → アンプ → うごき → エフェクト → 出力 → 鍵盤の鳴らし方）で、合わせる値の一覧と、次に触るスライダーへの目印が出ます。値が合うと ✓ がつき、迷ったら「代わりにやる」で進めます。ステップは音色の設定から自動で作るので、どの音色にもあります
 - **声や楽器の音からも作れます**。音声ファイルを選ぶと、音の高さを調べて波形を取り出し、コマに並べます。解析はブラウザの中だけで行い、音声はどこにも送りません
 
 ![波形を描く画面](docs/screenshot-table.png)
@@ -182,6 +183,7 @@ src/                 画面（TypeScript）
   engine/              wasm のラッパー、AudioWorklet、エンジンの型
   app.ts               画面全体で共有するアプリオブジェクト
   store.ts             パッチの状態管理（取り消し、JSON、URL）
+  lesson.ts            音色を組み立てるレッスンのステップ（音色の設定から作る）
   ui/nodes.ts          ノードのつながり方と、エフェクトチェーンの編集
   ui/board.ts          ホワイトボード（ノード、線、パン／ズーム）
   ui/panel.ts          ノードごとの設定パネル
@@ -190,6 +192,7 @@ src/                 画面（TypeScript）
   ui/displays.ts       波形・フィルター特性・エンベロープ・LFO の表示
   ui/table-editor.ts   波形を描く画面
   ui/keyboard.ts       鍵盤、鳴らし方の切り替え、ホイール、MIDI
+  ui/lesson.ts         「学ぶ」のレッスンの吹き出し
   ui/clip-panel.ts     クリップの編集（ピアノロールと seosynth のつなぎ）
   pianoroll/           独立したピアノロール（データモデルと操作、編集部品）
   wavetable-import.ts  音声ファイルから波形を取り出す解析
@@ -212,6 +215,7 @@ seosynth is a wavetable synthesizer for the browser. The DSP engine is dependenc
 
 - **The whole sound as a graph.** The centre of the screen is a whiteboard you can drag and pinch-zoom. Nodes on the signal path have on/off switches, and the sound line runs through every node that is switched on to the output, brightening where sound flows. Sources run in parallel; effects that are off wait in a tray below. Effects can be stacked (up to three of each) and the chain can split into two lanes that run side by side (two copies, lows and highs, centre and sides, or left and right) and join again. Pressing a node opens its settings (a side panel on desktop, a bottom sheet on phones) with sliders, a picture of the sound going in and coming out, and an explanation.
 - **Movement on its own layer.** LFOs, envelopes, macros and playing gestures float on a separate plane. You add one, pick the node and slider it should move, and a coloured tag and dashed line show where it acts.
+- **Learn any sound by building it.** Every sound in the list has a Learn button that resets to the plain saw and walks you through rebuilding that sound one node at a time, in signal order: the values to set, a marker on the next control to touch, a tick when each matches, and "Do it for me" when stuck. The steps are derived from the preset itself, so every sound has one.
 - **Wavetables of your own.** Draw one cycle of the wave with the pointer and hear it change as you draw; add frames to make it morph. Or choose an audio file: its pitch is detected and its waveforms become the frames, all inside the browser. These tables travel in the share link too.
 - **Synth features** modelled on Serum's layout: three wavetable oscillators (22 generated tables plus two of your own, unison, 13 warp modes with two in a row per oscillator), sub, noise, two 19-type filters in series or parallel, 4 envelopes, 10 LFOs with drawable shapes and two chaotic ones (Lorenz, Rössler), 8 macros, up to 64 connections (each with a curve and an optional second source that scales it) and twelve kinds of effect (among them a frequency shifter and a utility) that can be reordered, stacked and run in parallel. An arpeggiator plays held keys in time with the tempo (six orders, note length, up to four octaves, gate, swing), and a clip sequencer loops a phrase drawn in a piano roll (1 to 8 bars) while a key is held, transposed to that key; it holds twelve clips, picked in the editor or with the lowest octave while playing. A "Keys play" switch above the keyboard picks notes, arpeggio or clip, and their settings open in a drawer above the keys. The voices can run at 2x or 4x the output rate to keep folded-back harmonics out. Japanese and English, light and dark.
 - **Sharing.** The whole patch is encoded into the URL fragment, so a link is the preset. Presets can also be saved as JSON.

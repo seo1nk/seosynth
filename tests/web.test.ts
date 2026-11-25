@@ -8,6 +8,7 @@ import { createI18n, hasParamText } from '../src/i18n.ts';
 import { PRESETS, CATEGORIES } from '../src/presets.ts';
 import { toBase64Url, fromBase64Url, patchToHash, encodeHash, decodeHash, shareUrl } from '../src/share.ts';
 import { formatValue } from '../src/format.ts';
+import { lessonSteps, lessonStart, applyTarget, isDone } from '../src/lesson.ts';
 import type { AudioMessage } from '../src/engine/types.ts';
 import type { PatchJSON } from '../src/patch-json.ts';
 import type { Lang } from '../src/i18n.ts';
@@ -106,6 +107,53 @@ test('tour and UI strings exist', () => {
     for (const cat of CATEGORIES) assert.notEqual(t(`cat.${cat}`), `cat.${cat}`);
     assert.equal(t('tour.step', { n: 2, total: 8 }).includes('2'), true);
   }
+});
+
+test('every lesson builds its preset from the init sound, step by step', async () => {
+  const { store } = await makeStore();
+  const { store: direct } = await makeStore();
+  for (const preset of PRESETS) {
+    const steps = lessonSteps(preset, store);
+    // Only the plain starting sound has nothing to build.
+    assert.equal(steps.length === 0, preset.name === 'Init Saw', preset.name);
+    assert.deepEqual(store.fromJSON(lessonStart(preset, preset.name)), [], preset.name);
+    const nodes = steps.map((s) => s.node);
+    assert.equal(new Set(nodes).size, nodes.length, `${preset.name}: one step per node`);
+    for (const step of steps) {
+      for (const target of step.targets) {
+        applyTarget(store, target);
+        assert.ok(isDone(store, target), `${preset.name}: ${JSON.stringify(target)}`);
+      }
+    }
+    direct.fromJSON({ ...preset, name: preset.name });
+    const built = store.toJSON();
+    const want = direct.toJSON();
+    assert.deepEqual(built.params, want.params, preset.name);
+    // The same connections; the order of the slots does not change the sound.
+    const sorted = (mods: PatchJSON['mods']) => [...(mods ?? [])].sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y)));
+    assert.deepEqual(sorted(built.mods), sorted(want.mods), preset.name);
+    // The sound starts in the signal's order: sources before the filter, the filter before effects.
+    const at = (n: string) => nodes.indexOf(n);
+    if (at('oscA') >= 0 && at('filter') >= 0) assert.ok(at('oscA') < at('filter'), preset.name);
+  }
+  assert.ok(!CATEGORIES.includes('learn' as never));
+});
+
+test('a lesson step is not done until the sound gets there', async () => {
+  const { store } = await makeStore();
+  const preset = must(PRESETS.find((p) => p.name === 'Filter Pluck'));
+  store.fromJSON(lessonStart(preset, preset.name));
+  const steps = lessonSteps(preset, store);
+  assert.deepEqual(steps.map((s) => s.node), ['filter', 'amp', 'env2']);
+  const env2 = must(steps.find((s) => s.node === 'env2'));
+  const mod = must(env2.targets.find((t) => t.kind === 'mod'));
+  assert.ok(!isDone(store, mod));
+  // Connected with the default amount: not there yet.
+  store.addMod(store.info.sources.indexOf('env2'), store.idx('filter.cutoff'));
+  assert.ok(!isDone(store, mod));
+  applyTarget(store, mod);
+  assert.ok(isDone(store, mod));
+  assert.equal(store.activeSlots().length, 1, 'the same connection is reused');
 });
 
 test('all presets load without warnings and are distinct', async () => {
@@ -279,7 +327,7 @@ test('the clip survives JSON, the share link and undo', async () => {
 
 test('Serum export: the clip becomes a Serum clip', async () => {
   const { store } = await makeStore();
-  store.fromJSON(PRESETS.find((p) => p.name === 'Learn: Clip Sequencer'));
+  store.fromJSON(PRESETS.find((p) => p.name === 'Clip Bassline'));
   const { preset, notes } = store.core.serumExport();
   const { data } = unpackSerum(preset);
   assert.equal(data.ClipPlayer0.plainParams.kParamEnabled, 1);
@@ -454,7 +502,7 @@ test('Serum export: values land in the right modules', async () => {
 
 test('the second warp survives the share link and reaches the Serum export', async () => {
   const { store } = await makeStore();
-  store.fromJSON(PRESETS.find((p) => p.name === 'Learn: Dual Warp'));
+  store.fromJSON(PRESETS.find((p) => p.name === 'Bent Sync Bass'));
   assert.equal(store.toJSON().params['oscA.warp2'], 'Sync');
   const link = await encodeHash(store.toBytes());
   store.init();
@@ -473,7 +521,7 @@ test('the second warp survives the share link and reaches the Serum export', asy
 
 test('Serum export: the arpeggiator is switched on in Serum', async () => {
   const { store } = await makeStore();
-  store.fromJSON(PRESETS.find((p) => p.name === 'Learn: Arpeggiator'));
+  store.fromJSON(PRESETS.find((p) => p.name === 'Arp Chords'));
   const arp = store.core.serumExport();
   assert.equal(unpackSerum(arp.preset).data.Arp0.plainParams.kParamEnabled, 1);
   assert.ok(arp.notes.some((n) => n.code === 'arp'), 'its settings are reported');

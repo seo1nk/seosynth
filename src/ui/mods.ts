@@ -150,7 +150,7 @@ export class Mods {
           : h('span', {}, this.describe(s));
     return h(
       'div',
-      { class: 'route-row', style: { '--c': this.color(s.src) } },
+      { class: 'route-row', dataset: { slot: String(index) }, style: { '--c': this.color(s.src) } },
       h('div', { class: 'route-head' }, h('span', { class: 'mod-dot' }), h('span', { class: 'route-name' }, name), amount),
       h(
         'div',

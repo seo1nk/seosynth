@@ -12,6 +12,7 @@ import type { ScopeBank } from './ui/displays.ts';
 import type { Board } from './ui/board.ts';
 import type { Keyboard } from './ui/keyboard.ts';
 import type { Help, Tour } from './ui/chrome.ts';
+import type { Lesson } from './ui/lesson.ts';
 import type { Child } from './ui/dom.ts';
 
 /** Collects the clean-up work of one part of the UI, so that part can be
@@ -79,6 +80,7 @@ export interface App {
   board: Board;
   keyboard: Keyboard;
   tour: Tour;
+  lesson: Lesson;
   /** Movers the user put on the board that are not connected to anything yet. */
   movers: Set<string>;
   /** The node whose settings are open. */

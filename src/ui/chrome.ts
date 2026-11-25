@@ -5,6 +5,7 @@ import { h, s, clamp } from './dom.ts';
 import { Slider } from './controls.ts';
 import { Meter } from './displays.ts';
 import { PRESETS, CATEGORIES, presetTitle } from '../presets.ts';
+import { lessonSteps } from '../lesson.ts';
 import { shareUrl } from '../share.ts';
 import { savedTheme } from '../theme.ts';
 import type { App, DialogOptions, PopoverOptions, Toaster } from '../app.ts';
@@ -329,23 +330,40 @@ export function Header(app: App): HTMLElement {
             'div',
             { class: 'sound-cat' },
             h('h4', {}, t(`cat.${cat}`)),
-            PRESETS.map((p, k) =>
-              p.cat === cat
-                ? h(
-                    'button',
-                    {
-                      type: 'button',
-                      class: 'menu-item',
-                      'aria-current': String(k === app.presetIndex),
-                      onclick: () => {
-                        close();
-                        app.loadPreset(k);
-                      },
-                    },
-                    presetTitle(p, i18n.lang),
-                  )
-                : null,
-            ),
+            PRESETS.map((p, k) => {
+              if (p.cat !== cat) return null;
+              const title = presetTitle(p, i18n.lang);
+              const load = h(
+                'button',
+                {
+                  type: 'button',
+                  class: 'menu-item',
+                  'aria-current': String(k === app.presetIndex),
+                  onclick: () => {
+                    close();
+                    app.loadPreset(k);
+                  },
+                },
+                title,
+              );
+              // The plain starting sound has nothing to build.
+              if (!lessonSteps(p, store).length) return load;
+              const learn = h(
+                'button',
+                {
+                  type: 'button',
+                  class: 'learn-btn',
+                  title: t('lesson.learn.help', { name: title }),
+                  'aria-label': t('lesson.learn.help', { name: title }),
+                  onclick: () => {
+                    close();
+                    app.lesson.start(k);
+                  },
+                },
+                t('lesson.learn'),
+              );
+              return h('div', { class: 'sound-row' }, load, learn);
+            }),
           ),
         ),
       ),
@@ -418,6 +436,7 @@ export function Header(app: App): HTMLElement {
         'div',
         { class: 'menu main-menu' },
         item(t('menu.new'), () => {
+          app.lesson.stop();
           store.init();
           app.presetIndex = null;
           app.toast(t('toast.patchInit'));

@@ -10,6 +10,7 @@ import { applyTheme, savedTheme, onSystemThemeChange } from './theme.ts';
 import { h } from './ui/dom.ts';
 import { Mods } from './ui/mods.ts';
 import { ScopeBank } from './ui/displays.ts';
+import { Lesson } from './ui/lesson.ts';
 import { Board } from './ui/board.ts';
 import { buildPanel } from './ui/panel.ts';
 import { isMover, SPLIT, fxGroups } from './ui/nodes.ts';
@@ -160,6 +161,7 @@ async function boot() {
     demoPhrase: () => (app.presetIndex != null ? PRESETS[app.presetIndex].demo : 'arp'),
     loadPreset(index: number) {
       const preset = PRESETS[index];
+      app.lesson?.stop();
       app.loading = true;
       try {
         const warnings = store.fromJSON({ ...preset, name: presetTitle(preset, app.i18n.lang) });
@@ -221,6 +223,7 @@ async function boot() {
     const keysShown = dock ? dock.hidden !== true : window.innerWidth >= 640;
     app.keyboard?.dispose();
     app.tour?.stop();
+    app.lesson?.stop();
     panelScope?.dispose();
     panelScope = null;
     app.scope.dispose();
@@ -235,6 +238,7 @@ async function boot() {
     app.mods = new Mods(app);
     app.scopes = new ScopeBank(app);
     app.tour = new Tour(app);
+    app.lesson = new Lesson(app);
     app.keyboard = new Keyboard(app);
     app.board = new Board(app);
     slot = h('div', { class: 'panel-slot' });

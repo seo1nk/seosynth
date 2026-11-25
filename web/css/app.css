@@ -1572,7 +1572,7 @@ input[type='range'] {
 }
 .sound-menu {
   display: grid;
-  grid-template-columns: repeat(2, minmax(190px, 1fr));
+  grid-template-columns: repeat(2, minmax(236px, 1fr));
   gap: 4px 12px;
   padding: 4px;
 }
@@ -1843,6 +1843,137 @@ input[type='range'] {
 .tour-focus {
   outline: 3px solid var(--mod-lfo1) !important;
   outline-offset: 4px !important;
+}
+
+/* --- lessons: building a sound from the start ----------------------------------- */
+.sound-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sound-row .menu-item {
+  flex: 1;
+  min-width: 0;
+}
+.learn-btn {
+  flex: none;
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--ink);
+  background: none;
+  border: 1.5px solid var(--sound);
+  border-radius: 999px;
+}
+.learn-btn:hover,
+.learn-btn:focus-visible {
+  background: var(--sound-soft);
+}
+.lesson:focus {
+  outline: none;
+}
+.lesson {
+  width: min(360px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+.lesson .tour-step {
+  align-items: center;
+  gap: 8px;
+  padding-right: 22px;
+}
+.lesson .tour-step > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lesson-fold,
+.lesson-close {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-weight: 700;
+}
+.lesson-fold {
+  font-size: 0.75rem;
+  text-decoration: underline;
+}
+.lesson-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 1.125rem;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.lesson.collapsed .lesson-body {
+  display: none;
+}
+.lesson.collapsed h3 {
+  margin-bottom: 0;
+}
+.lesson p {
+  margin-bottom: 8px;
+}
+.lesson-tip {
+  border-left: 3px solid var(--sound);
+  padding-left: 9px;
+}
+.lesson-open {
+  font-weight: 700;
+}
+.lesson-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+  font-size: 0.8125rem;
+}
+.lesson-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.lesson-mark {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--faint);
+  border-radius: 50%;
+  transform: translateY(2px);
+  display: grid;
+  place-items: center;
+  font-size: 0.625rem;
+  line-height: 1;
+}
+.lesson-list li.done {
+  color: var(--muted);
+}
+.lesson-list li.done .lesson-mark {
+  background: var(--sound);
+  border-color: var(--sound);
+  color: var(--on-sound);
+}
+.lesson-list li.done .lesson-mark::after {
+  content: '✓';
+}
+.lesson-focus {
+  outline: 3px solid var(--mod-lfo1) !important;
+  outline-offset: 4px !important;
+  animation: lesson-pulse 1.6s ease-in-out infinite;
+}
+@keyframes lesson-pulse {
+  50% {
+    outline-offset: 7px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lesson-focus {
+    animation: none;
+  }
 }
 
 /* --- keyboard dock ------------------------------------------------------------------- */
