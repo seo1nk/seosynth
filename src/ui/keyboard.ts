@@ -46,7 +46,19 @@ export type Mode = (typeof MODES)[number];
 let modWheel = 0;
 
 const PHRASES: Record<string, Phrase> = {
-  arp: { root: 48, steps: [0, 12, 7, 12, 3, 12, 7, 10, 0, 12, 8, 12, 3, 12, 8, 10], div: 2, gate: 0.6 },
+  // The same progression as the chords below, its notes one at a time in eighths:
+  // up through each chord and back down, a bar each.
+  arp: {
+    root: 48,
+    steps: [
+      5, 9, 12, 16, 17, 16, 12, 9, // FM7
+      4, 8, 11, 14, 17, 14, 11, 8, // E7(b9)
+      9, 12, 16, 19, 21, 19, 16, 12, // Am7
+      7, 10, 14, 17, 19, 17, 14, 10, // Gm7
+    ],
+    div: 2,
+    gate: 0.6,
+  },
   bass: { root: 36, steps: [0, null, 0, 12, null, 0, 3, null, 0, null, 10, 12, null, 0, 7, 5], div: 4, gate: 0.7 },
   lead: { root: 60, steps: [0, null, 3, 7, null, 10, 12, null, 10, 7, null, 3, 5, null, 7, null], div: 2, gate: 0.85 },
   pad: { root: 48, steps: [[0, 7, 12, 15, 19], null, null, null, null, null, null, null, [-4, 3, 8, 12, 15], null, null, null, null, null, null, null], div: 1, gate: 7.6 },
@@ -54,8 +66,10 @@ const PHRASES: Record<string, Phrase> = {
   // Chord sounds: IVM7, III7(b9), VIm7, Vm7 in C (FM7, E7(b9), Am7, Gm7),
   // a bar each, the bass note under close voicings that move by small steps.
   progression: { root: 48, steps: [[-7, 5, 9, 12, 16], null, null, null, [-8, 8, 11, 14, 17], null, null, null, [-3, 7, 12, 16, 19], null, null, null, [-5, 5, 10, 14, 17], null, null, null], div: 1, gate: 3.9 },
-  // With the arpeggiator on: chords held for a bar each, for it to play.
-  chords: { root: 48, steps: [[0, 3, 7], null, null, null, [-4, 0, 3], null, null, null, [-7, -4, 0], null, null, null, [-2, 2, 5], null, null, null], div: 1, gate: 3.9 },
+  // With the arpeggiator on: the same chords without the bass, a bar each, for it to play.
+  chords: { root: 48, steps: [[5, 9, 12, 16], null, null, null, [4, 8, 11, 14], null, null, null, [9, 12, 16, 19], null, null, null, [7, 10, 14, 17], null, null, null], div: 1, gate: 3.9 },
+  // With the clip on: the progression's roots (F, E, A, G), held a bar each, from the clip's root.
+  clip: { root: 0, steps: [5, null, null, null, 4, null, null, null, -3, null, null, null, -5, null, null, null], div: 1, gate: 3.9 },
 };
 
 export class Keyboard {
@@ -516,12 +530,11 @@ export class Keyboard {
     this.app.onDemo?.(true);
     const tick = () => {
       if (this.demo !== state) return;
-      // The arpeggiator gets chords to play; the clip its root note, held.
+      // The arpeggiator gets chords to play; the clip the roots, from its own root note.
       const mode = this.mode();
-      const root = Math.round(this.app.store.plain('clip.root'));
       const phrase =
         mode === 'clip'
-          ? { root, steps: [0, ...Array<null>(15).fill(null)], div: 1, gate: 15.9 }
+          ? { ...PHRASES.clip, root: Math.round(this.app.store.plain('clip.root')) }
           : (PHRASES[mode === 'arp' ? 'chords' : (this.app.demoPhrase?.() ?? 'arp')] ?? PHRASES.arp);
       const bpm = this.app.store.plain('master.bpm');
       const stepMs = 60000 / bpm / phrase.div;

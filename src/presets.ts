@@ -91,6 +91,8 @@ export const PRESETS: Preset[] = [
       'dist.on': true, 'dist.drive': 0.25, 'delay.on': true, 'delay.mix': 0.15,
     },
     mods: [mod('env2', 'filter.cutoff', 0.42), mod('velocity', 'filter.cutoff', 0.12)],
+    // Root, octave and fifth only, so it fits under any chord the keys move it to.
+    clip: { length: 384, notes: [[60, 0, 24, 110], [60, 48, 24, 90], [72, 96, 24, 110], [60, 144, 24, 90], [67, 192, 24, 110], [60, 240, 24, 90], [72, 288, 24, 110], [67, 336, 24, 90]] },
   },
   {
     name: 'Deep Sub',
@@ -527,7 +529,7 @@ export const PRESETS: Preset[] = [
     name: 'Electric Piano',
     ja: 'エレクトリックピアノ',
     cat: 'keys',
-    demo: 'arp',
+    demo: 'progression',
     params: {
       'oscA.wt': 'FM Basic', 'oscA.pos': 0.04, 'oscA.rand': 0,
       'filter.type': 'LP12', 'filter.cutoff': 5000,
@@ -542,7 +544,7 @@ export const PRESETS: Preset[] = [
     name: 'Drawbar Organ',
     ja: 'ドローバー・オルガン',
     cat: 'keys',
-    demo: 'arp',
+    demo: 'progression',
     params: {
       'oscA.wt': 'Organ', 'oscA.pos': 0.6, 'oscA.rand': 0, 'filter.on': false,
       'sub.on': true, 'sub.oct': -1, 'sub.level': 0.45,
@@ -556,9 +558,9 @@ export const PRESETS: Preset[] = [
     name: 'Music Box',
     ja: 'オルゴール',
     cat: 'keys',
-    demo: 'arp',
+    demo: 'progression',
     params: {
-      'master.volume': 0.9,
+      'master.volume': 0.55,
       'oscA.pos': 0, 'oscA.oct': 1, 'oscA.rand': 0, 'oscA.warp': 'FM', 'oscA.warpAmt': 0.12,
       'oscB.on': true, 'oscB.pos': 0, 'oscB.oct': 2, 'oscB.semi': 7, 'oscB.rand': 0, 'oscB.level': 0,
       'filter.on': false,
