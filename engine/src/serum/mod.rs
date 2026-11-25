@@ -433,22 +433,37 @@ fn lfo_points(kind: LfoKind, custom: &[LfoPoint]) -> Vec<LfoPoint> {
 fn lfo(c: &mut Ctx, l: usize) -> Value {
     let k = |p: &str| format!("lfo{}.{p}", l + 1);
     let kind = LfoKind::from_index(c.v(&k("shape")) as usize);
+    // Serum 2 has random and chaos LFOs of its own: they are chosen with
+    // kParamType and carry no drawn shape.
+    let native = match kind {
+        LfoKind::SampleHold | LfoKind::Smooth => Some("RandomSH"),
+        LfoKind::Lorenz => Some("Lorenz"),
+        LfoKind::Rossler => Some("Rossler"),
+        _ => None,
+    };
     if matches!(kind, LfoKind::SampleHold | LfoKind::Smooth) {
         c.note("lfoRandom", &format!("LFO {}", l + 1));
     }
     if kind.is_chaos() {
         c.note("lfoChaos", &format!("LFO {}", l + 1));
     }
-    let pts = lfo_points(kind, &c.patch.lfo_shapes[l]);
-    let curve_data = map(vec![
-        ("numPoints", Value::Int(pts.len() as i64 - 1)),
-        ("xVals", Value::List(pts.iter().map(|p| num(p.x)).collect())),
-        // Serum stores y with 0 at the top of its display.
-        ("yVals", Value::List(pts.iter().map(|p| num(1.0 - p.y)).collect())),
-        ("curveVals", Value::List(pts.iter().map(|p| num(0.5 + 0.5 * p.curve)).collect())),
-    ]);
+    let curve_data = if native.is_some() {
+        empty()
+    } else {
+        let pts = lfo_points(kind, &c.patch.lfo_shapes[l]);
+        map(vec![
+            ("numPoints", Value::Int(pts.len() as i64 - 1)),
+            ("xVals", Value::List(pts.iter().map(|p| num(p.x)).collect())),
+            // Serum stores y with 0 at the top of its display.
+            ("yVals", Value::List(pts.iter().map(|p| num(1.0 - p.y)).collect())),
+            ("curveVals", Value::List(pts.iter().map(|p| num(0.5 + 0.5 * p.curve)).collect())),
+        ])
+    };
 
     let mut params = Vec::new();
+    if let Some(ty) = native {
+        params.push(("kParamType", Value::from(ty)));
+    }
     if c.on(&k("sync")) {
         let (step, dotted, triplet) = division(c.v(&k("div")) as usize);
         params.push(("kParamRate", num(100.0 * (step / 14.0).powi(4))));
@@ -482,18 +497,23 @@ fn lfo(c: &mut Ctx, l: usize) -> Value {
     if c.v(&k("phase")) > 0.0 {
         params.push(("kParamPhase", num(c.v(&k("phase")) * 360.0)));
     }
-    if c.v(&k("smooth")) > 0.01 {
+    if kind == LfoKind::Smooth {
+        // Our smooth random glides from value to value: Serum's random LFO
+        // with its Smooth knob all the way up.
+        params.push(("kParamSmooth", num(100.0)));
+    } else if c.v(&k("smooth")) > 0.01 {
         // Serum's Smooth knob runs 0..100; it rounds the shape a little
         // differently, so the user is told.
         params.push(("kParamSmooth", num(c.v(&k("smooth")) * 100.0)));
         c.note("lfoSmooth", &format!("LFO {}", l + 1));
     }
-    map(vec![
-        ("curveData", curve_data),
-        ("curveDisplayName", Value::from("Custom")),
-        ("pathData", empty()),
-        ("plainParams", plain(params)),
-    ])
+    let mut out = vec![("curveData", curve_data)];
+    if native.is_none() {
+        out.push(("curveDisplayName", Value::from("Custom")));
+    }
+    out.push(("pathData", empty()));
+    out.push(("plainParams", plain(params)));
+    map(out)
 }
 
 fn unused_lfo() -> Value {
@@ -549,7 +569,9 @@ fn destination(key: &str, rack: &[usize]) -> Option<Dest> {
     let numbered = |prefix: &str| module_key.strip_prefix(prefix).and_then(|n| n.parse::<i64>().ok()).map(|n| n - 1);
     if let Some(e) = numbered("env") {
         return match param {
+            "attack" => d("Env", e, "kParamAttack", 0, 1.0),
             "decay" => d("Env", e, "kParamDecay", 2, 1.0),
+            "sustain" => d("Env", e, "kParamSustain", 3, 1.0),
             "release" => d("Env", e, "kParamRelease", 4, 1.0),
             _ => None,
         };
@@ -567,6 +589,11 @@ fn destination(key: &str, rack: &[usize]) -> Option<Dest> {
             ("dist", "mix") => d("FXDistortion", place, "kParamWet", 1, 1.0),
             ("dist", "drive") => d("FXDistortion", place, "kParamDrive", 2, 1.0),
             ("delay", "mix") => d("FXDelay", place, "kParamWet", 1, 1.0),
+            ("chorus", "mix") => d("FXChorus", place, "kParamWet", 1, 1.0),
+            ("reverb", "lowcut") => d("FXReverb", place, "kParamFreq", 4, 1.0),
+            ("reverb", "highcut") => d("FXReverb", place, "kParamFreqB", 6, 1.0),
+            // Our shelf gains span ±18 dB, Serum's ±24 dB.
+            ("eq", "highGain") => d("FXEQ", place, "kParamGain2", 6, 0.75),
             ("reverb", "mix") => d("FXReverb", place, "kParamWet", 1, 1.0),
             ("hyper", "mix") => d("FXHyperD", place, "kParamWet", 1, 1.0),
             ("phaser", "mix") => d("FXPhaser", place, "kParamWet", 1, 1.0),
@@ -627,14 +654,19 @@ fn mod_slots(c: &mut Ctx, data: &mut Value, rack: &[usize]) {
         if slot >= 64 {
             break;
         }
-        // Serum has both, but the units of its curve and the way it stores
-        // an aux source are not known yet.
+        // Serum has a curve too, but its unit and shape are not known yet.
         if s.curve != 0.0 {
             c.note("modCurve", &format!("{source_key} > {key}"));
         }
-        if s.aux_src() != 0 {
-            c.note("modAux", &format!("{source_key} > {key}"));
-        }
+        // The aux source, like ours, scales the connection; Serum stores it
+        // as the second number of `source`, 0 for none.
+        let aux = match s.aux_src() {
+            0 => 0,
+            a => source_id(a).unwrap_or_else(|| {
+                c.note("modAux", &format!("{source_key} > {key}"));
+                0
+            }),
+        };
         let amount = (s.amount * 100.0 * dest.scale).max(-100.0).min(100.0);
         let mut params = vec![("kParamAmount", num(amount))];
         if s.bipolar {
@@ -648,7 +680,7 @@ fn mod_slots(c: &mut Ctx, data: &mut Value, rack: &[usize]) {
                 ("destModuleParamName", Value::from(dest.name)),
                 ("destModuleTypeString", Value::from(dest.module)),
                 ("plainParams", plain(params)),
-                ("source", Value::List(vec![Value::Int(source), Value::Int(0)])),
+                ("source", Value::List(vec![Value::Int(source), Value::Int(aux)])),
             ]),
         );
         slot += 1;
@@ -1328,7 +1360,7 @@ mod tests {
         let cutoff = (FILTER_BASE + filter::CUTOFF) as u16;
         p.slots[0] = ModSlot { src: src::LFO1 as u8, dst: cutoff, amount: 0.5, bipolar: true, ..ModSlot::EMPTY };
         p.slots[1] = ModSlot { src: src::ENV2 as u8, dst: osc_idx(1, osc::POS) as u16, amount: -1.0, bipolar: false, ..ModSlot::EMPTY };
-        p.slots[2] = ModSlot { src: src::MACRO1 as u8, dst: index_of_key("env1.attack").unwrap() as u16, amount: 0.3, bipolar: false, ..ModSlot::EMPTY };
+        p.slots[2] = ModSlot { src: src::MACRO1 as u8, dst: index_of_key("env1.hold").unwrap() as u16, amount: 0.3, bipolar: false, ..ModSlot::EMPTY };
         p.slots[3] = ModSlot { src: src::MACRO1 as u8, dst: lfo_idx(0, crate::params::lfo::RATE) as u16, amount: 0.3, bipolar: false, ..ModSlot::EMPTY };
         let (d, notes) = export(&p);
         let s0 = d.get("ModSlot0").unwrap();
@@ -1344,7 +1376,7 @@ mod tests {
         assert_eq!(s1.get("destModuleID"), Some(&Value::Int(1)));
         assert_eq!(plain_of(s1, &["plainParams", "kParamAmount"]), &Value::Num(-100.0));
         // The third has no known Serum destination id: dropped and reported.
-        assert!(notes.iter().any(|n| n == "modDropped\tmacro1 > env1.attack"), "{notes:?}");
+        assert!(notes.iter().any(|n| n == "modDropped\tmacro1 > env1.hold"), "{notes:?}");
         // So the fourth takes the third slot.
         let s2 = d.get("ModSlot2").unwrap();
         assert_eq!(s2.get("destModuleTypeString"), Some(&Value::from("LFO")));
@@ -1476,6 +1508,44 @@ mod tests {
         assert_eq!(kinds(&d), vec![0, 4, 6, 0]);
         p.fx_lane[1] = crate::patch::lane::B;
         assert_eq!(kinds(&export(&p).0), vec![6, 0, 0, 4], "reverb | both distortions, then the delay");
+    }
+
+    #[test]
+    fn aux_sources_go_into_the_second_source_number() {
+        let mut p = Patch::init();
+        let dst = |k: &str| index_of_key(k).unwrap() as u16;
+        p.slots[0] = ModSlot { src: src::lfo(1) as u8, dst: dst("oscA.fine"), amount: 0.3, aux: src::macro_(6) as u8, ..ModSlot::EMPTY };
+        p.slots[1] = ModSlot { src: src::ENV2 as u8, dst: dst("env1.sustain"), amount: 0.5, ..ModSlot::EMPTY };
+        let (d, notes) = export(&p);
+        let s0 = d.get("ModSlot0").unwrap();
+        // LFO 2 scaled by macro 7, as in presets saved by Serum.
+        assert_eq!(s0.get("source"), Some(&Value::List(vec![Value::Int(7), Value::Int(31)])));
+        let s1 = d.get("ModSlot1").unwrap();
+        assert_eq!(s1.get("source"), Some(&Value::List(vec![Value::Int(3), Value::Int(0)])));
+        assert_eq!(s1.get("destModuleParamName"), Some(&Value::from("kParamSustain")));
+        assert_eq!(s1.get("destModuleParamID"), Some(&Value::Int(3)));
+        assert!(!notes.iter().any(|n| n.starts_with("modAux")), "{notes:?}");
+    }
+
+    #[test]
+    fn random_and_chaos_lfos_use_serums_own_types() {
+        let mut p = Patch::init();
+        let shape = |name: &str| params::LFO_SHAPES.iter().position(|s| *s == name).unwrap() as f32;
+        set(&mut p, "lfo1.shape", shape("Lorenz"));
+        set(&mut p, "lfo2.shape", shape("Rossler"));
+        set(&mut p, "lfo3.shape", shape("S&H"));
+        set(&mut p, "lfo4.shape", shape("Smooth"));
+        set(&mut p, "lfo5.shape", shape("Sine"));
+        let (d, _) = export(&p);
+        let ty = |l: usize| d.get(&format!("LFO{l}")).unwrap().get("plainParams").and_then(|p| p.get("kParamType")).cloned();
+        assert_eq!(ty(0), Some(Value::from("Lorenz")));
+        assert_eq!(ty(1), Some(Value::from("Rossler")));
+        assert_eq!(ty(2), Some(Value::from("RandomSH")));
+        assert_eq!(ty(3), Some(Value::from("RandomSH")));
+        assert_eq!(number(plain_of(&d, &["LFO3", "plainParams", "kParamSmooth"])), 100.0);
+        assert_eq!(ty(4), None);
+        // A native type carries no drawn shape.
+        assert_eq!(d.get("LFO0").unwrap().get("curveData"), Some(&empty()));
     }
 
     #[test]
