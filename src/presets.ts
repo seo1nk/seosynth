@@ -170,22 +170,6 @@ export const PRESETS: Preset[] = [
   },
   // --- Lead ---------------------------------------------------------------------
   {
-    name: 'Super Saw',
-    ja: 'スーパーソウ',
-    cat: 'lead',
-    demo: 'lead',
-    params: {
-      'master.bpm': 160,
-      'oscA.pos': 0.5, 'oscA.unison': 7, 'oscA.detune': 0.32, 'oscA.blend': 0.8,
-      'oscB.on': true, 'oscB.pos': 0.5, 'oscB.oct': 1, 'oscB.unison': 5, 'oscB.detune': 0.28, 'oscB.level': 0.45,
-      'filter.type': 'LP12', 'filter.cutoff': 9000, 'filter.res': 0.12,
-      'env1.attack': 0.005, 'env1.release': 0.3,
-      'reverb.on': true, 'reverb.mix': 0.22, 'reverb.decay': 0.55, 'delay.on': true, 'delay.mix': 0.18, 'delay.mode': 'PingPong',
-      'hyper.on': true, 'hyper.mix': 0.2, 'hyper.dimMix': 0.3,
-    },
-    mods: [mod('velocity', 'filter.cutoff', 0.12)],
-  },
-  {
     name: 'Sync Lead',
     ja: 'シンク・リード',
     cat: 'lead',
@@ -335,8 +319,8 @@ export const PRESETS: Preset[] = [
   },
   // --- Chords: big, bright stacks (future bass) ---------------------------------
   {
-    name: 'Future Chord',
-    ja: 'フューチャー・コード',
+    name: 'Super Saw',
+    ja: 'スーパーソウ',
     cat: 'chord',
     demo: 'progression',
     note: [
