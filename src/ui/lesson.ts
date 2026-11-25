@@ -13,6 +13,8 @@ import { isMover } from './nodes.ts';
 
 const hasPopover = typeof HTMLElement !== 'undefined' && Object.hasOwn(HTMLElement.prototype, 'popover');
 const FOCUS = 'lesson-focus';
+/** Settings under "Play settings" by the keyboard. */
+const PLAY_KEYS = new Set(['master.mono', 'master.legato', 'master.porta', 'master.portaAlways', 'master.voices', 'master.bendRange']);
 /** Phone widths, where the node's settings are a sheet over the board. */
 const narrow = () => typeof matchMedia === 'function' && matchMedia('(max-width: 47.5em)').matches;
 
@@ -97,6 +99,14 @@ export class Lesson {
     return `${label}${i18n.lang === 'ja' ? '：' : ': '}${value}`;
   }
 
+  /** The name of the folded place a setting is in, '' when it is in plain sight. */
+  #where(key: string): string {
+    const { i18n } = this.app;
+    if (PLAY_KEYS.has(key)) return i18n.t('kb.settings');
+    const summary = this.#control(key)?.closest('details')?.querySelector('summary');
+    return summary?.textContent?.trim() ?? '';
+  }
+
   #title(node: string): string {
     const { i18n } = this.app;
     if (node === 'keys') return i18n.t('lesson.keys');
@@ -118,6 +128,12 @@ export class Lesson {
     } else app.select(step.node);
   }
 
+  /** The control of a parameter where it is shown now: a node's panel, the
+   * drawer by the keys, or the play settings. */
+  #control(key: string): Element | null {
+    return document.querySelector(`.panel [data-key="${key}"], .kb-drawer [data-key="${key}"], .play-settings [data-key="${key}"]`);
+  }
+
   /** The element to touch for a target, opening a folded section if needed. */
   #targetEl(t: Target): Element | null {
     const scope = document;
@@ -130,10 +146,14 @@ export class Lesson {
       return scope.querySelector(slot ? `.panel .route-row[data-slot="${slot.index}"]` : '.panel .link-form');
     }
     if (t.key === 'arp.on' || t.key === 'clip.on') return scope.querySelector('.kb-mode');
-    const ctl = scope.querySelector(`.panel .ctl[data-key="${t.key}"], .kb-drawer .ctl[data-key="${t.key}"]`);
+    const ctl = this.#control(t.key);
     const fold = ctl?.closest('details');
     if (fold && !fold.open) fold.open = true;
     if (ctl) return ctl;
+    // Play settings open from their button by the keyboard.
+    if (t.key.startsWith('master.')) return scope.querySelector('.kb-settings-btn');
+    // The arpeggiator's or the clip's settings: in the drawer by the keys.
+    if (t.key.startsWith('arp.') || t.key.startsWith('clip.')) return scope.querySelector('.kb-drawer-btn:not([hidden])') ?? scope.querySelector('.kb-mode');
     // A switch in the node's head on the board.
     if (t.key.endsWith('.on')) return scope.querySelector(`.node[data-node="${t.key.slice(0, -3)}"] .switch`);
     return null;
@@ -202,7 +222,10 @@ export class Lesson {
 
     const btn = (label: string, onclick: () => void, cls = 'btn') => h('button', { type: 'button', class: cls, onclick }, label);
     const check = h('span', { class: 'tour-check', hidden: true }, t('tour.did'));
-    const items = def ? def.targets.map((target) => h('li', {}, h('span', { class: 'lesson-mark', 'aria-hidden': 'true' }), this.#describe(target))) : [];
+    // Where a setting is out of sight, the list says so: inside a folded
+    // section of the panel, or under the play settings by the keys.
+    const wheres = def ? def.targets.map(() => h('span', { class: 'lesson-where', hidden: true })) : [];
+    const items = def ? def.targets.map((target, k) => h('li', {}, h('span', { class: 'lesson-mark', 'aria-hidden': 'true' }), h('span', {}, this.#describe(target), wheres[k]))) : [];
     // Folded, the card keeps only the next thing to do and the buttons.
     const nowMark = h('span', { class: 'lesson-mark', 'aria-hidden': 'true' });
     const nowText = h('span', {});
@@ -272,12 +295,17 @@ export class Lesson {
       if (def) {
         const done = def.targets.map((target) => isDone(store, target));
         items.forEach((li, k) => li.classList.toggle('done', done[k]));
+        def.targets.forEach((target, k) => {
+          const where = target.kind === 'param' ? this.#where(target.key) : '';
+          wheres[k].textContent = where ? t('lesson.where', { name: where }) : '';
+          wheres[k].hidden = !where;
+        });
         check.hidden = !done.every(Boolean);
         if (opener) opener.hidden = app.selected === def.node;
         const next = done.indexOf(false);
         const closed = def.node !== 'keys' && app.selected !== def.node;
         nowMark.parentElement!.classList.toggle('done', next < 0);
-        nowText.textContent = next < 0 ? t('lesson.now.done') : closed ? t('lesson.open', { name: this.#title(def.node) }) : this.#describe(def.targets[next]);
+        nowText.textContent = next < 0 ? t('lesson.now.done') : closed ? t('lesson.open', { name: this.#title(def.node) }) : this.#describe(def.targets[next]) + (wheres[next].textContent ?? '');
         nowCount.textContent = `${done.filter(Boolean).length} / ${done.length}`;
         this.#point(def, done);
       } else if (step === last) {

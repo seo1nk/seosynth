@@ -8,7 +8,7 @@ import { createI18n, hasParamText } from '../src/i18n.ts';
 import { PRESETS, CATEGORIES } from '../src/presets.ts';
 import { toBase64Url, fromBase64Url, patchToHash, encodeHash, decodeHash, shareUrl } from '../src/share.ts';
 import { formatValue } from '../src/format.ts';
-import { lessonSteps, lessonStart, applyTarget, isDone } from '../src/lesson.ts';
+import { lessonSteps, lessonStart, applyTarget, isDone, stepOfParam } from '../src/lesson.ts';
 import type { AudioMessage } from '../src/engine/types.ts';
 import type { PatchJSON } from '../src/patch-json.ts';
 import type { Lang } from '../src/i18n.ts';
@@ -891,4 +891,14 @@ test('where the board draws a source going matches where the engine sends it', a
     }
   }
   assert.equal(checked, 48);
+});
+
+test('lesson steps open where each setting is shown', () => {
+  // Mono, legato and glide are under the play settings by the keys; velocity on the amp.
+  assert.equal(stepOfParam('master.mono'), 'keys');
+  assert.equal(stepOfParam('master.porta'), 'keys');
+  assert.equal(stepOfParam('master.velSens'), 'amp');
+  assert.equal(stepOfParam('master.volume'), 'out');
+  assert.equal(stepOfParam('env1.attack'), 'amp');
+  assert.equal(stepOfParam('arp.gate'), 'keys');
 });

@@ -298,7 +298,7 @@ export class Keyboard {
       'button',
       {
         type: 'button',
-        class: 'chip-toggle',
+        class: 'chip-toggle kb-settings-btn',
         onclick: () => {
           const [content, scope] = app.inScope(() =>
             h(

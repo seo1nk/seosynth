@@ -1994,6 +1994,10 @@ input[type='range'] {
   font-size: 0.625rem;
   line-height: 1;
 }
+.lesson-where {
+  color: var(--muted);
+  font-weight: 700;
+}
 .lesson-list li.done {
   color: var(--muted);
 }

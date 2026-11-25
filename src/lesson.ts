@@ -36,9 +36,13 @@ export interface LessonStep {
 const SOURCE_NODES = ['oscA', 'oscB', 'oscC', 'sub', 'noise'];
 
 /** The step a parameter is set in. */
+/** Master settings shown under "Play settings" by the keyboard, not on the output node. */
+const PLAY_SETTINGS = new Set(['master.mono', 'master.legato', 'master.porta', 'master.portaAlways', 'master.voices', 'master.bendRange']);
+
 export function stepOfParam(key: string): string {
   const [mod] = key.split('.');
-  if (mod === 'env1') return 'amp';
+  if (mod === 'env1' || key === 'master.velSens') return 'amp';
+  if (PLAY_SETTINGS.has(key)) return 'keys';
   if (mod === 'master') return 'out';
   if (mod === 'arp' || mod === 'clip') return 'keys';
   return mod;
