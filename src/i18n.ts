@@ -209,6 +209,7 @@ const UI: Record<string, Pair> = {
   'cat.bass': ['ベース', 'Bass'],
   'cat.lead': ['リード', 'Lead'],
   'cat.pad': ['パッド', 'Pad'],
+  'cat.chord': ['コード', 'Chords'],
   'cat.pluck': ['プラック', 'Pluck'],
   'cat.keys': ['キー', 'Keys'],
   'cat.fx': ['効果音', 'Sound effects'],

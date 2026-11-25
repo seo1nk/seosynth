@@ -4,7 +4,7 @@
 
 import type { ModJSON, PatchJSON } from './patch-json.ts';
 
-export type Category = 'basic' | 'bass' | 'lead' | 'pad' | 'pluck' | 'keys' | 'fx';
+export type Category = 'basic' | 'bass' | 'lead' | 'pad' | 'chord' | 'pluck' | 'keys' | 'fx';
 
 export interface Preset extends PatchJSON {
   name: string;
@@ -228,6 +228,24 @@ export const PRESETS: Preset[] = [
     lfoShapes: { 1: [[0, 0, 0], [0.25, 1, 0], [0.5, 0.25, 0], [0.75, 0.75, 0], [1, 0, 0]] },
     mods: [mod('lfo1', 'oscA.pos', 0.85)],
   },
+  {
+    name: 'Glide Lead',
+    ja: 'グライド・リード',
+    cat: 'lead',
+    demo: 'lead',
+    params: {
+      'master.volume': 0.85,
+      'oscA.pos': 0.5, 'oscA.unison': 3, 'oscA.detune': 0.12,
+      'oscB.on': true, 'oscB.pos': 0.75, 'oscB.oct': 1, 'oscB.level': 0.2,
+      'filter.type': 'LP12', 'filter.cutoff': 5000, 'filter.res': 0.1,
+      'master.mono': true, 'master.legato': true, 'master.porta': 0.08,
+      'env1.attack': 0.005, 'env1.release': 0.2,
+      'lfo1.sync': false, 'lfo1.rate': 5.8, 'lfo1.shape': 'Sine', 'lfo1.delay': 0.25, 'lfo1.rise': 0.3,
+      'delay.on': true, 'delay.mode': 'PingPong', 'delay.divL': '1/8.', 'delay.mix': 0.18,
+      'reverb.on': true, 'reverb.mix': 0.2,
+    },
+    mods: [mod('lfo1', 'oscA.fine', 0.12, true), mod('lfo1', 'oscB.fine', 0.12, true)],
+  },
   // --- Pad ----------------------------------------------------------------------
   {
     name: 'Morph Pad',
@@ -308,6 +326,85 @@ export const PRESETS: Preset[] = [
     },
     mods: [mod('lfo1', 'oscA.pos', 0.8), mod('lfo2', 'oscB.pos', 0.5), mod('lfo2', 'filter.cutoff', 0.15, true)],
   },
+  // --- Chords: big, bright stacks (future bass) ---------------------------------
+  {
+    name: 'Future Chord',
+    ja: 'フューチャー・コード',
+    cat: 'chord',
+    demo: 'chords',
+    note: [
+      '厚いノコギリ波の和音に、鳴り始めのピッチの落ち込みと、拍ごとに音量が沈んで戻る「ポンプ」をかけています。和音を押さえて聴いてみましょう。',
+      'A thick saw chord with a quick pitch drop at the start of each note and a "pump" that ducks the volume on every beat. Hold a chord to hear it.',
+    ],
+    params: {
+      'master.volume': 0.85,
+      'oscA.pos': 0.5, 'oscA.unison': 9, 'oscA.detune': 0.3, 'oscA.blend': 0.75, 'oscA.width': 1,
+      'oscB.on': true, 'oscB.pos': 0.5, 'oscB.oct': 1, 'oscB.unison': 7, 'oscB.detune': 0.34, 'oscB.width': 1, 'oscB.level': 0.32,
+      'noise.on': true, 'noise.level': 0.05, 'noise.tone': 0.7,
+      'filter.type': 'HP12', 'filter.cutoff': 140,
+      'env1.attack': 0.004, 'env1.decay': 0.8, 'env1.sustain': 0.85, 'env1.release': 0.35,
+      'env3.attack': 0, 'env3.decay': 0.09, 'env3.sustain': 0, 'env3.release': 0.05,
+      'lfo1.shape': 'Custom', 'lfo1.div': '1/4',
+      'delay.on': true, 'delay.mode': 'PingPong', 'delay.divL': '1/8', 'delay.mix': 0.14, 'delay.filterFreq': 4500,
+      'reverb.on': true, 'reverb.mode': 'Hall', 'reverb.mix': 0.24, 'reverb.decay': 0.6, 'reverb.lowcut': 0.35,
+      'comp.on': true, 'comp.multiband': true, 'comp.threshold': -24, 'comp.ratio': 4, 'comp.mix': 0.45,
+    },
+    lfoShapes: { 1: [[0, 1, 0], [0.32, 0, 0.5], [1, 0, 0]] },
+    mods: [mod('env3', 'oscA.coarse', 0.03), mod('env3', 'oscB.coarse', 0.03), mod('lfo1', 'master.volume', -0.55)],
+    lesson: {
+      env3: [
+        'ENV 3 は一瞬で上がってすぐ下がります。オシレーターの音程（Coarse）につなぐと、鳴り始めだけ少し高く、すぐ元の高さに落ちる「ピュン」という頭ができます。',
+        'ENV 3 jumps up and falls straight away. Tied to the oscillators\' coarse pitch, each note starts a little sharp and drops into tune: the "pew" at the front.',
+      ],
+      lfo1: [
+        'LFO 1 は 4 分音符ごとに、最初が高くてすぐ下がる形です。マイナスの強さで全体の音量につなぐと、拍の頭で音が沈んでから戻ります。キックに合わせて音を空ける「サイドチェイン」の代わりです。',
+        'LFO 1 starts high and falls on every quarter note. Tied to the volume with a negative amount, the sound ducks on each beat and swells back: a stand-in for sidechain to a kick.',
+      ],
+    },
+  },
+  {
+    name: 'Wobble Chord',
+    ja: 'ワブル・コード',
+    cat: 'chord',
+    demo: 'chords',
+    note: [
+      'LFO が 3 連符のリズムでフィルターを開け閉めし、和音が「ワウワウ」と刻まれます。LFO の速さを変えるとノリが変わります。',
+      'An LFO opens and closes the filter in triplets, so the chord chops into "wah-wah" rhythms. Change the LFO note length for another groove.',
+    ],
+    params: {
+      'master.volume': 0.8,
+      'oscA.wt': 'Dual Saw', 'oscA.pos': 0.3, 'oscA.unison': 7, 'oscA.detune': 0.26, 'oscA.width': 0.9,
+      'oscB.on': true, 'oscB.pos': 0.75, 'oscB.oct': 1, 'oscB.unison': 3, 'oscB.detune': 0.2, 'oscB.level': 0.25,
+      'sub.on': true, 'sub.oct': -1, 'sub.level': 0.25,
+      'filter.type': 'LP24', 'filter.cutoff': 700, 'filter.res': 0.3, 'filter.drive': 0.2, 'filter.keytrack': 0.3,
+      'env1.attack': 0.003, 'env1.sustain': 0.9, 'env1.release': 0.25,
+      'lfo1.shape': 'SawDown', 'lfo1.div': '1/8T',
+      'dist.on': true, 'dist.mode': 'Soft', 'dist.drive': 0.25, 'dist.mix': 0.5,
+      'chorus.on': true, 'chorus.mix': 0.25,
+      'reverb.on': true, 'reverb.mix': 0.18,
+      'comp.on': true, 'comp.multiband': true, 'comp.threshold': -20, 'comp.ratio': 3, 'comp.mix': 0.35,
+    },
+    mods: [mod('lfo1', 'filter.cutoff', 0.5), mod('modWheel', 'filter.cutoff', 0.25)],
+  },
+  {
+    name: 'Saw Stab',
+    ja: 'ソウ・スタブ',
+    cat: 'chord',
+    demo: 'chords',
+    params: {
+      'master.volume': 0.78,
+      'oscA.pos': 0.5, 'oscA.unison': 7, 'oscA.detune': 0.24, 'oscA.width': 0.9,
+      'oscB.on': true, 'oscB.pos': 0.75, 'oscB.oct': 1, 'oscB.unison': 5, 'oscB.detune': 0.2, 'oscB.level': 0.3,
+      'filter.type': 'LP12', 'filter.cutoff': 900, 'filter.res': 0.15,
+      'env1.attack': 0.002, 'env1.decay': 0.45, 'env1.sustain': 0.15, 'env1.release': 0.2,
+      'env2.attack': 0.001, 'env2.decay': 0.3, 'env2.sustain': 0.1,
+      'delay.on': true, 'delay.mode': 'PingPong', 'delay.divL': '1/8.', 'delay.mix': 0.2,
+      'reverb.on': true, 'reverb.mode': 'Hall', 'reverb.mix': 0.22,
+      'comp.on': true, 'comp.multiband': true, 'comp.threshold': -26, 'comp.ratio': 5, 'comp.mix': 0.5,
+    },
+    mods: [mod('env2', 'filter.cutoff', 0.45), mod('velocity', 'filter.cutoff', 0.1)],
+  },
+
   // --- Pluck ----------------------------------------------------------------------
   {
     name: 'Filter Pluck',
@@ -391,6 +488,40 @@ export const PRESETS: Preset[] = [
     },
     mods: [mod('env2', 'oscA.pos', 0.45), mod('velocity', 'oscA.pos', 0.2)],
   },
+  {
+    name: 'Sparkle Pluck',
+    ja: 'スパークル・プラック',
+    cat: 'pluck',
+    demo: 'arp',
+    params: {
+      'master.volume': 0.85,
+      'oscA.pos': 0.5, 'oscA.unison': 4, 'oscA.detune': 0.18,
+      'oscB.on': true, 'oscB.pos': 0.75, 'oscB.oct': 1, 'oscB.level': 0.4,
+      'oscC.on': true, 'oscC.pos': 0, 'oscC.oct': 2, 'oscC.level': 0.25,
+      'filter.type': 'LP24', 'filter.cutoff': 500, 'filter.res': 0.2, 'filter.keytrack': 0.5,
+      'env1.attack': 0.001, 'env1.decay': 0.35, 'env1.sustain': 0, 'env1.release': 0.3,
+      'env2.attack': 0.001, 'env2.decay': 0.18, 'env2.sustain': 0,
+      'delay.on': true, 'delay.mode': 'PingPong', 'delay.divL': '1/8.', 'delay.mix': 0.28, 'delay.feedback': 0.45,
+      'reverb.on': true, 'reverb.mix': 0.25,
+    },
+    mods: [mod('env2', 'filter.cutoff', 0.55)],
+  },
+  {
+    name: 'Chip Arp',
+    ja: 'チップ・アルペジオ',
+    cat: 'pluck',
+    demo: 'chords',
+    params: {
+      'master.volume': 0.7,
+      'arp.on': true, 'arp.div': '1/16', 'arp.octaves': 2, 'arp.mode': 'UpDown', 'arp.gate': 0.5,
+      'oscA.wt': '8-Bit', 'oscA.pos': 0.33, 'oscA.rand': 0,
+      'oscB.on': true, 'oscB.wt': '8-Bit', 'oscB.pos': 0.66, 'oscB.oct': 1, 'oscB.fine': 8, 'oscB.rand': 0, 'oscB.level': 0.3,
+      'filter.on': false,
+      'env1.attack': 0.001, 'env1.decay': 0.2, 'env1.sustain': 0.3, 'env1.release': 0.08,
+      'delay.on': true, 'delay.mode': 'PingPong', 'delay.divL': '1/8', 'delay.mix': 0.2,
+      'reverb.on': true, 'reverb.mix': 0.12,
+    },
+  },
   // --- Keys -----------------------------------------------------------------------
   {
     name: 'Electric Piano',
@@ -420,6 +551,23 @@ export const PRESETS: Preset[] = [
       'dist.on': true, 'dist.mode': 'Tube', 'dist.drive': 0.2, 'dist.mix': 0.5, 'reverb.on': true, 'reverb.mix': 0.15,
     },
     mods: [mod('modWheel', 'oscA.pos', 0.4)],
+  },
+  {
+    name: 'Music Box',
+    ja: 'オルゴール',
+    cat: 'keys',
+    demo: 'arp',
+    params: {
+      'master.volume': 0.9,
+      'oscA.pos': 0, 'oscA.oct': 1, 'oscA.rand': 0, 'oscA.warp': 'FM', 'oscA.warpAmt': 0.12,
+      'oscB.on': true, 'oscB.pos': 0, 'oscB.oct': 2, 'oscB.semi': 7, 'oscB.rand': 0, 'oscB.level': 0,
+      'filter.on': false,
+      'env1.attack': 0.001, 'env1.decay': 1.4, 'env1.sustain': 0, 'env1.release': 1.2, 'env1.decCurve': -0.6,
+      'env2.attack': 0.001, 'env2.decay': 0.25, 'env2.sustain': 0,
+      'chorus.on': true, 'chorus.mix': 0.2,
+      'reverb.on': true, 'reverb.mode': 'Plate', 'reverb.mix': 0.3,
+    },
+    mods: [mod('env2', 'oscA.warpAmt', 0.3)],
   },
   // --- FX -------------------------------------------------------------------------
   {
@@ -451,9 +599,26 @@ export const PRESETS: Preset[] = [
     },
     mods: [mod('lfo1', 'filter.cutoff', 0.3, true), mod('lfo2', 'noise.level', -0.4)],
   },
+  {
+    name: 'Noise Riser',
+    ja: 'ノイズ・ライザー',
+    cat: 'fx',
+    demo: 'pad',
+    params: {
+      'master.volume': 0.8,
+      'oscA.on': false,
+      'noise.on': true, 'noise.level': 0.8,
+      'filter.type': 'BP12', 'filter.cutoff': 300, 'filter.res': 0.35,
+      'env1.attack': 2.5, 'env1.release': 0.6,
+      'env2.attack': 3, 'env2.sustain': 1,
+      'reverb.on': true, 'reverb.mode': 'Hall', 'reverb.mix': 0.35, 'reverb.decay': 0.7,
+      'delay.on': true, 'delay.mode': 'PingPong', 'delay.mix': 0.15,
+    },
+    mods: [mod('env2', 'filter.cutoff', 0.7)],
+  },
 ];
 
-export const CATEGORIES: Category[] = ['basic', 'bass', 'lead', 'pad', 'pluck', 'keys', 'fx'];
+export const CATEGORIES: Category[] = ['basic', 'bass', 'lead', 'pad', 'chord', 'pluck', 'keys', 'fx'];
 
 export function presetTitle(p: Preset, lang: string): string {
   return lang === 'ja' && p.ja ? p.ja : p.name;
