@@ -22,13 +22,30 @@ const KEYMAP: Record<string, number> = {
 };
 
 /** A demo phrase: semitone offsets from `root` (arrays are chords, null
- * rests), steps per beat, and how long each note is held (in steps). */
+ * rests), steps per beat, and how long each note is held (in steps);
+ * `hold` gives a step its own length instead. */
 interface Phrase {
   root: number;
   steps: (number | number[] | null)[];
   div: number;
   gate: number;
+  hold?: (number | undefined)[];
 }
+
+/** A melody as [start, note, length] in steps of 1/`div` beat, `length` steps long in all. */
+function melody(div: number, length: number, notes: [number, number, number][]): Phrase {
+  const steps: (number | null)[] = Array(length).fill(null);
+  const hold: (number | undefined)[] = Array(length).fill(undefined);
+  for (const [at, note, len] of notes) {
+    steps[at] = note;
+    // Short notes a little detached, long ones nearly joined.
+    hold[at] = len < 1 ? len : len - (len <= 2 ? 0.3 : 0.15);
+  }
+  return { root: 0, steps, div, gate: 1, hold };
+}
+
+// MIDI notes of the lead melody.
+const D5 = 74, E5 = 76, F5 = 77, Gb5 = 78, A5 = 81, B5 = 83;
 
 interface DemoState {
   step: number;
@@ -60,7 +77,16 @@ const PHRASES: Record<string, Phrase> = {
     gate: 0.6,
   },
   bass: { root: 36, steps: [0, null, 0, 12, null, 0, 3, null, 0, null, 10, 12, null, 0, 7, 5], div: 4, gate: 0.7 },
-  lead: { root: 60, steps: [0, null, 3, 7, null, 10, 12, null, 10, 7, null, 3, 5, null, 7, null], div: 2, gate: 0.85 },
+  // Seven bars in sixteenths, then round again (written for 160 bpm).
+  lead: melody(4, 112, [
+    [4, Gb5, 2], [8, D5, 4], [14, D5, 2],
+    [16, E5, 2], [18, Gb5, 2], [22, D5, 6],
+    [36, Gb5, 2], [40, D5, 4], [46, D5, 2],
+    [48, E5, 2], [50, D5, 2], [53, E5, 0.5], [54, F5, 4], [58, E5, 2], [60, D5, 2], [62, E5, 2],
+    [68, Gb5, 2], [72, D5, 4], [78, D5, 2],
+    [80, E5, 2], [82, Gb5, 2], [86, D5, 6], [92, B5, 2],
+    [96, A5, 8],
+  ]),
   pad: { root: 48, steps: [[0, 7, 12, 15, 19], null, null, null, null, null, null, null, [-4, 3, 8, 12, 15], null, null, null, null, null, null, null], div: 1, gate: 7.6 },
   hit: { root: 60, steps: [0, null, null, null, -5, null, null, null], div: 1, gate: 0.5 },
   // Chord sounds: IVM7, III7(b9), VIm7, Vm7 in C (FM7, E7(b9), Am7, Gm7),
@@ -542,10 +568,11 @@ export class Keyboard {
       if (entry !== null) {
         const notes = (Array.isArray(entry) ? entry : [entry]).map((o) => phrase.root + o);
         for (const n of notes) this.noteOn(n, 0.8);
+        const held = phrase.hold?.[state.step % phrase.steps.length] ?? phrase.gate;
         const t = setTimeout(() => {
           state.timers.delete(t);
           for (const n of notes) this.noteOff(n);
-        }, stepMs * phrase.gate);
+        }, stepMs * held);
         state.timers.add(t);
         state.sounding = notes;
       }

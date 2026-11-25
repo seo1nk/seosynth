@@ -175,6 +175,7 @@ export const PRESETS: Preset[] = [
     cat: 'lead',
     demo: 'lead',
     params: {
+      'master.bpm': 160,
       'oscA.pos': 0.5, 'oscA.unison': 7, 'oscA.detune': 0.32, 'oscA.blend': 0.8,
       'oscB.on': true, 'oscB.pos': 0.5, 'oscB.oct': 1, 'oscB.unison': 5, 'oscB.detune': 0.28, 'oscB.level': 0.45,
       'filter.type': 'LP12', 'filter.cutoff': 9000, 'filter.res': 0.12,
@@ -190,6 +191,7 @@ export const PRESETS: Preset[] = [
     cat: 'lead',
     demo: 'lead',
     params: {
+      'master.bpm': 160,
       'master.volume': 1.0,
       'oscA.pos': 0.5, 'oscA.warp': 'Sync', 'oscA.warpAmt': 0.2, 'oscA.unison': 2, 'oscA.detune': 0.08, 'oscA.rand': 0,
       'filter.type': 'LP12', 'filter.cutoff': 7000,
@@ -205,6 +207,7 @@ export const PRESETS: Preset[] = [
     cat: 'lead',
     demo: 'lead',
     params: {
+      'master.bpm': 160,
       'master.volume': 0.85,
       'oscA.wt': '8-Bit', 'oscA.pos': 0.66, 'oscA.rand': 0, 'filter.on': false,
       'lfo1.sync': false, 'lfo1.rate': 5.5, 'lfo1.shape': 'Sine', 'lfo1.rise': 0.35, 'lfo1.delay': 0.2,
@@ -220,6 +223,7 @@ export const PRESETS: Preset[] = [
     cat: 'lead',
     demo: 'lead',
     params: {
+      'master.bpm': 160,
       'master.volume': 1.0,
       'oscA.wt': 'Vowels', 'oscA.pos': 0.1, 'oscA.unison': 3, 'oscA.detune': 0.1,
       'filter.type': 'LP12', 'filter.cutoff': 8000,
@@ -236,6 +240,7 @@ export const PRESETS: Preset[] = [
     cat: 'lead',
     demo: 'lead',
     params: {
+      'master.bpm': 160,
       'master.volume': 0.85,
       'oscA.pos': 0.5, 'oscA.unison': 3, 'oscA.detune': 0.12,
       'oscB.on': true, 'oscB.pos': 0.75, 'oscB.oct': 1, 'oscB.level': 0.2,
