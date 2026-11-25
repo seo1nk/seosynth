@@ -51,6 +51,9 @@ const PHRASES: Record<string, Phrase> = {
   lead: { root: 60, steps: [0, null, 3, 7, null, 10, 12, null, 10, 7, null, 3, 5, null, 7, null], div: 2, gate: 0.85 },
   pad: { root: 48, steps: [[0, 7, 12, 15, 19], null, null, null, null, null, null, null, [-4, 3, 8, 12, 15], null, null, null, null, null, null, null], div: 1, gate: 7.6 },
   hit: { root: 60, steps: [0, null, null, null, -5, null, null, null], div: 1, gate: 0.5 },
+  // Chord sounds: IVM7, III7(b9), VIm7, Vm7 in C (FM7, E7(b9), Am7, Gm7),
+  // a bar each, the bass note under close voicings that move by small steps.
+  progression: { root: 48, steps: [[-7, 5, 9, 12, 16], null, null, null, [-8, 8, 11, 14, 17], null, null, null, [-3, 7, 12, 16, 19], null, null, null, [-5, 5, 10, 14, 17], null, null, null], div: 1, gate: 3.9 },
   // With the arpeggiator on: chords held for a bar each, for it to play.
   chords: { root: 48, steps: [[0, 3, 7], null, null, null, [-4, 0, 3], null, null, null, [-7, -4, 0], null, null, null, [-2, 2, 5], null, null, null], div: 1, gate: 3.9 },
 };

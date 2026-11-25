@@ -331,7 +331,7 @@ export const PRESETS: Preset[] = [
     name: 'Future Chord',
     ja: 'フューチャー・コード',
     cat: 'chord',
-    demo: 'chords',
+    demo: 'progression',
     note: [
       '厚いノコギリ波の和音に、鳴り始めのピッチの落ち込みと、拍ごとに音量が沈んで戻る「ポンプ」をかけています。和音を押さえて聴いてみましょう。',
       'A thick saw chord with a quick pitch drop at the start of each note and a "pump" that ducks the volume on every beat. Hold a chord to hear it.',
@@ -366,7 +366,7 @@ export const PRESETS: Preset[] = [
     name: 'Wobble Chord',
     ja: 'ワブル・コード',
     cat: 'chord',
-    demo: 'chords',
+    demo: 'progression',
     note: [
       'LFO が 3 連符のリズムでフィルターを開け閉めし、和音が「ワウワウ」と刻まれます。LFO の速さを変えるとノリが変わります。',
       'An LFO opens and closes the filter in triplets, so the chord chops into "wah-wah" rhythms. Change the LFO note length for another groove.',
@@ -390,7 +390,7 @@ export const PRESETS: Preset[] = [
     name: 'Saw Stab',
     ja: 'ソウ・スタブ',
     cat: 'chord',
-    demo: 'chords',
+    demo: 'progression',
     params: {
       'master.volume': 0.78,
       'oscA.pos': 0.5, 'oscA.unison': 7, 'oscA.detune': 0.24, 'oscA.width': 0.9,
