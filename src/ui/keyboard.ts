@@ -39,7 +39,7 @@ function melody(div: number, length: number, notes: [number, number, number][]):
   for (const [at, note, len] of notes) {
     steps[at] = note;
     // Short notes a little detached, long ones nearly joined.
-    hold[at] = len < 1 ? len : len - (len <= 2 ? 0.3 : 0.15);
+    hold[at] = len - (len <= 2 ? 0.3 : 0.15);
   }
   return { root: 0, steps, div, gate: 1, hold };
 }
@@ -82,7 +82,7 @@ const PHRASES: Record<string, Phrase> = {
     [4, Gb5, 2], [8, D5, 4], [14, D5, 2],
     [16, E5, 2], [18, Gb5, 2], [22, D5, 6],
     [36, Gb5, 2], [40, D5, 4], [46, D5, 2],
-    [48, E5, 2], [50, D5, 2], [53, E5, 0.5], [54, F5, 4], [58, E5, 2], [60, D5, 2], [62, E5, 2],
+    [48, E5, 2], [50, D5, 2], [54, F5, 4], [58, E5, 2], [60, D5, 2], [62, E5, 2],
     [68, Gb5, 2], [72, D5, 4], [78, D5, 2],
     [80, E5, 2], [82, Gb5, 2], [86, D5, 6], [92, B5, 2],
     [96, A5, 8],
