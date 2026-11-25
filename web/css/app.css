@@ -2311,7 +2311,7 @@ input[type='range'] {
   .sound-picker {
     order: 3;
     /* A wide basis pushes it onto the second row, next to Listen. */
-    flex: 1 1 calc(100% - 190px);
+    flex: 1 1 calc(100% - 120px);
     min-width: 0;
   }
   .sound-btn {
@@ -2324,10 +2324,14 @@ input[type='range'] {
   .listen-group {
     order: 4;
   }
-  /* Only the icon on a phone, so the sound's name keeps its room. */
+  /* Only icons on a phone, so the sound's name keeps its room. */
+  .listen {
+    padding: 7px 12px;
+  }
   .learn {
     padding: 7px 10px;
   }
+  .listen-label,
   .learn span {
     display: none;
   }

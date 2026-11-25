@@ -357,10 +357,10 @@ export function Header(app: App): HTMLElement {
 
   // --- listen -------------------------------------------------------------------
   const listenIcon = h('span', { class: 'listen-icon' }, icon('play', true));
-  const listenLabel = h('span', {}, t('btn.listen'));
+  const listenLabel = h('span', { class: 'listen-label' }, t('btn.listen'));
   const listen = h(
     'button',
-    { type: 'button', class: 'listen', 'aria-pressed': 'false', title: t('btn.listen.help'), onclick: () => app.keyboard.toggleDemo() },
+    { type: 'button', class: 'listen', 'aria-pressed': 'false', 'aria-label': t('btn.listen'), title: t('btn.listen.help'), onclick: () => app.keyboard.toggleDemo() },
     listenIcon,
     listenLabel,
   );
@@ -404,6 +404,8 @@ export function Header(app: App): HTMLElement {
     listen.setAttribute('aria-pressed', String(playing));
     listenIcon.replaceChildren(icon(playing ? 'stop' : 'play', true));
     listenLabel.textContent = t(playing ? 'btn.stop' : 'btn.listen');
+    // The label is hidden on a phone: the name has to follow too.
+    listen.setAttribute('aria-label', listenLabel.textContent);
   };
 
   // --- undo / redo ----------------------------------------------------------------
