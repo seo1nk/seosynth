@@ -13,6 +13,8 @@ import { isMover } from './nodes.ts';
 
 const hasPopover = typeof HTMLElement !== 'undefined' && Object.hasOwn(HTMLElement.prototype, 'popover');
 const FOCUS = 'lesson-focus';
+/** Phone widths, where the node's settings are a sheet over the board. */
+const narrow = () => typeof matchMedia === 'function' && matchMedia('(max-width: 47.5em)').matches;
 
 export class Lesson {
   readonly app: App;
@@ -23,6 +25,8 @@ export class Lesson {
   collapsed = false;
   el: HTMLElement | null = null;
   timer: ReturnType<typeof setInterval> | undefined;
+  /** The control last pointed at, scrolled into view once. */
+  #pointed: Element | null = null;
 
   constructor(app: App) {
     this.app = app;
@@ -40,6 +44,8 @@ export class Lesson {
     app.tour.stop();
     this.stop();
     this.preset = preset;
+    // On a phone the card starts folded, so the sheet under it stays usable.
+    this.collapsed = narrow();
     this.steps = lessonSteps(preset, store);
     app.loading = true;
     try {
@@ -65,6 +71,12 @@ export class Lesson {
   }
 
   #unfocus() {
+    this.#pointed = null;
+    for (const el of document.querySelectorAll(`.${FOCUS}`)) el.classList.remove(FOCUS);
+  }
+
+  /** Removes the outline but remembers what was pointed at, so it is not scrolled to again. */
+  #clearOutline() {
     for (const el of document.querySelectorAll(`.${FOCUS}`)) el.classList.remove(FOCUS);
   }
 
@@ -129,22 +141,39 @@ export class Lesson {
 
   /** Points at the first thing in this step that is not done yet. */
   #point(step: LessonStep, done: boolean[]) {
-    this.#unfocus();
+    this.#clearOutline();
     const { app } = this;
     const next = step.targets.findIndex((_, k) => !done[k]);
     if (next < 0) return;
     // The node's settings are closed: point at the node itself first.
-    if (step.node !== 'keys' && app.selected !== step.node) {
-      document.querySelector(`.node[data-node="${step.node}"], .mover[data-node="${step.node}"]`)?.classList.add(FOCUS);
-      return;
+    const el =
+      step.node !== 'keys' && app.selected !== step.node
+        ? document.querySelector(`.node[data-node="${step.node}"], .mover[data-node="${step.node}"]`)
+        : this.#targetEl(step.targets[next]);
+    if (!el) return;
+    el.classList.add(FOCUS);
+    // Bring a control that has moved on into view, once: the panel may be
+    // scrolled past it, or on a phone it may be below the fold of the sheet.
+    // Not on the board, which pans by itself and must not scroll.
+    if (el !== this.#pointed) {
+      this.#pointed = el;
+      if (el.closest('.panel, .kb-drawer')) el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
     }
-    this.#targetEl(step.targets[next])?.classList.add(FOCUS);
   }
 
   #place() {
     if (!this.el) return;
     const board = document.querySelector('.board')?.getBoundingClientRect();
     const r = this.el.getBoundingClientRect();
+    // On a phone the settings open as a sheet over the bottom of the board,
+    // and the keys at the bottom of the screen: the card goes up top, out of their way.
+    const def = this.steps[this.step - 1];
+    const below = !!document.querySelector('.panel-slot.open') || (def?.node === 'keys' && this.step <= this.steps.length);
+    if (board && narrow() && below) {
+      this.el.style.left = '8px';
+      this.el.style.top = `${Math.max(8, board.top + 8)}px`;
+      return;
+    }
     // Bottom left of the board, over the hint, clear of the panel on the right.
     const left = board ? board.left + 12 : 8;
     const bottom = board ? board.bottom - 12 : window.innerHeight - 8;
@@ -168,10 +197,17 @@ export class Lesson {
     const lang = i18n.lang === 'ja' ? 0 : 1;
     const def = step >= 1 && step < last ? this.steps[step - 1] : null;
     if (def) this.#open(def);
+    // On a phone the card takes the top of the board, where notices show.
+    if (def && narrow()) app.toast.clear();
 
     const btn = (label: string, onclick: () => void, cls = 'btn') => h('button', { type: 'button', class: cls, onclick }, label);
     const check = h('span', { class: 'tour-check', hidden: true }, t('tour.did'));
     const items = def ? def.targets.map((target) => h('li', {}, h('span', { class: 'lesson-mark', 'aria-hidden': 'true' }), this.#describe(target))) : [];
+    // Folded, the card keeps only the next thing to do and the buttons.
+    const nowMark = h('span', { class: 'lesson-mark', 'aria-hidden': 'true' });
+    const nowText = h('span', {});
+    const nowCount = h('span', { class: 'lesson-count' });
+    const now = def ? h('p', { class: 'lesson-now', 'aria-live': 'polite' }, nowMark, nowText, nowCount) : null;
     let opener: HTMLElement | null = null;
     let body: Child[];
     let actions: Child[];
@@ -198,7 +234,7 @@ export class Lesson {
       actions = [btn(t('tour.back'), () => this.go(step - 1)), btn(t('lesson.finish'), () => this.stop(), 'btn primary')];
     }
 
-    const fold = h('button', {
+    const fold = !def ? null : h('button', {
       type: 'button',
       class: 'lesson-fold',
       'aria-expanded': String(!this.collapsed),
@@ -210,7 +246,7 @@ export class Lesson {
     const title = step === 0 ? t('lesson.intro.title', { name }) : def ? this.#title(def.node) : t('lesson.done.title');
     this.el = h(
       'aside',
-      { class: `tour lesson ${this.collapsed ? 'collapsed' : ''}`, role: 'dialog', 'aria-labelledby': 'lesson-title', tabindex: -1 },
+      { class: `tour lesson ${def && this.collapsed ? 'collapsed' : ''}`, role: 'dialog', 'aria-labelledby': 'lesson-title', tabindex: -1 },
       h(
         'div',
         { class: 'tour-step' },
@@ -219,7 +255,9 @@ export class Lesson {
         fold,
       ),
       h('h3', { id: 'lesson-title' }, title),
-      h('div', { class: 'lesson-body' }, body, h('div', { class: 'tour-actions' }, actions)),
+      h('div', { class: 'lesson-body' }, body),
+      now,
+      h('div', { class: 'tour-actions' }, actions),
       h('button', { type: 'button', class: 'lesson-close', 'aria-label': t('lesson.end'), title: t('lesson.end'), onclick: () => this.stop() }, '×'),
     );
     document.body.append(this.el);
@@ -236,6 +274,11 @@ export class Lesson {
         items.forEach((li, k) => li.classList.toggle('done', done[k]));
         check.hidden = !done.every(Boolean);
         if (opener) opener.hidden = app.selected === def.node;
+        const next = done.indexOf(false);
+        const closed = def.node !== 'keys' && app.selected !== def.node;
+        nowMark.parentElement!.classList.toggle('done', next < 0);
+        nowText.textContent = next < 0 ? t('lesson.now.done') : closed ? t('lesson.open', { name: this.#title(def.node) }) : this.#describe(def.targets[next]);
+        nowCount.textContent = `${done.filter(Boolean).length} / ${done.length}`;
         this.#point(def, done);
       } else if (step === last) {
         this.#unfocus();

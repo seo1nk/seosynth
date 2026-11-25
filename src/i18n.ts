@@ -202,6 +202,7 @@ const UI: Record<string, Pair> = {
   'lesson.expand': ['ひらく', 'Expand'],
   'lesson.keys': ['鍵盤の鳴らし方', 'How the keys play'],
   'lesson.keys.role': ['鍵盤の上の「鳴らし方」と、その設定です。', '"Keys play" above the keyboard and its settings.'],
+  'lesson.now.done': ['できました。「次へ」で進みましょう。', 'Done. Go on with Next.'],
   'lesson.open': ['ボードの「{name}」を押して、設定を開きましょう。', 'Press "{name}" on the board to open its settings.'],
   'lesson.mod': ['{sentence}：強さ {amount}', '{sentence}: amount {amount}'],
   'lesson.done.title': ['できあがり', 'All done'],
