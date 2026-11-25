@@ -2,7 +2,7 @@
 //
 // The steps come from src/lesson.ts. Each step opens the node it is about,
 // lists the values to set and ticks them off as the sound reaches them,
-// and points at the next control to touch. "Do it for me" sets the step.
+// and points at the next control to touch. "Set it for me" sets the step.
 
 import type { App } from '../app.ts';
 import { h, type Child } from './dom.ts';
