@@ -518,6 +518,30 @@ p {
 .node.off .node-scope {
   opacity: 0.25;
 }
+/* Where the sound is born (the sources) and where it leaves (the output):
+   a band of the sound colour on the side the sound flows from or to, and a
+   faint wash of it. Drawn inside the border so the layout does not move. */
+.node.end {
+  background: color-mix(in srgb, var(--paper) 90%, var(--sound));
+}
+.node.end:hover {
+  background: color-mix(in srgb, var(--paper) 84%, var(--sound));
+}
+.node.start {
+  box-shadow: inset 6px 0 0 var(--sound);
+  padding-left: 16px;
+}
+.node.finish {
+  box-shadow: inset -6px 0 0 var(--sound);
+  padding-right: 16px;
+}
+.node.end.off {
+  background: color-mix(in srgb, var(--paper) 55%, var(--map));
+  box-shadow: inset 6px 0 0 var(--sound-soft);
+}
+.node.finish.off {
+  box-shadow: inset -6px 0 0 var(--sound-soft);
+}
 /* An effect waiting in the tray is not part of the sound: show no wave. */
 .node.idle .node-scope {
   visibility: hidden;

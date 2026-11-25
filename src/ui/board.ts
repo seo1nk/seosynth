@@ -105,6 +105,12 @@ function rounded(pts: Point[], r = 16): string {
   return `${d}L${lx} ${ly}`;
 }
 
+
+/** Where the sound starts and where it leaves get a band of the sound
+ * colour, the fork its round shape. */
+const nodeShape = (id: string): string =>
+  id === SPLIT ? 'fork' : SOURCES.includes(id) ? 'end start' : id === 'out' ? 'end finish' : '';
+
 export class Board {
   readonly app: App;
   view: View = { x: 0, y: 0, k: 1 };
@@ -213,7 +219,7 @@ export class Board {
     const { store, i18n } = app;
     const el = h(
       'div',
-      { class: `node ${id === SPLIT ? 'fork' : ''}`, role: 'button', tabindex: 0, 'aria-pressed': 'false', dataset: { node: id } },
+      { class: `node ${nodeShape(id)}`, role: 'button', tabindex: 0, 'aria-pressed': 'false', dataset: { node: id } },
       h('div', { class: 'buffs' }),
       h(
         'div',
