@@ -139,6 +139,22 @@ test('every lesson builds its preset from the init sound, step by step', async (
   assert.ok(!CATEGORIES.includes('learn' as never));
 });
 
+test('a lesson sets switches and menus before the sliders they reveal', async () => {
+  const { store } = await makeStore();
+  const wind = must(PRESETS.find((p) => p.name === 'Night Wind'));
+  const lfo1 = must(lessonSteps(wind, store).find((s) => s.node === 'lfo1'));
+  const keys = lfo1.targets.map((t) => (t.kind === 'param' ? t.key : ''));
+  // "Sync to tempo" off is what makes the speed slider appear.
+  assert.ok(keys.indexOf('lfo1.sync') < keys.indexOf('lfo1.rate'), keys.join(', '));
+  for (const preset of PRESETS) {
+    for (const step of lessonSteps(preset, store)) {
+      const kinds = step.targets.flatMap((t) => (t.kind === 'param' ? [store.def(store.idx(t.key)).curve] : []));
+      const firstSlider = kinds.findIndex((c) => c !== 'bool' && c !== 'enum');
+      if (firstSlider >= 0) assert.ok(kinds.slice(firstSlider).every((c) => c !== 'bool' && c !== 'enum'), `${preset.name} / ${step.node}`);
+    }
+  }
+});
+
 test('a lesson step is not done until the sound gets there', async () => {
   const { store } = await makeStore();
   const preset = must(PRESETS.find((p) => p.name === 'Filter Pluck'));

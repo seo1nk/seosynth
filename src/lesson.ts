@@ -69,10 +69,18 @@ export function lessonSteps(preset: PatchJSON, store: Pick<Store, 'params' | 'in
     if (!step) steps.set(node, (step = { node, targets: [] }));
     return step;
   };
-  // Switches first, then in the order the panel shows the sliders.
+  // What decides which sliders a panel shows comes first: the power switch,
+  // then other switches and menus (a synced LFO shows a note length instead
+  // of a speed, a delay its divisions instead of times). Then the sliders,
+  // in the order the panel shows them.
+  const kind = (key: string) => {
+    if (key.endsWith('.on')) return 0;
+    const curve = byKey.get(key)!.curve;
+    return curve === 'bool' || curve === 'enum' ? 1 : 2;
+  };
   const params = Object.entries(preset.params ?? {})
     .filter(([key, value]) => position.has(key) && !isDefault(key, value))
-    .sort(([a], [b]) => Number(b.endsWith('.on')) - Number(a.endsWith('.on')) || position.get(a)! - position.get(b)!);
+    .sort(([a], [b]) => kind(a) - kind(b) || position.get(a)! - position.get(b)!);
   for (const [key, value] of params) stepFor(stepOfParam(key)).targets.push({ kind: 'param', key, value });
   for (const m of preset.mods ?? []) {
     stepFor(stepOfSource(m.source)).targets.push({
